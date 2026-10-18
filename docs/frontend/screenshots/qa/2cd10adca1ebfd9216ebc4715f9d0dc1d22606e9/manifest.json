@@ -1,0 +1,794 @@
+{
+  "commit": "2cd10adca1ebfd9216ebc4715f9d0dc1d22606e9",
+  "origin": "http://127.0.0.1:8123",
+  "browser": "Chromium 141.0.7390.37",
+  "captured_at": "2026-10-16T15:29:27.951Z",
+  "note": "Real headless Chromium captures of web/ served by web/tools/serve.mjs on loopback. live = bare URL (no backend: honest NOT CONFIGURED / UNKNOWN states); demo = ?demo=1 SYNTHETIC fixtures.",
+  "shots": [
+    {
+      "file": "overview-1440-light-live.png",
+      "url": "http://127.0.0.1:8123/index.html#overview",
+      "viewport": "1440x900",
+      "theme": "light",
+      "mode": "live",
+      "page": "overview",
+      "scroll_width": 1440
+    },
+    {
+      "file": "compute-1440-light-live.png",
+      "url": "http://127.0.0.1:8123/index.html#compute",
+      "viewport": "1440x900",
+      "theme": "light",
+      "mode": "live",
+      "page": "compute",
+      "scroll_width": 1440
+    },
+    {
+      "file": "models-1440-light-live.png",
+      "url": "http://127.0.0.1:8123/index.html#models",
+      "viewport": "1440x900",
+      "theme": "light",
+      "mode": "live",
+      "page": "models",
+      "scroll_width": 1440
+    },
+    {
+      "file": "api-1440-light-live.png",
+      "url": "http://127.0.0.1:8123/index.html#api",
+      "viewport": "1440x900",
+      "theme": "light",
+      "mode": "live",
+      "page": "api",
+      "scroll_width": 1440
+    },
+    {
+      "file": "calls-1440-light-live.png",
+      "url": "http://127.0.0.1:8123/index.html#calls",
+      "viewport": "1440x900",
+      "theme": "light",
+      "mode": "live",
+      "page": "calls",
+      "scroll_width": 1440
+    },
+    {
+      "file": "observability-1440-light-live.png",
+      "url": "http://127.0.0.1:8123/index.html#observability",
+      "viewport": "1440x900",
+      "theme": "light",
+      "mode": "live",
+      "page": "observability",
+      "scroll_width": 1440
+    },
+    {
+      "file": "atlas-1440-light-live.png",
+      "url": "http://127.0.0.1:8123/index.html#atlas",
+      "viewport": "1440x900",
+      "theme": "light",
+      "mode": "live",
+      "page": "atlas",
+      "scroll_width": 1440
+    },
+    {
+      "file": "evaluation-1440-light-live.png",
+      "url": "http://127.0.0.1:8123/index.html#evaluation",
+      "viewport": "1440x900",
+      "theme": "light",
+      "mode": "live",
+      "page": "evaluation",
+      "scroll_width": 1440
+    },
+    {
+      "file": "admin-1440-light-live.png",
+      "url": "http://127.0.0.1:8123/index.html#admin",
+      "viewport": "1440x900",
+      "theme": "light",
+      "mode": "live",
+      "page": "admin",
+      "scroll_width": 1440
+    },
+    {
+      "file": "overview-1440-light-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#overview",
+      "viewport": "1440x900",
+      "theme": "light",
+      "mode": "demo",
+      "page": "overview",
+      "scroll_width": 1440
+    },
+    {
+      "file": "compute-1440-light-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#compute",
+      "viewport": "1440x900",
+      "theme": "light",
+      "mode": "demo",
+      "page": "compute",
+      "scroll_width": 1440
+    },
+    {
+      "file": "models-1440-light-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#models",
+      "viewport": "1440x900",
+      "theme": "light",
+      "mode": "demo",
+      "page": "models",
+      "scroll_width": 1440
+    },
+    {
+      "file": "api-1440-light-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#api",
+      "viewport": "1440x900",
+      "theme": "light",
+      "mode": "demo",
+      "page": "api",
+      "scroll_width": 1440
+    },
+    {
+      "file": "calls-1440-light-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#calls",
+      "viewport": "1440x900",
+      "theme": "light",
+      "mode": "demo",
+      "page": "calls",
+      "scroll_width": 1440
+    },
+    {
+      "file": "observability-1440-light-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#observability",
+      "viewport": "1440x900",
+      "theme": "light",
+      "mode": "demo",
+      "page": "observability",
+      "scroll_width": 1440
+    },
+    {
+      "file": "atlas-1440-light-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#atlas",
+      "viewport": "1440x900",
+      "theme": "light",
+      "mode": "demo",
+      "page": "atlas",
+      "scroll_width": 1440
+    },
+    {
+      "file": "evaluation-1440-light-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#evaluation",
+      "viewport": "1440x900",
+      "theme": "light",
+      "mode": "demo",
+      "page": "evaluation",
+      "scroll_width": 1440
+    },
+    {
+      "file": "admin-1440-light-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#admin",
+      "viewport": "1440x900",
+      "theme": "light",
+      "mode": "demo",
+      "page": "admin",
+      "scroll_width": 1440
+    },
+    {
+      "file": "overview-1440-dark-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#overview",
+      "viewport": "1440x900",
+      "theme": "dark",
+      "mode": "demo",
+      "page": "overview",
+      "scroll_width": 1440
+    },
+    {
+      "file": "compute-1440-dark-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#compute",
+      "viewport": "1440x900",
+      "theme": "dark",
+      "mode": "demo",
+      "page": "compute",
+      "scroll_width": 1440
+    },
+    {
+      "file": "models-1440-dark-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#models",
+      "viewport": "1440x900",
+      "theme": "dark",
+      "mode": "demo",
+      "page": "models",
+      "scroll_width": 1440
+    },
+    {
+      "file": "api-1440-dark-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#api",
+      "viewport": "1440x900",
+      "theme": "dark",
+      "mode": "demo",
+      "page": "api",
+      "scroll_width": 1440
+    },
+    {
+      "file": "calls-1440-dark-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#calls",
+      "viewport": "1440x900",
+      "theme": "dark",
+      "mode": "demo",
+      "page": "calls",
+      "scroll_width": 1440
+    },
+    {
+      "file": "observability-1440-dark-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#observability",
+      "viewport": "1440x900",
+      "theme": "dark",
+      "mode": "demo",
+      "page": "observability",
+      "scroll_width": 1440
+    },
+    {
+      "file": "atlas-1440-dark-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#atlas",
+      "viewport": "1440x900",
+      "theme": "dark",
+      "mode": "demo",
+      "page": "atlas",
+      "scroll_width": 1440
+    },
+    {
+      "file": "evaluation-1440-dark-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#evaluation",
+      "viewport": "1440x900",
+      "theme": "dark",
+      "mode": "demo",
+      "page": "evaluation",
+      "scroll_width": 1440
+    },
+    {
+      "file": "admin-1440-dark-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#admin",
+      "viewport": "1440x900",
+      "theme": "dark",
+      "mode": "demo",
+      "page": "admin",
+      "scroll_width": 1440
+    },
+    {
+      "file": "overview-390-light-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#overview",
+      "viewport": "390x900",
+      "theme": "light",
+      "mode": "demo",
+      "page": "overview",
+      "scroll_width": 390
+    },
+    {
+      "file": "compute-390-light-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#compute",
+      "viewport": "390x900",
+      "theme": "light",
+      "mode": "demo",
+      "page": "compute",
+      "scroll_width": 390
+    },
+    {
+      "file": "models-390-light-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#models",
+      "viewport": "390x900",
+      "theme": "light",
+      "mode": "demo",
+      "page": "models",
+      "scroll_width": 390
+    },
+    {
+      "file": "api-390-light-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#api",
+      "viewport": "390x900",
+      "theme": "light",
+      "mode": "demo",
+      "page": "api",
+      "scroll_width": 390
+    },
+    {
+      "file": "calls-390-light-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#calls",
+      "viewport": "390x900",
+      "theme": "light",
+      "mode": "demo",
+      "page": "calls",
+      "scroll_width": 390
+    },
+    {
+      "file": "observability-390-light-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#observability",
+      "viewport": "390x900",
+      "theme": "light",
+      "mode": "demo",
+      "page": "observability",
+      "scroll_width": 390
+    },
+    {
+      "file": "atlas-390-light-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#atlas",
+      "viewport": "390x900",
+      "theme": "light",
+      "mode": "demo",
+      "page": "atlas",
+      "scroll_width": 390
+    },
+    {
+      "file": "evaluation-390-light-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#evaluation",
+      "viewport": "390x900",
+      "theme": "light",
+      "mode": "demo",
+      "page": "evaluation",
+      "scroll_width": 390
+    },
+    {
+      "file": "admin-390-light-demo.png",
+      "url": "http://127.0.0.1:8123/index.html?demo=1#admin",
+      "viewport": "390x900",
+      "theme": "light",
+      "mode": "demo",
+      "page": "admin",
+      "scroll_width": 390
+    },
+    {
+      "file": "overview-390-dark-live.png",
+      "url": "http://127.0.0.1:8123/index.html#overview",
+      "viewport": "390x900",
+      "theme": "dark",
+      "mode": "live",
+      "page": "overview",
+      "scroll_width": 390
+    },
+    {
+      "file": "compute-390-dark-live.png",
+      "url": "http://127.0.0.1:8123/index.html#compute",
+      "viewport": "390x900",
+      "theme": "dark",
+      "mode": "live",
+      "page": "compute",
+      "scroll_width": 390
+    },
+    {
+      "file": "models-390-dark-live.png",
+      "url": "http://127.0.0.1:8123/index.html#models",
+      "viewport": "390x900",
+      "theme": "dark",
+      "mode": "live",
+      "page": "models",
+      "scroll_width": 390
+    },
+    {
+      "file": "api-390-dark-live.png",
+      "url": "http://127.0.0.1:8123/index.html#api",
+      "viewport": "390x900",
+      "theme": "dark",
+      "mode": "live",
+      "page": "api",
+      "scroll_width": 390
+    },
+    {
+      "file": "calls-390-dark-live.png",
+      "url": "http://127.0.0.1:8123/index.html#calls",
+      "viewport": "390x900",
+      "theme": "dark",
+      "mode": "live",
+      "page": "calls",
+      "scroll_width": 390
+    },
+    {
+      "file": "observability-390-dark-live.png",
+      "url": "http://127.0.0.1:8123/index.html#observability",
+      "viewport": "390x900",
+      "theme": "dark",
+      "mode": "live",
+      "page": "observability",
+      "scroll_width": 390
+    },
+    {
+      "file": "atlas-390-dark-live.png",
+      "url": "http://127.0.0.1:8123/index.html#atlas",
+      "viewport": "390x900",
+      "theme": "dark",
+      "mode": "live",
+      "page": "atlas",
+      "scroll_width": 390
+    },
+    {
+      "file": "evaluation-390-dark-live.png",
+      "url": "http://127.0.0.1:8123/index.html#evaluation",
+      "viewport": "390x900",
+      "theme": "dark",
+      "mode": "live",
+      "page": "evaluation",
+      "scroll_width": 390
+    },
+    {
+      "file": "admin-390-dark-live.png",
+      "url": "http://127.0.0.1:8123/index.html#admin",
+      "viewport": "390x900",
+      "theme": "dark",
+      "mode": "live",
+      "page": "admin",
+      "scroll_width": 390
+    }
+  ],
+  "overflow": [
+    {
+      "width": 320,
+      "mode": "live",
+      "page": "overview",
+      "scroll_width": 320,
+      "overflows": false
+    },
+    {
+      "width": 320,
+      "mode": "live",
+      "page": "compute",
+      "scroll_width": 320,
+      "overflows": false
+    },
+    {
+      "width": 320,
+      "mode": "live",
+      "page": "models",
+      "scroll_width": 320,
+      "overflows": false
+    },
+    {
+      "width": 320,
+      "mode": "live",
+      "page": "api",
+      "scroll_width": 320,
+      "overflows": false
+    },
+    {
+      "width": 320,
+      "mode": "live",
+      "page": "calls",
+      "scroll_width": 320,
+      "overflows": false
+    },
+    {
+      "width": 320,
+      "mode": "live",
+      "page": "observability",
+      "scroll_width": 320,
+      "overflows": false
+    },
+    {
+      "width": 320,
+      "mode": "live",
+      "page": "atlas",
+      "scroll_width": 320,
+      "overflows": false
+    },
+    {
+      "width": 320,
+      "mode": "live",
+      "page": "evaluation",
+      "scroll_width": 320,
+      "overflows": false
+    },
+    {
+      "width": 320,
+      "mode": "live",
+      "page": "admin",
+      "scroll_width": 320,
+      "overflows": false
+    },
+    {
+      "width": 320,
+      "mode": "demo",
+      "page": "overview",
+      "scroll_width": 320,
+      "overflows": false
+    },
+    {
+      "width": 320,
+      "mode": "demo",
+      "page": "compute",
+      "scroll_width": 320,
+      "overflows": false
+    },
+    {
+      "width": 320,
+      "mode": "demo",
+      "page": "models",
+      "scroll_width": 320,
+      "overflows": false
+    },
+    {
+      "width": 320,
+      "mode": "demo",
+      "page": "api",
+      "scroll_width": 320,
+      "overflows": false
+    },
+    {
+      "width": 320,
+      "mode": "demo",
+      "page": "calls",
+      "scroll_width": 320,
+      "overflows": false
+    },
+    {
+      "width": 320,
+      "mode": "demo",
+      "page": "observability",
+      "scroll_width": 320,
+      "overflows": false
+    },
+    {
+      "width": 320,
+      "mode": "demo",
+      "page": "atlas",
+      "scroll_width": 320,
+      "overflows": false
+    },
+    {
+      "width": 320,
+      "mode": "demo",
+      "page": "evaluation",
+      "scroll_width": 320,
+      "overflows": false
+    },
+    {
+      "width": 320,
+      "mode": "demo",
+      "page": "admin",
+      "scroll_width": 320,
+      "overflows": false
+    },
+    {
+      "width": 768,
+      "mode": "live",
+      "page": "overview",
+      "scroll_width": 768,
+      "overflows": false
+    },
+    {
+      "width": 768,
+      "mode": "live",
+      "page": "compute",
+      "scroll_width": 768,
+      "overflows": false
+    },
+    {
+      "width": 768,
+      "mode": "live",
+      "page": "models",
+      "scroll_width": 768,
+      "overflows": false
+    },
+    {
+      "width": 768,
+      "mode": "live",
+      "page": "api",
+      "scroll_width": 768,
+      "overflows": false
+    },
+    {
+      "width": 768,
+      "mode": "live",
+      "page": "calls",
+      "scroll_width": 768,
+      "overflows": false
+    },
+    {
+      "width": 768,
+      "mode": "live",
+      "page": "observability",
+      "scroll_width": 768,
+      "overflows": false
+    },
+    {
+      "width": 768,
+      "mode": "live",
+      "page": "atlas",
+      "scroll_width": 768,
+      "overflows": false
+    },
+    {
+      "width": 768,
+      "mode": "live",
+      "page": "evaluation",
+      "scroll_width": 768,
+      "overflows": false
+    },
+    {
+      "width": 768,
+      "mode": "live",
+      "page": "admin",
+      "scroll_width": 768,
+      "overflows": false
+    },
+    {
+      "width": 768,
+      "mode": "demo",
+      "page": "overview",
+      "scroll_width": 768,
+      "overflows": false
+    },
+    {
+      "width": 768,
+      "mode": "demo",
+      "page": "compute",
+      "scroll_width": 768,
+      "overflows": false
+    },
+    {
+      "width": 768,
+      "mode": "demo",
+      "page": "models",
+      "scroll_width": 768,
+      "overflows": false
+    },
+    {
+      "width": 768,
+      "mode": "demo",
+      "page": "api",
+      "scroll_width": 768,
+      "overflows": false
+    },
+    {
+      "width": 768,
+      "mode": "demo",
+      "page": "calls",
+      "scroll_width": 768,
+      "overflows": false
+    },
+    {
+      "width": 768,
+      "mode": "demo",
+      "page": "observability",
+      "scroll_width": 768,
+      "overflows": false
+    },
+    {
+      "width": 768,
+      "mode": "demo",
+      "page": "atlas",
+      "scroll_width": 768,
+      "overflows": false
+    },
+    {
+      "width": 768,
+      "mode": "demo",
+      "page": "evaluation",
+      "scroll_width": 768,
+      "overflows": false
+    },
+    {
+      "width": 768,
+      "mode": "demo",
+      "page": "admin",
+      "scroll_width": 768,
+      "overflows": false
+    },
+    {
+      "width": 1024,
+      "mode": "live",
+      "page": "overview",
+      "scroll_width": 1024,
+      "overflows": false
+    },
+    {
+      "width": 1024,
+      "mode": "live",
+      "page": "compute",
+      "scroll_width": 1024,
+      "overflows": false
+    },
+    {
+      "width": 1024,
+      "mode": "live",
+      "page": "models",
+      "scroll_width": 1024,
+      "overflows": false
+    },
+    {
+      "width": 1024,
+      "mode": "live",
+      "page": "api",
+      "scroll_width": 1024,
+      "overflows": false
+    },
+    {
+      "width": 1024,
+      "mode": "live",
+      "page": "calls",
+      "scroll_width": 1024,
+      "overflows": false
+    },
+    {
+      "width": 1024,
+      "mode": "live",
+      "page": "observability",
+      "scroll_width": 1024,
+      "overflows": false
+    },
+    {
+      "width": 1024,
+      "mode": "live",
+      "page": "atlas",
+      "scroll_width": 1024,
+      "overflows": false
+    },
+    {
+      "width": 1024,
+      "mode": "live",
+      "page": "evaluation",
+      "scroll_width": 1024,
+      "overflows": false
+    },
+    {
+      "width": 1024,
+      "mode": "live",
+      "page": "admin",
+      "scroll_width": 1024,
+      "overflows": false
+    },
+    {
+      "width": 1024,
+      "mode": "demo",
+      "page": "overview",
+      "scroll_width": 1024,
+      "overflows": false
+    },
+    {
+      "width": 1024,
+      "mode": "demo",
+      "page": "compute",
+      "scroll_width": 1024,
+      "overflows": false
+    },
+    {
+      "width": 1024,
+      "mode": "demo",
+      "page": "models",
+      "scroll_width": 1024,
+      "overflows": false
+    },
+    {
+      "width": 1024,
+      "mode": "demo",
+      "page": "api",
+      "scroll_width": 1024,
+      "overflows": false
+    },
+    {
+      "width": 1024,
+      "mode": "demo",
+      "page": "calls",
+      "scroll_width": 1024,
+      "overflows": false
+    },
+    {
+      "width": 1024,
+      "mode": "demo",
+      "page": "observability",
+      "scroll_width": 1024,
+      "overflows": false
+    },
+    {
+      "width": 1024,
+      "mode": "demo",
+      "page": "atlas",
+      "scroll_width": 1024,
+      "overflows": false
+    },
+    {
+      "width": 1024,
+      "mode": "demo",
+      "page": "evaluation",
+      "scroll_width": 1024,
+      "overflows": false
+    },
+    {
+      "width": 1024,
+      "mode": "demo",
+      "page": "admin",
+      "scroll_width": 1024,
+      "overflows": false
+    }
+  ]
+}

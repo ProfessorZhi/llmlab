@@ -1,0 +1,31 @@
+# 最小打包文件：让 ``llmlab`` 成为一个可安装的命令，而不是只能 ``python3 -m``。
+#
+# 刻意**零依赖**：整个子系统只用标准库（``sqlite3`` / ``wsgiref`` / ``http.client`` /
+# ``argparse`` / ``json``），因此本文件不引入任何需要联网解析的包。在这台机器上
+# 没有 ``pip``，所以 ``python3 -m cli.llmlab`` 这条路径是**不需要安装**就能用的，
+# 也是本仓库唯一实际验证过的那条（见 docs/registry-cli-contract.md §12）。
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-lab-registry"
+version = "0.1.0"
+description = "Atelier Observatory 平台 Registry：Engine / Model / Deployment / Endpoint 的登记、验证与跨用户共享（含 llmlab CLI）"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+# 非生产：本包是单节点 MVP，仓库硬约束禁止常驻服务。
+classifiers = [
+  "Private :: Do Not Upload",
+  "Programming Language :: Python :: 3 :: Only",
+]
+
+[project.scripts]
+llmlab = "cli.llmlab.entry:main"
+
+[tool.setuptools.packages.find]
+# backend 与 cli 都是隐式命名空间包（没有 __init__.py 的目录层级也要收进来）。
+namespaces = true
+include = ["backend*", "cli*"]

@@ -1,0 +1,1675 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark"><title>Dell LLM Lab — Atelier Observatory · 05</title>
+<meta name="description" content="Dell LLM Lab 统一管理后台：Strata、Gateway、Grafana、Prometheus、EvalScope、API 与 Linux 账号身份（PAM 待接线）。界面原型，非生产数据。">
+<style>
+:root{color-scheme:light;--bg:#f5f4ed;--panel:#eeeee4;--card:#f9f9f3;--elev:#e4e7da;--ink:#202c23;--muted:#606f5f;--dim:#788473;--line:#d4d9ca;--faint:#e7eade;--dark:#213b2c;--sage:#5f9074;--rust:#da7353;--blue:#7b87b1;--good:#3d8662;--caution:#a87331;--shadow:0 16px 60px #253e230f;--font:'Geist','Aptos','Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;--mono:'SFMono-Regular',Consolas,'Liberation Mono',monospace}
+:root[data-theme=dark]{color-scheme:dark;--bg:#121812;--panel:#182019;--card:#1c261e;--elev:#222c22;--ink:#eff0e5;--muted:#abb6a6;--dim:#84917e;--line:#344032;--faint:#263125;--dark:#e8ecdf;--sage:#a4c9ad;--rust:#f18e6b;--blue:#abb8d5;--good:#8ac9a5;--caution:#dfbb82;--shadow:0 18px 60px #0004}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--font);-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;transition:background .22s,color .22s}button,input,select,textarea{font:inherit}button{cursor:pointer;color:inherit;border:0;background:none}a{text-decoration:none;color:inherit}button:focus-visible,a:focus-visible,input:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--rust);outline-offset:3px}svg{display:block}.wrap{max-width:1510px;margin:0 auto;padding:0 clamp(20px,4vw,66px)}.muted{color:var(--muted)}.dim{color:var(--dim)}.mono{font-family:var(--mono)}.caps{font-size:10px;letter-spacing:.11em;font-weight:600;color:var(--muted)}.tiny{font-size:11px;color:var(--muted)}.number{letter-spacing:-.062em;font-weight:470;line-height:1.04}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--sage);flex:none}.dot.rust{background:var(--rust)}.dot.blue{background:var(--blue)}.dot.dim{background:var(--dim)}.badge{font-size:10.5px;display:inline-flex;align-items:center;gap:7px;color:var(--muted);background:var(--panel);padding:6px 10px;border-radius:5px;white-space:nowrap}.badge.good{color:var(--good)}.badge.warn{color:var(--caution)}.badge.bad{color:var(--rust)}.key{font:11px var(--mono);border:1px solid var(--line);padding:4px 7px;border-radius:4px;background:var(--panel)}.primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 15px;border-radius:7px;background:var(--dark);color:var(--bg);font-size:12px;white-space:nowrap}.primary:hover{opacity:.87}.secondary{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:9px 13px;border:1px solid var(--line);border-radius:7px;font-size:12px;white-space:nowrap}.secondary:hover{background:var(--elev)}button:active{transform:translateY(1px)}.unavailable{opacity:.65;cursor:not-allowed}.topbar{border-bottom:1px solid var(--line);background:var(--bg);position:sticky;top:0;z-index:50}.top-inner{height:74px;display:flex;justify-content:space-between;align-items:center;gap:16px}.brand{display:flex;align-items:center;gap:11px;min-width:max-content}.mark{width:27px;height:27px;border-radius:9px;border:7px solid var(--dark);border-right-color:var(--rust);border-bottom-color:var(--sage);transform:rotate(-35deg)}.brandname{font-weight:720;font-size:16px;letter-spacing:-.04em}.brand small{display:block;color:var(--dim);font-size:10px;letter-spacing:.12em;font-weight:500;margin-top:-1px}.topnav{display:flex;gap:24px;align-items:center;justify-content:center;overflow:auto;scrollbar-width:none;white-space:nowrap}.topnav::-webkit-scrollbar{display:none}.navitem{font-size:12px;color:var(--muted);padding:25px 0 23px;border-bottom:2px solid transparent;flex:none}.navitem:hover{color:var(--ink)}.navitem.active{color:var(--ink);border-bottom-color:var(--dark);font-weight:620}.topright{display:flex;align-items:center;gap:10px;flex:none}.topright .mode{display:inline-flex;gap:7px;align-items:center;font-size:11px;color:var(--muted)}.themebtn{border:1px solid var(--line);border-radius:7px;width:34px;height:34px;display:grid;place-items:center;font-size:15px}.themebtn:hover{background:var(--panel)}.account{font-size:11px;border:1px solid var(--line);padding:8px 11px;border-radius:7px;white-space:nowrap}.account:hover{background:var(--panel)}.auth-demo{background:var(--rust);color:#fff;border-radius:50%;font-weight:750;width:21px;height:21px;display:inline-grid;place-items:center;font-size:10px;margin-right:5px}.mobile-nav{display:none}
+.content{padding-top:35px}.view{display:none;animation:appear .25s ease both}.view.active{display:block}@keyframes appear{from{opacity:.4;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}.breadcrumb{display:flex;gap:10px;align-items:center;color:var(--dim);font:10px var(--mono);letter-spacing:.08em;text-transform:uppercase;margin:1px 0 20px}.breadcrumb b{color:var(--sage);font-weight:500}.hero{display:flex;justify-content:space-between;gap:28px;align-items:flex-end;padding-bottom:31px}.hero h1{font-weight:640;letter-spacing:-.05em;font-size:clamp(28px,3.5vw,38px);line-height:1.14;margin:0 0 12px}.hero p{font-size:12px;color:var(--muted);max-width:650px;margin:0}.hero-right{text-align:right;min-width:225px;display:flex;flex-direction:column;align-items:end;gap:12px}.seg{display:inline-flex;gap:2px;padding:4px;border-radius:8px;background:var(--panel)}.seg button{font-size:11px;color:var(--muted);padding:8px 12px;border-radius:5px;white-space:nowrap}.seg button.active{background:var(--dark);color:var(--bg)}.stamp{font:10px var(--mono);color:var(--dim)}.demo-strip{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:10px 13px;margin-bottom:27px;background:var(--panel);border-left:2px solid var(--rust);color:var(--muted);font-size:11px}.demo-strip strong{color:var(--ink);font-weight:600}.demo-strip span:last-child{white-space:nowrap}.lead-grid{display:grid;grid-template-columns:1.15fr 1fr;align-items:end;gap:25px;padding:2px 0 30px}.lead-label{font-size:12px;font-weight:580}.hardware{display:flex;align-items:baseline;gap:14px;margin:6px 0}.hardware .big{font-size:clamp(90px,11vw,144px);font-weight:440;letter-spacing:-.09em;line-height:.99}.hardware .unit{font-size:21px;letter-spacing:-.04em;margin-left:5px}.hardware .note{color:var(--muted);font-size:11px}.lead-meta{display:flex;align-items:center;gap:24px;flex-wrap:wrap;font-size:11px;color:var(--muted)}.lead-meta strong{font-size:15px;color:var(--ink);font-weight:560;margin-right:5px}.right-hardware{padding:0 0 6px 25px;border-left:1px solid var(--line);display:flex;flex-direction:column;gap:13px}.right-hardware h2{font-size:20px;font-weight:600;letter-spacing:-.03em;margin:0}.right-hardware .value-row{display:flex;gap:14px;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:12px}.right-hardware .value-row:last-child{border:0;padding-bottom:0}.right-hardware .value-row b{font-size:12px;font-weight:570}.status{display:flex;align-items:center;gap:6px;color:var(--good)}.mutedflag{color:var(--muted)}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:0 0 30px}.stat{display:flex;gap:13px;align-items:center;padding:19px 17px;border-right:1px solid var(--line);min-width:0}.stat:first-child{padding-left:0}.stat:last-child{border:0}.stat span{font-size:11px;color:var(--muted);white-space:nowrap}.stat strong{font-size:28px;font-weight:510;letter-spacing:-.055em;white-space:nowrap}.stat small{font-size:10px;color:var(--dim);margin-left:auto;text-align:right}.explorer{display:grid;grid-template-columns:minmax(0,1.72fr) minmax(330px,1fr);border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-bottom:38px}.plot-side{padding:24px 32px 20px 0;min-width:0}.side-side{border-left:1px solid var(--line);padding:25px 0 24px 29px;min-width:0}.headrow{display:flex;justify-content:space-between;align-items:center;gap:12px}.section-h{font-size:20px;font-weight:610;letter-spacing:-.045em;margin:0}.sect-sub{font-size:10.5px;color:var(--dim)}.plot{height:334px;width:100%;position:relative;margin-top:11px}.plot svg{width:100%;height:100%}.legendline{display:flex;gap:18px;align-items:center;color:var(--muted);font-size:11px;padding-top:11px}.legendline .mono{margin-left:auto;color:var(--dim);font-size:10px}.side-kicker{font-size:10px;color:var(--dim)}.model-name{font-size:23px;letter-spacing:-.05em;font-weight:600;margin:6px 0 9px;word-break:break-word;line-height:1.26}.model-detail{display:grid;grid-template-columns:1fr 1fr;gap:17px;margin:23px 0;padding:22px 0;border-block:1px solid var(--line)}.model-detail dt{font-size:10px;color:var(--dim);margin-bottom:5px}.model-detail dd{margin:0;font-size:14px;font-weight:520}.model-detail .mono{font-size:11px}.source-foot{margin-top:16px;font-size:10px;color:var(--dim);line-height:1.6}.source-foot b{font-weight:500;color:var(--muted)}.tags{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.tag{background:var(--panel);color:var(--muted);padding:5px 8px;font-size:10px;border-radius:4px}.group-title{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:15px 0 20px}.group-title h2{font-size:21px;letter-spacing:-.045em;font-weight:625;margin:0}.group-title .smallmeta{font:10px var(--mono);color:var(--dim)}.service-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.service{padding:23px 20px 22px 0;border-right:1px solid var(--line);min-width:0}.service:not(:first-child){padding-left:20px}.service:last-child{border:0}.service-icon{width:30px;height:30px;border-radius:8px;background:var(--elev);color:var(--dark);display:grid;place-items:center;margin-bottom:17px;font-size:14px;font-weight:750}.service h3{font-size:15px;margin:0 0 6px;letter-spacing:-.03em;font-weight:620}.service p{color:var(--muted);font-size:11px;line-height:1.7;min-height:51px;margin:0 0 18px}.service-foot{display:flex;justify-content:space-between;gap:9px;align-items:center;color:var(--dim);font:10px var(--mono)}.tablewrap{overflow-x:auto;border-top:1px solid var(--line)}table{width:100%;border-collapse:collapse;min-width:650px;text-align:left;font-size:12px}th{color:var(--dim);font-weight:500;font-size:10.5px}td,th{padding:15px 12px;border-bottom:1px solid var(--line)}tr:last-child td{border-bottom:0}td:first-child,th:first-child{padding-left:0}.rowtitle{font-weight:590;color:var(--ink)}.rowmuted{display:block;color:var(--muted);font-size:10px;margin-top:3px}.flow-row{display:flex;gap:13px;align-items:center;padding:15px 0;border-bottom:1px solid var(--line)}.flow-row:last-child{border:0}.flow-row b{font-size:13px;font-weight:610}.flow-row p{font-size:11px;color:var(--muted);margin:2px 0 0}.flow-row .badge{margin-left:auto}.footnote{font-size:11px;color:var(--muted);margin:16px 0 0}.footnote b{color:var(--ink);font-weight:500}
+.columns{display:grid;grid-template-columns:minmax(0,1.24fr) minmax(0,.76fr);gap:36px;margin-bottom:35px}.columns>*,.view,.statusrows,.flatpanel{min-width:0}.flatpanel{padding:25px;background:var(--panel);border:1px solid var(--line);border-radius:10px}.flatpanel h3{font-weight:620;font-size:16px;margin:0 0 12px;letter-spacing:-.025em}.flatpanel p{font-size:12px;color:var(--muted);margin:0 0 16px}.steps{list-style:none;margin:0;padding:0;counter-reset:seq}.steps li{display:flex;align-items:start;gap:15px;border-top:1px solid var(--line);padding:15px 0}.steps li:first-child{border:0}.steps .count{font:12px var(--mono);color:var(--dim);padding-top:2px}.steps b{font-size:12px;font-weight:610}.steps p{font-size:11px;color:var(--muted);margin:3px 0 0}.surface{border:1px solid var(--line);border-radius:8px;padding:19px;background:var(--card)}.fieldgrid{display:grid;grid-template-columns:1fr 1fr;gap:15px}.field{display:flex;flex-direction:column;gap:7px}.field label{font-size:10px;color:var(--muted)}.field input,.field select{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:6px;padding:10px;min-width:0;font-size:12px}.field input:disabled{opacity:.7}.actions{display:flex;gap:8px;margin-top:18px;align-items:center;flex-wrap:wrap}.codearea{background:var(--elev);padding:15px 17px;font:11.5px/1.8 var(--mono);overflow:auto;border-radius:6px;color:var(--ink);white-space:pre-wrap;word-break:break-word}.guard{font-size:11px;color:var(--muted);border-left:2px solid var(--sage);padding:5px 0 5px 12px;margin:18px 0}.guard.warn{border-left-color:var(--rust)}.api-keys{margin-top:30px}.page-block{padding-bottom:35px}.page-block .overview-intro{font-size:12px;max-width:640px;color:var(--muted)}.subnav{display:flex;gap:7px;align-items:center;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:13px 0;margin-bottom:25px;overflow:auto}.subnav button{padding:7px 10px;border-radius:5px;color:var(--muted);font-size:11px;white-space:nowrap}.subnav button.active{background:var(--dark);color:var(--bg)}.selector{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.selector select{border:1px solid var(--line);border-radius:6px;background:var(--panel);padding:8px 12px;color:var(--ink);font-size:11px}.infobox{border:1px solid var(--line);padding:25px 28px;border-radius:8px;background:var(--panel)}.statusrows{display:grid;grid-template-columns:1fr 1fr;gap:14px}.statusitem{border-bottom:1px solid var(--line);padding:0 0 15px}.statusitem .tiny{margin-bottom:8px}.statusitem strong{font-size:17px;font-weight:570}.chatbox{display:flex;flex-direction:column;min-height:380px;border:1px solid var(--line);border-radius:8px;background:var(--card)}.chatlog{padding:24px;flex:1;display:flex;flex-direction:column;gap:14px}.chatbubble{max-width:85%;padding:12px 15px;border:1px solid var(--line);border-radius:8px;font-size:12px;line-height:1.7}.chatbubble.me{align-self:end;background:var(--elev)}.chatbubble.bot{background:var(--panel)}.chatcomposer{padding:14px;border-top:1px solid var(--line);display:flex;gap:9px}.chatcomposer input{flex:1;min-width:0;border:1px solid var(--line);background:var(--bg);padding:11px;border-radius:6px;color:var(--ink)}.footbar{margin-top:60px;border-top:1px solid var(--line);padding:20px 0 30px;color:var(--dim);font:10px var(--mono);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+dialog{border:1px solid var(--line);border-radius:12px;max-width:min(560px,calc(100vw - 36px));padding:0;background:var(--bg);color:var(--ink);box-shadow:var(--shadow)}dialog::backdrop{background:#15201975;backdrop-filter:blur(5px)}.modal-head{display:flex;justify-content:space-between;align-items:center;padding:21px 24px;border-bottom:1px solid var(--line)}.modal-head h2{font-size:17px;margin:0;letter-spacing:-.03em}.modal-body{padding:23px 24px;font-size:12px;color:var(--muted);line-height:1.7}.modal-body strong{color:var(--ink)}.close{font-size:20px;color:var(--muted)}.modal-actions{padding:0 24px 24px;display:flex;justify-content:flex-end}.only-mobile{display:none}
+@media(max-width:1100px){.topnav{gap:14px}.topright .mode{display:none}.lead-grid{grid-template-columns:1fr 1fr}.explorer{grid-template-columns:minmax(0,1.45fr) minmax(285px,1fr)}.plot-side{padding-right:19px}.side-side{padding-left:20px}.stat{display:block}.stat strong{display:block;margin:8px 0 1px}.stat small{display:block;text-align:left}.service-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.service:nth-child(2){border:0}.service:nth-child(n+3){border-top:1px solid var(--line)}}
+@media(max-width:1050px){.topnav{display:none}.mobile-nav{display:flex;gap:18px;overflow:auto;padding:9px 0 0;scrollbar-width:none}}
+@media(max-width:760px){.wrap{padding:0 20px}.top-inner{height:68px}.topnav{display:none}.topright .account{font-size:0;padding:6px}.topright .account .auth-demo{font-size:10px;margin:0}.mobile-nav{display:flex;gap:18px;overflow:auto;padding:9px 0 0;scrollbar-width:none}.mobile-nav .navitem{padding:10px 0 12px;font-size:11px}.content{padding-top:24px}.hero{align-items:start}.hero h1{font-size:30px}.hero-right{min-width:0}.demo-strip span:last-child{display:none}.lead-grid{grid-template-columns:1fr;gap:20px}.right-hardware{padding-left:0;border-left:0;border-top:1px solid var(--line);padding-top:18px}.hardware .big{font-size:112px}.stats{grid-template-columns:repeat(2,1fr)}.stat:nth-child(2){border-right:0}.stat:nth-child(-n+2){border-bottom:1px solid var(--line)}.stat:nth-child(3){padding-left:0}.explorer{grid-template-columns:1fr}.plot-side{padding-right:0;padding-bottom:20px}.side-side{border-left:0;border-top:1px solid var(--line);padding:22px 0}.columns{grid-template-columns:minmax(0,1fr);gap:22px}.plot{height:300px}}
+@media(max-width:520px){.brandname{font-size:15px}.mark{width:24px;height:24px;border-width:6px}.topright{gap:6px}.topright .badge{display:none}.topright .account{border:0}.content{padding-top:18px}.hero{display:block;padding-bottom:24px}.hero p{max-width:300px}.hero-right{margin-top:18px;align-items:start;text-align:left}.hardware .big{font-size:94px}.lead-meta{gap:10px 20px}.stat{padding:15px 9px}.stat:first-child{padding-left:0}.stat strong{font-size:24px}.stat small{font-size:9px}.plot{height:260px}.service-grid{grid-template-columns:1fr}.service,.service:not(:first-child){padding:18px 0;border-right:0;border-top:1px solid var(--line)}.service:first-child{border-top:0}.service:nth-child(2){border-top:1px solid var(--line)}.fieldgrid{grid-template-columns:1fr}.statusrows{grid-template-columns:1fr}.subnav{padding:9px 0}.model-name{font-size:20px}.flatpanel{padding:18px}.model-detail{grid-template-columns:1fr 1fr}.stamp{font-size:9px}.demo-strip{font-size:10px}.hero h1{font-size:27px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
+
+/* ==============================================================
+   ATELIER OBSERVATORY Nº 05 — editorial-system design refinements
+   Inspired by visual principles, not visual assets or trademarks,
+   from Aesop, Loro Piana, Porsche, Rolls-Royce and Harvard.
+   Functional scope: self-contained offline concept; no API requests.
+   ============================================================== */
+:root{
+  color-scheme: light;
+  --bg:#F7F7F2;--panel:#EEEFE8;--card:#FBFCF9;--elev:#E5EBE5;
+  --ink:#20352D;--muted:#4D6155;--dim:#5F7464;--line:#CDD8CE;
+  --faint:#E8EEE7;--dark:#213C30;--sage:#43745D;--rust:#A95C46;
+  --blue:#70839A;--good:#3C765B;--caution:#9D672D;
+  --shadow:0 20px 48px #233C2B11;
+  --font-ui:'Avenir Next','Geist','Noto Sans CJK SC','PingFang SC','Microsoft YaHei',sans-serif;
+  --font-display:'GFS Baskerville','Baskerville','Noto Serif CJK SC','Songti SC',serif;
+  --font-data:'DIN 2014','Bahnschrift','Clear Sans','Noto Sans CJK SC',sans-serif;
+  --font-mono:'IBM Plex Mono','SFMono-Regular','Consolas',monospace;
+}
+:root[data-theme=dark]{color-scheme:dark;--bg:#151F1C;--panel:#1F2D27;--card:#1C2924;--elev:#283A30;--ink:#F0F0E8;--muted:#BBC9BD;--dim:#9AAE9C;--line:#405449;--faint:#26372D;--dark:#E7ECE3;--sage:#B8D3BD;--rust:#F0A28A;--blue:#B6C6DC;--good:#A4D4B5;--caution:#E6BB86;--shadow:0 18px 52px #0003}
+html{scroll-padding-top:90px} body{font-family:var(--font-ui);font-size:14px;line-height:1.65;letter-spacing:-.012em;color:var(--ink);text-rendering:optimizeLegibility}
+::selection{background:var(--sage);color:var(--bg)}
+.skip-link{position:absolute;left:24px;top:-100px;padding:11px 15px;background:var(--dark);color:var(--bg);z-index:300}
+.skip-link:focus{top:10px}
+.institutional-strip{background:var(--dark);color:var(--bg);height:30px}
+.strip-inner{height:30px;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:9px;font-weight:540;letter-spacing:.15em}
+.strip-inner b{font-weight:300;opacity:.6;padding:0 5px}
+.strip-center{opacity:.65;letter-spacing:.19em}.strip-right{opacity:.85}.strip-right i{font-style:normal;opacity:.62;margin-left:8px}
+.topbar{background:var(--bg);border-bottom:1px solid var(--line);backdrop-filter:none}
+.top-inner{height:82px}.wrap{max-width:1620px;padding-left:clamp(22px,4.6vw,76px);padding-right:clamp(22px,4.6vw,76px)}
+.brand{gap:14px}.mark{width:30px;height:30px;border-radius:50%;border-width:1.5px;border-style:solid;border-color:var(--dark);border-right-color:var(--rust);border-bottom-color:var(--sage);transform:rotate(-25deg);position:relative}
+.mark::before{content:'';position:absolute;inset:7px;border:1px solid var(--sage);border-radius:50%}.mark::after{content:'';position:absolute;width:5px;height:5px;right:-3px;top:3px;background:var(--rust);border-radius:50%}
+.brandname{font-family:var(--font-display);font-size:24px;letter-spacing:-.06em;font-weight:500;line-height:1}
+.brandname em{font-style:italic;font-weight:400;color:var(--sage)}.wordmark-period{color:var(--rust)}
+.brand small{letter-spacing:.14em;font-size:9px;font-weight:620;margin-top:7px;color:var(--dim)}.wordmark-rule{color:var(--rust);padding:0 2px}
+.topnav{gap:26px}.navitem{font-size:12px;letter-spacing:.012em;font-weight:490;padding:28px 0 26px}
+.navitem.active{font-weight:660;border-bottom-color:var(--rust)}.topright{gap:13px}.topstatus{font-size:9px;font-weight:600;letter-spacing:.08em;background:transparent;border:1px solid var(--line);padding:8px 10px}
+.themebtn{width:36px;height:36px;border-radius:3px;font-size:17px;border-color:var(--line)}.account{border-radius:3px;font-size:11px;font-weight:570;padding:9px 11px}.account-arrow{color:var(--rust)}.auth-demo{background:var(--dark);color:var(--bg);font-size:10px;width:21px;height:21px;font-family:var(--font-display);font-style:italic}
+.content{padding-top:24px}.demo-strip{margin-bottom:18px;background:var(--panel);border-left:2px solid var(--rust);padding:10px 15px;line-height:1.65;font-size:11px}.demo-strip strong{letter-spacing:.01em}
+.editorial-index{display:flex;align-items:center;gap:12px;color:var(--dim);font:10px var(--font-mono);letter-spacing:.09em;padding:5px 0 4px}
+.editorial-index b{font-family:var(--font-display);font-size:14px;font-weight:400;color:var(--rust)}
+.index-rule{height:1px;flex:1;background:var(--line)}
+.breadcrumb{letter-spacing:.14em;color:var(--dim);font-size:9px;margin:10px 0 14px}.breadcrumb b{color:var(--rust)}
+.hero{padding:0 0 30px;gap:30px;align-items:end;border-bottom:1px solid var(--line);margin-bottom:20px}
+.hero h1{font-family:'Noto Serif CJK SC','Songti SC',serif;letter-spacing:-.065em;line-height:1.22;font-weight:540;font-size:clamp(31px,3.2vw,43px);margin:0 0 9px}
+.title-whisper{font-family:var(--font-display);font-weight:400;font-style:italic;color:var(--sage);font-size:clamp(24px,2.9vw,40px);margin-left:12px;letter-spacing:-.048em;white-space:nowrap}
+.hero p{font-size:12px;line-height:1.8;max-width:780px;letter-spacing:.005em;color:var(--muted)}.hero-right{gap:12px}
+.seg{background:var(--panel);padding:3px;border-radius:4px}.seg button{border-radius:2px;font-weight:540;font-size:11px}
+.seg button.active{background:var(--dark);color:var(--bg)}.stamp{color:var(--dim);letter-spacing:.08em}
+.lead-grid{gap:35px;padding:5px 0 32px;grid-template-columns:1.18fr 1fr}
+.lead-label{font-size:11.5px;font-weight:610;letter-spacing:.022em}.label-prefix{font:9px var(--font-mono);letter-spacing:.08em;color:var(--rust);margin-right:16px}
+.hardware{margin:10px 0;align-items:baseline;gap:17px}.hardware .big{font-family:var(--font-data);font-weight:390;letter-spacing:-.11em;font-size:clamp(110px,10.8vw,152px);line-height:.99}
+.hardware .unit{font:600 19px var(--font-ui);letter-spacing:-.055em;margin:0 0 0 -4px}.hardware .unit small{display:block;font:9px var(--font-mono);letter-spacing:.05em;color:var(--dim);margin-top:1px}
+.hardware .note{font:10px var(--font-mono);letter-spacing:.08em;color:var(--dim)}
+.lead-meta{gap:25px;color:var(--muted)}.lead-meta strong{font:550 17px var(--font-data)}
+.right-hardware{border-left-color:var(--line);padding-left:34px;gap:12px}
+.right-hardware h2{font-family:'Noto Serif CJK SC',serif;font-size:19px;font-weight:550;letter-spacing:-.045em}
+.serif-note{font:italic 17px var(--font-display);color:var(--sage);margin-left:7px;letter-spacing:-.035em}
+.right-hardware .value-row{padding-bottom:15px;gap:12px}.right-hardware .value-row b{font-size:12px;font-weight:580}
+.dot{border-radius:50%;width:6px;height:6px}.status{color:var(--good)}
+.stats{margin-bottom:29px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);counter-reset:metric}
+.stat{position:relative;counter-increment:metric;display:grid;grid-template-columns:1fr auto;grid-template-rows:auto auto;column-gap:8px;row-gap:9px;align-content:center;padding:18px 23px}
+.stat::before{content:'0' counter(metric);position:absolute;top:8px;right:12px;font:9px var(--font-mono);color:var(--dim);letter-spacing:.04em}
+.stat span{grid-column:1;grid-row:1;color:var(--muted);font-size:10px;font-weight:560;letter-spacing:.025em}
+.stat strong{grid-column:1;grid-row:2;display:block;font:440 34px/1.1 var(--font-data);letter-spacing:-.07em;color:var(--ink)}
+.stat small{grid-column:2;grid-row:2;font-size:9px;color:var(--dim);align-self:end;max-width:90px;white-space:normal}
+.explorer{grid-template-columns:minmax(0,1.73fr) minmax(300px,1fr);margin-bottom:36px}
+.plot-side{padding:26px 34px 19px 0}.side-side{padding:26px 0 22px 34px}
+.section-h{font-family:'Noto Serif CJK SC',serif;font-size:20px;font-weight:560;letter-spacing:-.06em}
+.heading-en{font:italic 18px var(--font-display);color:var(--sage);margin-left:5px}
+.sect-sub{font-size:10px;color:var(--dim);margin-top:5px}
+.plot{height:320px;margin-top:16px}.plot svg text{font-family:var(--font-mono)}
+.legendline{font-size:10px;gap:18px}.legendline .mono{font-size:9px}
+.model-name{font-family:var(--font-data);font-size:27px;letter-spacing:-.06em;font-weight:540;line-height:1.24;margin:9px 0 8px}
+.model-detail{padding:20px 0;margin:22px 0;gap:18px}
+.model-detail dt{letter-spacing:.05em;color:var(--dim)}.model-detail dd{font-size:14px;font-weight:590}.model-detail .mono{font-size:11px}
+.badge{border-radius:2px;font-size:10px;padding:5px 9px}.badge.good{color:var(--good)}
+.tag{border-radius:2px;font-size:9px;letter-spacing:.02em}
+.primary,.secondary{border-radius:3px;font-weight:580;letter-spacing:.015em;transition:transform .25s cubic-bezier(.2,.7,.2,1),background .22s cubic-bezier(.2,.7,.2,1),opacity .22s}
+.primary{padding:11px 17px}.secondary{padding:10px 14px}.secondary:hover{border-color:var(--sage)}.primary:active,.secondary:active{transform:translateY(1px) scale(.99)}
+.service-grid{gap:0}.service{position:relative;min-height:155px;padding-top:22px}
+.service-icon{background:transparent;color:var(--sage);font-family:var(--font-display);font-size:30px;font-weight:400;line-height:1.0;display:block;width:auto;height:auto;border-radius:0;margin-bottom:16px}
+.monogram-tail{color:var(--rust)}.service h3{font-family:var(--font-data);font-size:16px;font-weight:580;letter-spacing:-.035em}
+.service p{color:var(--muted);font-size:11px;line-height:1.85}.service-foot{font-family:var(--font-mono);letter-spacing:.04em;font-size:9px}
+.group-title{margin-top:20px;margin-bottom:19px}.group-title h2{font-family:'Noto Serif CJK SC',serif;font-size:21px;font-weight:550;letter-spacing:-.055em}
+.group-title .smallmeta{font-size:9px;letter-spacing:.08em}
+.tablewrap{border-top-color:var(--line)}table{font-size:11px}th{font-size:9.5px;letter-spacing:.06em;color:var(--dim);font-weight:580;text-transform:uppercase}td{font-size:11px}td,.rowmuted{line-height:1.6}
+tr:hover td{background:var(--panel)}
+.flatpanel{background:var(--panel);border-color:var(--line);box-shadow:none}
+.flatpanel h3{font-family:'Noto Serif CJK SC',serif;letter-spacing:-.04em;font-weight:560}
+.chatbox,.infobox{border-color:var(--line)}.chatbubble{font-size:12px;line-height:1.8}.chatcomposer input{background:var(--card)}
+.statusitem{background:transparent}
+.guard{border-left-color:var(--rust)}
+.codearea{background:var(--dark);color:var(--bg);font:11px/1.8 var(--font-mono)}
+.footbar{border-top:1px solid var(--line);font:9px var(--font-mono);letter-spacing:.065em;margin-top:54px}
+/* Calm institutional motion: one entrance instead of perpetual animation */
+.view.active{animation:atelier-in .38s cubic-bezier(.22,.76,.2,1) both}
+@keyframes atelier-in{from{opacity:.55;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media(max-width:1180px){.topnav{gap:16px}.brandname{font-size:21px}.right-hardware{padding-left:23px}}
+@media(max-width:1050px){.top-inner{height:70px}.institutional-strip{height:27px}.strip-inner{height:27px}.mobile-nav{border-top:1px solid var(--line)}.strip-center{display:none}}
+@media(max-width:760px){.wrap{padding:0 22px}.content{padding-top:15px}.top-inner{height:68px}.brandname{font-size:21px}.title-whisper{display:block;margin:7px 0 0;font-size:clamp(26px,5.4vw,34px)}.hero{padding-bottom:21px}.hero h1{font-size:31px}.hero p{font-size:11.5px}.lead-grid{grid-template-columns:1fr;gap:23px;padding-bottom:24px}.right-hardware{border-left:0;padding:20px 0 0;border-top:1px solid var(--line)}.hardware .big{font-size:116px}.stat{padding:18px 16px}.stat strong{font-size:28px}.explorer{grid-template-columns:1fr}.plot-side{padding-right:0}.side-side{border-left:0;border-top:1px solid var(--line);padding:25px 0}.strip-right{font-size:9px}.account-label{display:none}.account-arrow{font-size:10px}.topstatus{display:none}.editorial-index{padding:9px 0 0}.editorial-index>span:last-child{font-size:8px}}
+@media(max-width:520px){.institutional-strip{height:24px}.strip-inner{height:24px;font-size:8px}.strip-right i{display:none}.brandname{font-size:20px}.brand small{font-size:8px}.mark{width:25px;height:25px}.topright{gap:7px}.topright .account{font-size:0}.account-arrow{font-size:10px}.hero h1{font-size:28px}.hero .title-whisper{font-size:30px}.lead-label{font-size:11px}.label-prefix{display:block;margin:0 0 6px}.hardware .big{font-size:105px}.hardware .unit{font-size:16px}.hardware .note{font-size:10px}.lead-meta{gap:9px 17px}.stat{padding:16px 10px 17px}.stat strong{font-size:26px}.stat small{font-size:9px}.stats{margin-bottom:19px}.headrow{align-items:start}.section-h{font-size:18px}.heading-en{font-size:16px}.group-title h2{font-size:20px}.plot{height:260px}.service-grid{grid-template-columns:1fr}.service{min-height:0}.editorial-index .index-rule{min-width:24px}}
+@media(max-width:360px){.top-inner{gap:6px}.brand{gap:8px}.brandname{font-size:18px}.topright{gap:5px}.topright .account{padding:6px 3px}.brand small{font-size:7px}}
+@media(prefers-reduced-motion:reduce){.view.active{animation:none!important}*{transition:none!important}}
+
+/* ========================================================================
+   ATELIER 03 · Typography-first redesign
+   Goal: one coherent type voice, legibility at operational density.
+   No downloaded font binaries. Does not change service functionality.
+   ======================================================================== */
+:root{
+  --font-ui:'Inter','Noto Sans CJK SC','PingFang SC','Microsoft YaHei UI','Microsoft YaHei',sans-serif;
+  --font-display:var(--font-ui);
+  --font-data:var(--font-ui);
+  --font-mono:'IBM Plex Mono','Cascadia Code','SFMono-Regular',Consolas,'Liberation Mono',monospace;
+  --font:var(--font-ui);
+  --bg:#F7F8F5;--panel:#EFF2EC;--card:#FDFEFB;--elev:#E7EDE7;
+  --ink:#1E3429;--muted:#4C5F54;--dim:#586A5F;--line:#D4DED3;
+  --faint:#E8EFE8;--dark:#1F382C;--sage:#356D54;--rust:#AC5C49;
+}
+:root[data-theme=dark]{
+  --bg:#141C19;--panel:#1E2A23;--card:#1A2520;--elev:#293B31;
+  --ink:#F1F5EE;--muted:#C0D0C3;--dim:#A8BBAE;--line:#3F5246;
+  --faint:#283B30;--dark:#E6F1E8;--sage:#A3D0B5;--rust:#EDAD95;
+}
+html{font-size:16px}
+body{
+  font-family:var(--font-ui);font-size:15px;line-height:1.62;
+  letter-spacing:0;font-weight:400;text-rendering:optimizeLegibility;
+  -webkit-font-smoothing:auto;
+}
+button,input,select,textarea{letter-spacing:0}
+button{min-height:32px}
+/* Two-column reading rhythm: content lives in a tighter, calmer field. */
+.wrap{max-width:1432px;padding-left:clamp(18px,3.5vw,54px);padding-right:clamp(18px,3.5vw,54px)}
+.content{padding-top:24px}
+.institutional-strip,.strip-inner{height:28px}
+.strip-inner{font:500 10.5px/1.2 var(--font-ui);letter-spacing:.025em}
+.strip-center{letter-spacing:.045em}
+.brand{gap:12px}
+.top-inner{height:74px}
+.brandname{font:650 21px/1.06 var(--font-ui);letter-spacing:-.025em;color:var(--ink)}
+.brandname em{font-style:normal;font-weight:650;color:inherit}
+.brand small{font:500 10.5px/1.4 var(--font-ui);letter-spacing:.045em;margin-top:4px;color:var(--dim)}
+.topnav{gap:24px}
+.navitem{font:500 13px/1.3 var(--font-ui);letter-spacing:0;padding:25px 0 23px}
+.navitem.active{font-weight:650}
+.topstatus{font:600 10.5px/1.2 var(--font-ui);letter-spacing:.01em;padding:7px 9px}
+.account{font:550 12.5px/1.2 var(--font-ui);padding:8px 10px}
+.auth-demo{font:600 10px var(--font-ui);font-style:normal}
+.themebtn{width:36px;height:36px}
+.demo-strip{font-size:12.5px;line-height:1.65;padding:11px 15px;margin-bottom:22px}
+.demo-strip .mono{font-family:var(--font-ui);font-size:10.5px;letter-spacing:.03em}
+/* Remove repeated decorative index and oversized Latin italic subtitles. */
+.editorial-index{display:none}
+.breadcrumb{font:500 11px/1.4 var(--font-ui);letter-spacing:.025em;text-transform:none;margin:0 0 15px}
+.hero{margin-bottom:20px;padding-bottom:24px;gap:22px;align-items:center}
+.hero h1{
+  font-family:var(--font-ui);font-weight:650;font-style:normal;
+  font-size:clamp(29px,2.8vw,37px);line-height:1.28;
+  letter-spacing:-.025em;margin:0 0 11px;
+}
+.title-whisper{display:block;margin:4px 0 0;font:500 12px/1.45 var(--font-ui);font-style:normal;letter-spacing:.06em;color:var(--sage);text-transform:uppercase;white-space:normal}
+.hero p{font-size:14.5px;line-height:1.78;letter-spacing:0;max-width:650px;color:var(--muted)}
+.hero-right{min-width:200px;gap:9px}
+.seg button{font:500 12.5px/1.3 var(--font-ui);padding:8px 12px}
+.stamp{font:500 10.5px/1.4 var(--font-ui);letter-spacing:.025em;color:var(--dim)}
+.caps{font:600 11.5px/1.3 var(--font-ui);letter-spacing:.045em}
+.tiny{font-size:12px;line-height:1.55}
+.label-prefix{font:500 10.5px/1.4 var(--font-ui);letter-spacing:.06em;margin-right:12px}
+.lead-grid{gap:30px;padding:3px 0 24px}
+.lead-label{font-size:13px;font-weight:600;letter-spacing:0}
+.hardware{gap:10px;margin:6px 0 12px}
+.hardware .big{font:500 clamp(95px,9vw,126px)/1.02 var(--font-data);letter-spacing:-.055em}
+.hardware .unit{font:650 20px/1.1 var(--font-ui);letter-spacing:-.015em;margin:0}
+.hardware .unit small{font:500 11px/1.4 var(--font-ui);letter-spacing:.025em;margin-top:3px}
+.hardware .note{font:500 12px/1.4 var(--font-ui);letter-spacing:0}
+.lead-meta{font-size:12.5px;gap:18px;line-height:1.6}
+.lead-meta strong{font:650 16px var(--font-ui)}
+.right-hardware{gap:9px;padding-left:28px}
+.right-hardware h2{font:650 18px/1.4 var(--font-ui);letter-spacing:-.015em}
+.serif-note{font:500 11px/1.4 var(--font-ui);font-style:normal;letter-spacing:.025em;color:var(--sage);margin-left:7px}
+.right-hardware .value-row{padding-bottom:13px;gap:10px}
+.right-hardware .value-row b{font-size:13px;font-weight:600}
+.stats{margin-bottom:22px}
+.stat{padding:17px 19px 18px;row-gap:9px}
+.stat::before{display:none}
+.stat span{font-size:12px;font-weight:550;letter-spacing:0}
+.stat strong{font:600 31px/1.2 var(--font-data);letter-spacing:-.025em}
+.stat small{font-size:11px;line-height:1.45;max-width:100px}
+.explorer{margin-bottom:26px}
+.plot-side{padding:23px 28px 18px 0}.side-side{padding:23px 0 21px 28px}
+.section-h{font:650 19px/1.4 var(--font-ui);letter-spacing:-.015em}
+.heading-en{font:500 12px/1.4 var(--font-ui);font-style:normal;letter-spacing:.02em;color:var(--sage);margin-left:5px}
+.sect-sub{font-size:12px;line-height:1.55;color:var(--muted);margin-top:7px}
+.plot{height:300px;margin-top:12px}
+.plot svg text{font-family:var(--font-ui);font-size:12px}
+.legendline{font-size:12px;line-height:1.5;gap:20px;padding-top:6px}
+.legendline .mono{font-size:11px}
+.side-kicker{font-size:11.5px}
+.model-name{font:600 23px/1.3 var(--font-ui);letter-spacing:-.018em;margin:11px 0 8px}
+.model-detail{margin:18px 0;padding:18px 0;gap:16px}
+.model-detail dt{font-size:12px;line-height:1.5;letter-spacing:0;color:var(--muted)}
+.model-detail dd{font-size:15px;font-weight:600;line-height:1.4}
+.model-detail .mono{font-size:12px}
+.source-foot{font-size:12px;line-height:1.7;margin-top:16px;color:var(--muted)}
+.tag{font-size:11.5px;letter-spacing:0;padding:6px 9px}
+.badge{font-size:11.5px;line-height:1.4;padding:6px 9px;letter-spacing:0}
+.primary,.secondary{font-size:13px;line-height:1.3;font-weight:600;padding:11px 14px;border-radius:6px}
+.group-title{margin-top:21px;margin-bottom:16px}
+.group-title h2{font:650 19px/1.4 var(--font-ui);letter-spacing:-.015em}
+.group-title .smallmeta{font:500 11px/1.5 var(--font-ui);letter-spacing:.025em}
+.service{min-height:0;padding-top:20px;padding-bottom:20px}
+.service-icon{font:650 23px/1.2 var(--font-ui);color:var(--sage);margin-bottom:11px}
+.service h3{font:650 15.5px/1.4 var(--font-ui);letter-spacing:0}
+.service p{font-size:13px;line-height:1.7;min-height:0;margin-bottom:14px}
+.service-foot{font:500 11px/1.4 var(--font-ui);letter-spacing:0}
+.tablewrap{border-top:1px solid var(--line)}
+table{font-size:13px}
+th{font:600 12px/1.45 var(--font-ui);letter-spacing:0;text-transform:none;color:var(--muted)}
+td{font-size:13px;line-height:1.65}
+td,th{padding:14px 13px}
+.rowtitle{font-weight:600}
+.rowmuted{font-size:11.5px;line-height:1.6;margin-top:4px}
+.footnote{font-size:13px;line-height:1.75}
+.flatpanel{padding:25px}
+.flatpanel h3{font:650 18px/1.5 var(--font-ui);letter-spacing:0}
+.flatpanel p{font-size:13.5px;line-height:1.75}
+.steps li{padding:15px 0;gap:13px}
+.steps .count{font:500 12px var(--font-ui)}
+.steps b{font-size:13.5px}
+.steps p{font-size:12.5px;line-height:1.7}
+.infobox{padding:26px}
+.surface{padding:21px}
+.field label{font-size:12px;font-weight:550}
+.field input,.field select{font-size:13.5px;padding:11px 12px;min-height:43px}
+.codearea{font:12px/1.75 var(--font-mono);letter-spacing:0;padding:18px}
+.guard{font-size:12.5px;line-height:1.75}
+.statusitem strong{font-size:16px;font-weight:650}
+.chatbubble{font-size:14px;line-height:1.75}
+.chatcomposer input{font-size:14px;min-height:43px}
+.subnav button,.selector select{font-size:12.5px}
+.footbar{font:500 10.5px/1.6 var(--font-ui);letter-spacing:.025em;margin-top:36px;padding:21px 0}
+/* Relaxed reading in long descriptions; no globally tracked Chinese text. */
+.view p:not(.source-foot):not(.demo-strip){overflow-wrap:break-word}
+/* Important data tokens remain monospaced; not entire paragraphs or subtitles. */
+.mono{font-family:var(--font-mono);letter-spacing:0}
+:focus-visible{outline-offset:3px}
+@media(max-width:1180px){
+  .topnav{gap:16px}.top-inner{gap:12px}.brandname{font-size:20px}
+  .stat{padding-inline:14px}
+}
+@media(max-width:1050px){
+  .top-inner{height:69px}.mobile-nav{padding-bottom:3px}
+}
+@media(max-width:760px){
+  .wrap{padding-inline:20px}.content{padding-top:18px}
+  .hero{align-items:flex-start;gap:12px;padding-bottom:20px}
+  .hero h1{font-size:31px}.title-whisper{font-size:11.5px;margin-top:5px}
+  .hero p{font-size:14px;line-height:1.72}
+  .hero-right{min-width:0}
+  .lead-grid{gap:18px;padding-bottom:22px}
+  .hardware .big{font-size:108px}
+  .right-hardware{padding:20px 0 0}
+  .stat{padding:17px 14px}
+  .stat strong{font-size:27px}
+  .stat span{font-size:11.5px}
+  .plot{height:285px}
+  .plot-side{padding:21px 0}
+  .side-side{padding:21px 0}
+}
+@media(max-width:520px){
+  .wrap{padding-inline:17px}.strip-inner{font-size:9.5px;letter-spacing:0}
+  .brandname{font-size:19px}.brand small{font-size:9.5px}
+  .demo-strip{font-size:12px;line-height:1.6}
+  .demo-strip .mono{display:none}
+  .hero h1{font-size:28px}
+  .hero p{font-size:13.5px}
+  .seg button{font-size:12px;padding:7px 9px}
+  .hardware .big{font-size:99px}
+  .hardware .note{font-size:11.5px}
+  .lead-meta{gap:9px 16px}
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:19px}
+  .stat{min-height:93px;padding:16px 12px;gap:4px}
+  .stat:nth-child(2){border-right:0}
+  .stat:nth-child(-n+2){border-bottom:1px solid var(--line)}
+  .stat strong{font-size:27px;white-space:nowrap}
+  .stat small{font-size:11px}
+  .section-h,.group-title h2{font-size:18px}
+  .heading-en{font-size:11px}
+  .sect-sub{font-size:11.5px}
+  .plot{height:265px}
+  .service p{font-size:13px}
+  td,th{padding:12px 10px}
+}
+@media(max-width:360px){
+  .top-inner{gap:5px}
+  .brandname{font-size:17px}.topright{gap:5px}.account{padding:7px 4px}
+  .hardware .big{font-size:90px}
+  .hero h1{font-size:27px}
+  .stat strong{font-size:25px}
+  .stamp{font-size:9px}
+}
+
+
+/* ========================================================================
+   ATELIER 05 · Crafted interaction system / restrained technology
+   References are principles only: institutional consistency, material
+   neutrals, decisive figures, and purposeful interaction. No brand assets.
+   This layer is intentionally isolated for downstream Portal migration.
+   ======================================================================== */
+:root {
+  --bg:#F4F5F1; --panel:#EBEFE9; --card:#FDFDFA; --elev:#E2E9E2;
+  --ink:#1C3027; --muted:#4D6155; --dim:#627267; --line:#CDD7CD;
+  --faint:#E5EBE4; --dark:#1E392C; --sage:#466F5A;
+  --rust:#98553E; --blue:#637C8B; --good:#367659;
+  --caution:#855F32;
+  --shadow:0 14px 44px rgba(20,47,31,.055);
+  --ease-crafted:cubic-bezier(.22,1,.36,1);
+  --ease-quick:cubic-bezier(.2,.75,.25,1);
+  --plot-accent:var(--rust);
+}
+:root[data-theme=dark] {
+  --bg:#141C19; --panel:#1B2821; --card:#1D2B24; --elev:#293A30;
+  --ink:#F0F3EE; --muted:#BDCCC0; --dim:#A1B3A5; --line:#3D5143;
+  --faint:#24362C; --dark:#E5F0E7; --sage:#A5CBB2;
+  --rust:#E1A88C; --blue:#A8BECA; --good:#96D1AE;
+  --caution:#DABB89; --shadow:0 22px 60px rgba(0,0,0,.20);
+}
+html, body {background:var(--bg)}
+body {color:var(--ink);background-color:var(--bg);transition:background-color .34s var(--ease-crafted),color .25s var(--ease-crafted)}
+.institutional-strip {background:#21382B}
+:root[data-theme=dark] .institutional-strip {background:#0C1410}
+.topbar {
+  background:var(--bg);background:color-mix(in srgb,var(--bg) 93%,transparent);
+  border-bottom-color:var(--line);
+  box-shadow:0 8px 26px rgba(26,58,39,.035);
+  -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+  transition:background-color .34s var(--ease-crafted),border-color .3s;
+}
+@supports not (backdrop-filter:blur(12px)){.topbar{background:var(--bg)}}
+.mark {transition:transform .65s var(--ease-crafted),border-color .35s}
+.brand:hover .mark {transform:rotate(-8deg)}
+.brandname {font-weight:680;letter-spacing:-.032em}
+/* A mechanically precise sliding nav underline. No bouncing, no glow. */
+.topnav,.mobile-nav {position:relative}
+.topnav .navitem,.mobile-nav .navitem {border-bottom-color:transparent!important}
+.nav-rail {
+  position:absolute;pointer-events:none;left:0;bottom:0;height:2px;width:0;
+  background:var(--rust);opacity:0;z-index:2;
+  transform:translateX(0);transition:transform .4s var(--ease-crafted),width .4s var(--ease-crafted),opacity .12s;
+  will-change:transform;
+}
+.navitem {transition:color .22s var(--ease-quick)}
+.navitem:active {transform:none}
+.navitem.active {color:var(--dark)}
+.account,.themebtn,.secondary,.primary,.seg button,.close,.service,.tag,.badge,td {
+  transition:background-color .23s var(--ease-quick),border-color .23s var(--ease-quick),
+  color .23s var(--ease-quick),box-shadow .3s var(--ease-crafted);
+}
+.primary,.secondary,.themebtn,.account {transition:transform .24s var(--ease-crafted),background-color .23s var(--ease-quick),border-color .23s var(--ease-quick),box-shadow .3s var(--ease-crafted)}
+.primary:hover {background:color-mix(in srgb,var(--dark) 87%,var(--sage));opacity:1;box-shadow:0 6px 18px rgba(32,65,45,.12)}
+.secondary:hover,.account:hover,.themebtn:hover {background:color-mix(in srgb,var(--panel) 78%,var(--card));border-color:var(--sage)}
+.primary:active,.secondary:active,.account:active,.themebtn:active {transform:scale(.985)}
+.primary:focus-visible,.secondary:focus-visible,.navitem:focus-visible {outline-offset:4px}
+/* A hint of material depth, only where there is an actual surface. */
+.demo-strip {background:var(--panel);border-left-color:var(--rust)}
+.flatpanel,.infobox,.chatbox {box-shadow:0 1px 0 rgba(255,255,255,.30) inset}
+:root[data-theme=dark] .flatpanel,:root[data-theme=dark] .infobox,:root[data-theme=dark] .chatbox {box-shadow:none}
+.service {transition:background-color .28s var(--ease-quick)}
+.service:hover {background:color-mix(in srgb,var(--sage) 5%,transparent)}
+.service-icon {transition:transform .32s var(--ease-crafted),color .25s}
+.service:hover .service-icon {transform:translateY(-3px);color:var(--dark)}
+.service:hover .service-foot {color:var(--ink)}
+tbody tr td {transition:background-color .2s var(--ease-quick)}
+tbody tr:hover td {background:color-mix(in srgb,var(--sage) 5%,var(--bg))}
+.badge.good{color:var(--good)}
+/* The body remains readable and static between interactions. */
+.view {display:none;animation:none}
+.view.active {display:block;animation:quiet-enter .30s var(--ease-crafted) both}
+@keyframes quiet-enter {from{opacity:.7;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
+@keyframes quiet-exit {from{opacity:1;transform:translateY(0)}to{opacity:.16;transform:translateY(-5px)}}
+@supports (view-transition-name:atelier-stage) {
+ .view.active {view-transition-name:atelier-stage;animation:none}
+ ::view-transition-old(root), ::view-transition-new(root) {animation:none}
+ ::view-transition-old(atelier-stage) {animation:quiet-exit .22s var(--ease-quick) both}
+ ::view-transition-new(atelier-stage) {animation:quiet-enter .36s var(--ease-crafted) both}
+ ::view-transition-group(atelier-stage) {animation-duration:.36s;animation-timing-function:var(--ease-crafted)}
+}
+@media(prefers-reduced-transparency:reduce){.topbar{-webkit-backdrop-filter:none!important;backdrop-filter:none!important;background:var(--bg)!important}}
+/* Image-free technical texture: barely-there calibration dots, not decoration. */
+.plot {isolation:isolate;position:relative;--plot-accent:var(--rust)}
+.plot[data-metric=latency]{--plot-accent:var(--sage)}
+.plot[data-metric=tokens]{--plot-accent:var(--blue)}
+.plot::before {
+ content:'';position:absolute;inset:14px 1px 34px 28px;z-index:-1;pointer-events:none;
+ opacity:.20;background-image:radial-gradient(circle,var(--line) .72px,transparent .8px);
+ background-size:21px 21px;mask-image:linear-gradient(to bottom,transparent 2%,black 35%,black 78%,transparent 100%);
+}
+.plot-cursor {pointer-events:none}
+.plot:focus-within {outline:1px solid color-mix(in srgb,var(--sage) 45%,transparent);outline-offset:5px}
+.plot svg {overflow:visible}
+.plot svg .series-path {vector-effect:non-scaling-stroke}
+.plot svg [data-chart-probe] text {font-family:var(--font-mono);letter-spacing:0}
+.plot svg:focus-visible {outline:2px solid var(--sage);outline-offset:4px;border-radius:3px}
+.seg button {transition:background-color .22s var(--ease-quick),color .22s var(--ease-quick),transform .22s var(--ease-crafted)}
+.seg button:not(.active):hover {background:var(--elev);color:var(--ink)}
+.seg button:active {transform:scale(.985)}
+/* Footer and readouts are purposefully quiet. */
+.footbar {color:var(--dim);border-color:var(--line)}
+.modal-head,.modal-body,.modal-actions {background:var(--card)}
+/* Optional native View Transitions always yield to accessibility preferences. */
+@media (prefers-reduced-motion:reduce) {
+ html {scroll-behavior:auto!important}
+ *,*::before,*::after {transition:none!important;animation:none!important;scroll-behavior:auto!important}
+ .nav-rail,.mark,.service-icon {will-change:auto!important}
+ ::view-transition-old(root),::view-transition-new(root),
+ ::view-transition-old(atelier-stage),::view-transition-new(atelier-stage) {animation:none!important}
+}
+
+
+/* Atelier Observatory 05 — Atlas visualization. Standalone demo data only. */
+:root{--atlas-a:#a95c46;--atlas-b:#477a62;--atlas-c:#7b8da5;--atlas-wash:#edf1e9;--atlas-plot:#f6f8f4}
+:root[data-theme=dark]{--atlas-a:#ef9c81;--atlas-b:#9bc7a8;--atlas-c:#abbfdb;--atlas-wash:#24362b;--atlas-plot:#18251e}
+.atlas-view{--atlas-rule:var(--line);min-width:0}.atlas-view .hero{margin-bottom:16px}.atlas-view .atlas-hero-sub{font-size:14px;line-height:1.75;max-width:700px}
+.atlas-view .atlas-link{appearance:none;display:inline-flex;align-items:center;gap:9px;color:var(--sage);font-size:13px;font-weight:620;letter-spacing:0;padding:9px 0;border-bottom:1px solid var(--sage);cursor:pointer}
+.atlas-view .atlas-link:hover{color:var(--rust);border-color:var(--rust)}
+.atlas-meta{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 20px;padding:13px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:0 0 22px}
+.atlas-overline{color:var(--dim);font-size:11px;font-weight:550;letter-spacing:.045em}.atlas-badge{color:var(--sage);font-size:11px;border:1px solid var(--line);border-radius:5px;padding:5px 9px;background:var(--card);white-space:nowrap}
+.atlas-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-bottom:1px solid var(--line);border-top:1px solid var(--line);margin-bottom:24px}
+.atlas-metric{padding:16px 23px 19px;border-right:1px solid var(--line);min-width:0}
+.atlas-metric:first-child{padding-left:0}.atlas-metric:last-child{border-right:0}
+.atlas-metric .label{font-size:12px;color:var(--muted);font-weight:550}.atlas-metric strong{font-size:clamp(26px,2.8vw,39px);letter-spacing:-.045em;font-weight:610;line-height:1.18;display:block;margin:7px 0 5px;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.atlas-metric small{font-size:11px;line-height:1.4;color:var(--dim)}
+.atlas-controlbar{display:flex;justify-content:space-between;gap:10px 20px;align-items:center;padding:10px 0 14px;flex-wrap:wrap}
+.atlas-filters,.atlas-toggle{display:flex;gap:5px;align-items:center;flex-wrap:wrap}.atlas-filters button,.atlas-toggle button,.atlas-view select,.atlas-view input{font-family:inherit;font-size:12px;color:var(--muted);border-radius:5px}
+.atlas-filters button,.atlas-toggle button{padding:8px 10px;border:1px solid transparent;transition:background .18s,color .18s,border-color .18s}
+.atlas-filters button[aria-pressed=true],.atlas-toggle button[aria-pressed=true]{background:var(--dark);color:var(--bg);border-color:var(--dark)}
+.atlas-filters button:hover:not([aria-pressed=true]),.atlas-toggle button:hover:not([aria-pressed=true]){background:var(--panel)}
+.atlas-dot{width:7px;height:7px;display:inline-block;border-radius:2px;background:var(--atlas-a);margin-right:5px;vertical-align:1px}.atlas-dot.b{background:var(--atlas-b)}.atlas-dot.c{background:var(--atlas-c)}
+.atlas-stage-grid{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(280px,.83fr);border-bottom:1px solid var(--line);border-top:1px solid var(--line);margin-bottom:28px}
+.atlas-primary{padding:21px 28px 22px 0;min-width:0}.atlas-secondary{border-left:1px solid var(--line);padding:22px 0 21px 28px;min-width:0}
+.atlas-sectionhead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}.atlas-sectionhead h2{font-size:19px;font-weight:630;letter-spacing:-.035em;margin:0}.atlas-sectionhead p{margin:4px 0 0;font-size:11px;color:var(--dim);line-height:1.5}
+.atlas-sectionhead .atlas-toggle{justify-content:flex-end}.atlas-sectionhead .atlas-toggle button{padding:6px 9px;font-size:11px}
+.atlas-breadcrumb{color:var(--muted);font-size:12px;min-height:22px;padding:7px 0 3px}.atlas-breadcrumb button{font-size:inherit;color:var(--sage);font-weight:550;padding:0}.atlas-breadcrumb button:hover{text-decoration:underline}
+.atlas-chart-frame{position:relative;width:100%;aspect-ratio:760/560;min-height:300px;max-height:640px}
+.atlas-chart-frame svg,.atlas-chart-frame canvas{width:100%;height:100%;display:block;touch-action:pan-y}
+.atlas-chart-frame .atlas-hit{cursor:pointer;transition:opacity .18s ease,filter .18s ease,stroke .18s ease}
+.atlas-chart-frame .atlas-hit:focus-visible,.atlas-chart-frame .atlas-hit:hover{filter:brightness(1.08)}
+.atlas-chart-frame .atlas-hit[data-dimmed=true]{opacity:.26}
+.atlas-chart-frame .atlas-hit[data-highlight=true]{filter:brightness(1.08)}
+.atlas-chart-frame svg text{font-family:var(--font-ui);pointer-events:none}
+.atlas-rail{padding:11px 0 0;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:11px}.atlas-rail span:last-child{text-align:right}
+.atlas-mini-strip{height:5px;display:flex;gap:2px;margin-top:10px;overflow:hidden}.atlas-mini-strip span{min-width:0}
+.atlas-donut-area{display:grid;grid-template-columns:minmax(90px,170px) minmax(130px,1fr);align-items:center;gap:12px;margin:12px 0 20px}
+#atlasDonut{width:100%;height:auto;max-height:200px}
+.atlas-legend{display:grid;gap:12px}.atlas-legend button{padding:4px;text-align:left;border-radius:4px;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;width:100%;font-size:12px;color:var(--muted)}.atlas-legend button:hover{background:var(--elev)}
+.atlas-legend b{font-variant-numeric:tabular-nums;color:var(--ink);font-weight:650;font-size:15px}
+.atlas-focus{border-top:1px solid var(--line);padding-top:19px}.atlas-focus .context{font-size:12px;color:var(--muted)}
+.atlas-focus h3{font-size:21px;letter-spacing:-.04em;line-height:1.3;margin:7px 0 10px;font-weight:640}
+.atlas-focus .focus-number{font-variant-numeric:tabular-nums;font-size:clamp(34px,3.5vw,48px);font-weight:620;letter-spacing:-.055em;line-height:1.18}
+.atlas-focus .focus-number small{font-size:12px;font-weight:400;letter-spacing:0;margin-left:8px;color:var(--muted)}
+.atlas-focus dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px 15px;margin:20px 0}.atlas-focus dl div{min-width:0}.atlas-focus dt{font-size:11px;color:var(--muted)}.atlas-focus dd{font-size:16px;margin:4px 0 0;font-weight:580;font-variant-numeric:tabular-nums}.atlas-focus-note{font-size:12px;color:var(--dim);line-height:1.7;border-top:1px solid var(--line);padding-top:13px}
+.atlas-subsection{margin:34px 0 0}.atlas-subsection-title{display:flex;justify-content:space-between;align-items:baseline;gap:14px;margin-bottom:15px}.atlas-subsection-title h2{font-size:20px;letter-spacing:-.03em;font-weight:630;margin:0}.atlas-subsection-title small{font-size:11px;color:var(--dim)}
+.atlas-table-controls{display:flex;gap:9px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:13px}
+.atlas-search{display:flex;align-items:center;border:1px solid var(--line);border-radius:5px;background:var(--card);padding:0 11px;min-width:180px;max-width:300px;flex:1}.atlas-search input{border:0;background:none;outline:0;min-width:0;width:100%;height:38px;color:var(--ink)}
+.atlas-view select{padding:9px 12px;border:1px solid var(--line);background:var(--card);color:var(--ink);min-height:38px}
+.atlas-rank{border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.atlas-rankhead,.atlas-rankrow{display:grid;grid-template-columns:44px minmax(140px,1.15fr) minmax(120px,2fr) 90px 82px 44px;gap:10px;align-items:center}
+.atlas-rankhead{padding:11px 12px;font-size:11px;color:var(--dim);background:var(--panel)}
+.atlas-rankrow{padding:12px;min-height:60px;border-top:1px solid var(--line);font-size:13px;cursor:pointer;transition:background .18s}
+.atlas-rankrow:hover,.atlas-rankrow[data-selected=true]{background:var(--panel)}.atlas-rankrow .rank-index{font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}
+.atlas-rankrow .rank-name{font-weight:610;color:var(--ink)}.atlas-rankrow .rank-sub{font-size:11px;color:var(--dim);margin-top:3px}
+.atlas-rankrow .bar{height:10px;background:var(--faint);border-radius:2px;overflow:hidden}.atlas-rankrow .bar span{display:block;height:100%;transition:width .42s cubic-bezier(.22,1,.36,1)}
+.atlas-rankrow .rank-val{text-align:right;font-weight:640;letter-spacing:-.02em;font-variant-numeric:tabular-nums}.atlas-rankrow .rank-p95{text-align:right;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}.atlas-rankrow .rank-add{width:30px;height:30px;border:1px solid var(--line);border-radius:4px;font-size:18px;line-height:1;color:var(--muted)}.atlas-rankrow .rank-add:hover{color:var(--sage);border-color:var(--sage)}
+.atlas-analysis-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.atlas-analysis-panel{padding:24px 22px 18px 0;min-width:0}.atlas-analysis-panel+.atlas-analysis-panel{border-left:1px solid var(--line);padding:24px 0 18px 22px}
+.atlas-analysis-panel h3{font-weight:620;font-size:15px;margin:0}.atlas-analysis-panel p{font-size:11px;color:var(--dim);margin:4px 0 0}
+.atlas-analysis-panel svg{margin-top:13px;width:100%;height:auto;max-height:325px;overflow:visible}
+.atlas-heatmap{border-top:1px solid var(--line);padding:22px 0 18px;margin-top:14px}.atlas-heatmap-row{display:flex;align-items:center;justify-content:space-between;gap:15px;flex-wrap:wrap}.atlas-heatmap-row h3{font-size:17px;margin:0}.atlas-heatmap-row p{font-size:11px;color:var(--dim);margin:3px 0 0}
+.atlas-heatmap-svg{width:100%;min-width:680px;max-height:280px;display:block}.atlas-h-scroll{overflow-x:auto;padding-bottom:7px;scrollbar-color:var(--line) transparent}
+.atlas-heatmap-output{font-size:11px;color:var(--dim);min-height:18px}
+.atlas-compare{background:var(--panel);padding:22px;margin:24px 0 4px;border:1px solid var(--line);border-radius:8px}
+.atlas-compare-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:15px}.atlas-compare-head h3{font-size:17px;font-weight:630;margin:0}.atlas-compare-head button{font-size:12px;color:var(--muted);text-decoration:underline}
+.atlas-compare-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}.atlas-compare-item{min-width:0;padding-right:14px;border-right:1px solid var(--line)}.atlas-compare-item:last-child{border:0}.atlas-compare-item h4{font-size:12px;margin:0;font-weight:650}.atlas-compare-item .big{font-size:27px;font-weight:630;margin:9px 0;letter-spacing:-.04em}.atlas-compare-item small{font-size:11px;color:var(--muted)}
+.atlas-compare-item dl{display:grid;grid-template-columns:1fr auto;gap:5px;margin:10px 0;font-size:11px}.atlas-compare-item dt{color:var(--muted)}.atlas-compare-item dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+.atlas-tip{position:fixed;z-index:90;background:var(--dark);color:var(--bg);border:1px solid var(--line);border-radius:7px;padding:11px 13px;box-shadow:var(--shadow);font-size:12px;pointer-events:none;max-width:260px;opacity:0;transition:opacity .13s;line-height:1.65}.atlas-tip[data-open=true]{opacity:1}.atlas-tip strong{font-weight:670}.atlas-tip small{opacity:.8;display:block}
+.atlas-note{border-left:2px solid var(--rust);background:var(--panel);color:var(--muted);font-size:12px;line-height:1.7;padding:13px 17px;margin-top:20px}
+.atlas-inline-link{font-size:12px;color:var(--sage);font-weight:640;text-decoration:underline;text-underline-offset:4px;cursor:pointer;border:0;background:none;padding:0}
+.atlas-inline-link:hover{color:var(--rust)}
+@media(max-width:1050px){.atlas-stage-grid{grid-template-columns:minmax(0,1.4fr) minmax(245px,1fr)}.atlas-primary{padding-right:17px}.atlas-secondary{padding-left:17px}.atlas-donut-area{grid-template-columns:1fr}.atlas-donut-area svg{max-width:145px;margin:auto}.atlas-rankhead,.atlas-rankrow{grid-template-columns:27px minmax(110px,1fr) minmax(95px,1.4fr) 68px 60px 32px;gap:6px}.atlas-rankrow{font-size:12px}}
+@media(max-width:760px){.atlas-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.atlas-metric:nth-child(2){border-right:0}.atlas-metric:nth-child(n+3){border-top:1px solid var(--line)}.atlas-metric:nth-child(3){padding-left:0}.atlas-stage-grid{grid-template-columns:1fr}.atlas-primary{padding-right:0}.atlas-secondary{border-left:0;border-top:1px solid var(--line);padding-left:0;display:grid;grid-template-columns:1fr 1fr;gap:20px}.atlas-secondary>.atlas-sectionhead{grid-column:1/-1;margin-bottom:-13px}.atlas-donut-area{grid-template-columns:120px 1fr;margin:4px 0;align-self:start}.atlas-focus{border:0;padding-top:0}.atlas-analysis-grid{grid-template-columns:1fr}.atlas-analysis-panel,.atlas-analysis-panel+.atlas-analysis-panel{padding:20px 0;border-left:0}.atlas-analysis-panel+.atlas-analysis-panel{border-top:1px solid var(--line)}.atlas-compare-grid{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:24px}.atlas-compare-item:nth-child(2){border:0}.atlas-compare-item:nth-child(3){border-top:1px solid var(--line);padding-top:12px}.atlas-compare-item:nth-child(4){border-top:1px solid var(--line);padding-top:12px}}
+@media(max-width:520px){.atlas-metric{padding:13px 12px 14px}.atlas-metric strong{font-size:26px}.atlas-controlbar{align-items:stretch}.atlas-filters{gap:2px}.atlas-filters button,.atlas-toggle button{font-size:11px;padding:7px 7px}.atlas-primary{padding:18px 0}.atlas-sectionhead{display:block}.atlas-sectionhead .atlas-toggle{justify-content:flex-start;margin-top:8px}.atlas-chart-frame{min-height:245px;aspect-ratio:760/650}.atlas-secondary{display:block}.atlas-secondary>.atlas-sectionhead{margin-bottom:6px}.atlas-donut-area{grid-template-columns:120px 1fr}.atlas-rank{overflow-x:auto}.atlas-rankhead,.atlas-rankrow{min-width:580px}.atlas-compare{padding:16px}.atlas-compare-grid{gap:12px}.atlas-compare-item .big{font-size:24px}.atlas-analysis-panel svg{max-height:260px}.atlas-subsection{margin-top:29px}}
+@media(prefers-reduced-motion:reduce){.atlas-view *, .atlas-tip{transition:none!important;animation:none!important}}
+
+.atlas-chart-frame [hidden]{display:none!important}
+/* Atelier Observatory 06 — Portal modules (calls, engines, playground, observability, evaluation, administration).
+ *
+ * The fourth Atelier layer. It is deliberately small: the new views are built
+ * out of the components Atelier 05 already defines (`.flatpanel`, `.surface`,
+ * `.tablewrap`, `.badge`, `.guard`, `.statusrows`, `.steps`, `.field`,
+ * `.selector`, `.flow-row`, `.editorial-index`), so what is added here is only
+ * what 05 had no equivalent for:
+ *
+ *   * the module panel frame and its state pill;
+ *   * the key/value rows the module panels are made of;
+ *   * the permitted-link row.
+ *
+ * No new colour is introduced. Every value comes from the 05 tokens, so both
+ * themes keep working without a second palette to maintain.
+ */
+
+.module-panel { padding-bottom: 35px }
+
+.module-body { margin-top: 4px }
+
+.module-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.module-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  padding: 18px 19px;
+  min-width: 0;
+}
+
+.module-card h3 {
+  margin: 0 0 3px;
+  font-size: 13px;
+  font-weight: 610;
+  letter-spacing: -.02em;
+}
+
+.module-card .module-card-sub {
+  font-size: 10.5px;
+  color: var(--dim);
+  margin: 0 0 13px;
+  line-height: 1.55;
+}
+
+/* The state pill is the module's most important pixel: it says what the
+   server is willing to claim, not what the platform could theoretically do. */
+.state-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  font-weight: 600;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 5px 9px;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.state-pill::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+/* A platform/source card ends with a real in-page navigation button rather than
+   a decorative `↗`. Give it room and keep the label from wrapping oddly on the
+   narrow breakpoint, without introducing a second palette. */
+.service > .secondary {
+  margin-top: 14px;
+}
+.service > .secondary[disabled] {
+  opacity: .65;
+  cursor: not-allowed;
+}
+
+/* 06 names two separate data sources in the demo strip, so its left-hand copy is
+   longer than 05's. Let the row wrap instead of pushing the nowrap right-hand
+   rule past the viewport edge on the 760–900px band. */
+.demo-strip {
+  flex-wrap: wrap;
+}
+.demo-strip > span:first-child {
+  min-width: 0;
+}
+
+/* The Compute hero carries real host readings ("48884.3 MiB") and an ISO sample
+   time, all longer than the short demo words the cells used to hold. Let them
+   wrap and break anywhere rather than push the grid past the viewport — at every
+   width, since a four-column row at 768px is still narrower than the value.
+   Scoped to #view-compute so the rest of the shell keeps its nowrap numbers. */
+#view-compute .stats .stat strong {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  #view-compute .stats .stat strong {
+    font-size: 20px;
+  }
+}
+
+/* The host read-out's provenance row pairs a source line with a nowrap badge
+   ("LIVE · Prometheus verified"). Let it wrap at the narrow breakpoints so the
+   badge cannot push the panel past the viewport. */
+[data-host-status-body] .headrow {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+[data-host-status-body] .headrow > .tiny {
+  min-width: 0;
+}
+
+/* The hero's infrastructure rows gained a third cell (the provenance note), so
+   let them wrap at narrow widths instead of overflowing the column. */
+.right-hardware .value-row {
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+/* Data-mode gate. Live is the default, so a block marked sample-only is never on
+   screen just because a page loaded — the reader has to ask for the design
+   samples. Neither rule can hide a real measurement: only authored sample
+   blocks carry these attributes, and the host read-out carries neither. */
+html:not([data-mode="demo"]) [data-demo-only] {
+  display: none;
+}
+html[data-mode="demo"] [data-live-only] {
+  display: none;
+}
+
+/* The compact stand-in that replaces a hidden sample block. Deliberately quiet:
+   a hairline rule, one line, and the reason — not a decorated empty card. */
+.gated-inline {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 14px 0;
+  margin: 0 0 30px;
+}
+.gated-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.gated-k {
+  font-size: 12px;
+  color: var(--muted);
+}
+.gated-why {
+  font-size: 11px;
+  color: var(--dim);
+  margin: 7px 0 0;
+  max-width: 68ch;
+}
+
+/* A two-column grid that has just lost one column must lose the column, not
+   leave it empty. `.explorer` is `1.73fr / 1fr`; with `.side-side` gated away in
+   live mode the plot stayed in the narrow track and the right half of the page
+   went blank, which reads as a broken layout rather than a deliberate gate. The
+   class is toggled by `web/js/demo-mode.js`, so the layout and the gate cannot
+   disagree about which mode the page is in. */
+html:not([data-mode="demo"]) .region-collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* The overview chart's live stand-in. It keeps the plot's height so the page
+   does not jump when a source is eventually wired in, and it is deliberately
+   plain: an empty frame that says what it is waiting for, not a chart drawn in
+   a lighter shade of fake. */
+.plot svg[data-chart-state="unavailable"] {
+  cursor: default;
+  outline: none;
+}
+
+/* A switch that cannot do anything is visibly inert rather than merely
+   unresponsive on click. Colour alone is not the signal — the reason is in the
+   control's own `title` and in the section's prose. */
+.seg button:disabled,
+.subnav button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+
+
+
+.state-available { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, var(--line)) }
+.state-unavailable { color: var(--caution); border-color: color-mix(in srgb, var(--caution) 40%, var(--line)) }
+.state-disabled { color: var(--dim) }
+.state-unknown { color: var(--rust) }
+
+.module-details { margin: 12px 0 0 }
+
+.module-kv {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 11.5px;
+}
+
+.module-kv:last-child { border-bottom: 0 }
+
+.module-kv dt { color: var(--muted); flex: none }
+
+.module-kv dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.module-kv dd.is-unknown { color: var(--rust) }
+
+.module-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 13px;
+}
+
+.module-links .secondary { font-size: 11px; padding: 7px 11px }
+
+.module-links .requires {
+  font-size: 10px;
+  color: var(--dim);
+  width: 100%;
+  margin-top: 2px;
+}
+
+.module-empty {
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.65;
+  margin: 0;
+}
+
+/* The call log's table is denser than the marketing tables 05 styles: it is a
+   log, read by scanning one column. */
+.calls-table { min-width: 980px }
+.calls-table td, .calls-table th { padding: 10px 11px }
+.calls-table td.num { text-align: right; font-variant-numeric: tabular-nums }
+
+.calls-table tbody tr td:first-child { color: var(--muted) }
+
+.doc-id {
+  font: 10.5px var(--font-mono);
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+
+/* A private/shared toggle is a *view* of a server-side decision, never a
+   client-set flag — so it is rendered as a read-only segmented control, and
+   the "off" side is a real, focusable, disabled control rather than a link. */
+.seg-readonly {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.seg-readonly span {
+  padding: 7px 12px;
+  font-size: 10.5px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.seg-readonly span[aria-current='true'] {
+  background: var(--dark);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+/* A `.seg` inside a module body is a real control with real labels, not the
+   shell's two-word range switch. Its buttons inherit `white-space: nowrap`
+   from the shell, which is right for "24 小时 / 7 天" but made the Admin
+   module's two-button group 389px wide — 100px past a 320px phone, so the
+   whole document scrolled sideways. Let the group wrap instead of pushing the
+   page; the shell's own `.seg` is untouched. */
+.module-body .seg {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+.module-body .seg button {
+  white-space: normal;
+  min-width: 0;
+}
+
+/* ---- My Calls workspace (V6.1) ------------------------------------------
+ * The filter bar was a single overflowing flex row; at 1440px the inputs
+ * squeezed and at 390px it scrolled sideways. It is now three labelled rows
+ * that wrap, with V3-style readable sizes (13px controls, 15px body copy).
+ */
+.calls-filters {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 14px 0 12px;
+  margin-bottom: 24px;
+  display: grid;
+  gap: 12px;
+}
+.calls-filter-row { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 14px }
+.calls-filter-row > .caps { min-width: 52px; padding-bottom: 10px }
+.calls-filters .field { min-width: 150px; flex: 1 1 160px; max-width: 260px }
+.calls-filters .field.calls-limit { flex: 0 1 110px; min-width: 96px }
+.calls-filters .field input, .calls-filters .field select { font-size: 13px; padding: 9px 10px }
+.calls-presets { display: flex; gap: 6px; flex-wrap: wrap; padding-bottom: 2px }
+.calls-presets button.active, .ws-tabs button[aria-selected=true] { background: var(--dark); color: var(--bg); border-color: var(--dark) }
+.calls-filter-actions { display: flex; gap: 8px; margin-left: auto }
+.calls-export-row { align-items: center; justify-content: space-between }
+.calls-export { display: flex; gap: 8px; align-items: center; flex-wrap: wrap }
+.calls-row { cursor: pointer }
+.calls-row:hover td, .calls-row:focus-visible td { background: var(--faint) }
+.calls-row:focus-visible { outline: 2px solid var(--sage); outline-offset: -2px }
+.calls-insights {
+  display: grid;
+  grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+  gap: 28px;
+  margin-top: 22px;
+  padding: 20px 22px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+}
+.calls-insight-col { min-width: 0 }
+.calls-mix { display: flex; height: 12px; border-radius: 3px; overflow: hidden; margin: 10px 0 14px; background: var(--faint) }
+.calls-mix-seg.ok { background: var(--sage) }
+.calls-mix-seg.bad { background: var(--rust) }
+.calls-mix-seg.mute { background: var(--dim) }
+.calls-kv { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 0 }
+.calls-kv div { border-top: 1px solid var(--line); padding-top: 8px }
+.calls-kv dt { font-size: 11px; color: var(--muted) }
+.calls-kv dd { margin: 4px 0 0; font-size: 18px; font-weight: 570; font-variant-numeric: tabular-nums; letter-spacing: -.02em }
+.calls-model-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px }
+.calls-model-table th, .calls-model-table td { padding: 7px 6px; border-bottom: 1px solid var(--line); text-align: left; font-weight: 450 }
+.calls-model-table thead th { font-size: 11px; color: var(--muted) }
+.calls-model-table .num { text-align: right; font-variant-numeric: tabular-nums }
+.calls-model-table td:nth-child(2) { width: 34% }
+.calls-bar { display: block; height: 6px; width: var(--w); min-width: 2px; background: var(--sage); border-radius: 2px }
+.calls-detail strong { font-size: 13px; word-break: break-all }
+.sr-only { position: absolute; left: 0; top: 0; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap }
+
+/* ---- Workspace layer (V6.1): readiness board, lifecycle, SDK tabs, routes -- */
+.ws-panel { padding-bottom: 35px }
+.ws-lede { font-size: 14px; line-height: 1.7; color: var(--muted); max-width: 760px; margin: 0 0 16px }
+.ws-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 760px }
+.ws-table th, .ws-table td { padding: 11px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; font-weight: 450 }
+.ws-table thead th { font-size: 11px; color: var(--muted); letter-spacing: .02em }
+.ws-table tbody th { font-weight: 600 }
+.ws-table td .tiny, .ws-table th .tiny { display: block; margin-top: 3px; font-weight: 400 }
+.ws-panel button:disabled, .calls-filters button:disabled { opacity: .45; cursor: not-allowed; filter: grayscale(.4) }
+.ws-state {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  font: 11px/1 var(--mono); padding: 5px 8px; border-radius: 4px;
+  border: 1px solid var(--line); color: var(--muted); background: var(--panel);
+}
+.ws-state::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--dim) }
+.ws-state[data-state=ready]::before { background: var(--good) }
+.ws-state[data-state=ready] { color: var(--good) }
+.ws-state[data-state=loading]::before { background: var(--blue) }
+.ws-state[data-state=empty]::before { background: var(--sage) }
+.ws-state[data-state=demo] { color: var(--caution); border-color: var(--caution) }
+.ws-state[data-state=demo]::before { background: var(--caution) }
+.ws-state[data-state=denied]::before, .ws-state[data-state=signed_out]::before,
+.ws-state[data-state=error]::before, .ws-state[data-state=stale]::before { background: var(--rust) }
+.ws-state[data-state=denied], .ws-state[data-state=error], .ws-state[data-state=stale] { color: var(--rust) }
+.ws-summary { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0 0 14px; font-size: 13px; color: var(--muted) }
+.ws-summary b { color: var(--ink); font-variant-numeric: tabular-nums }
+.ws-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 12px; counter-reset: ws }
+.ws-step { border: 1px solid var(--line); border-radius: 8px; background: var(--card); padding: 16px 16px 14px; min-width: 0; display: flex; flex-direction: column; gap: 8px }
+.ws-step h3 { margin: 0; font-size: 14px; font-weight: 610; letter-spacing: -.02em }
+.ws-step h3::before { counter-increment: ws; content: counter(ws, decimal-leading-zero) "  "; font: 11px var(--mono); color: var(--dim) }
+.ws-step p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--muted) }
+.ws-step code, .ws-cmd { font: 12px/1.6 var(--mono); background: var(--elev); border-radius: 4px; padding: 6px 8px; display: block; white-space: pre-wrap; word-break: break-all; color: var(--ink) }
+.ws-step .ws-foot { margin-top: auto; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 11px; color: var(--muted) }
+.ws-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px }
+.ws-tabs button { font-size: 12.5px }
+.ws-tabpanel[hidden] { display: none }
+.ws-split { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, .75fr); gap: 22px }
+@media (max-width: 860px) {
+  .calls-insights, .ws-split { grid-template-columns: 1fr }
+  .calls-kv { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+}
+@media (max-width: 520px) {
+  .calls-filters .field { max-width: none; flex-basis: 100% }
+  .calls-filter-actions { margin-left: 0 }
+  .calls-insights { padding: 16px }
+}
+/* The call summary's token figure ("54,489 → 22,223") is wider than half a
+ * 320px phone; let the summary tiles wrap their value instead of the page. */
+@media (max-width: 520px) {
+  #callsHost .stat strong { white-space: normal; overflow-wrap: normal; word-break: keep-all; font-size: 20px }
+}
+
+/* ---- V3 readability refinement (V6.1) -----------------------------------
+ * Atelier V3's lesson, applied without changing the V5 voice: table cells at
+ * ~13px, explanatory copy at ~13.5px with an open line-height, and footnotes
+ * that can be read rather than squinted at. Scoped to tables, notices and
+ * footnotes so headings, KPIs and charts keep their V5 proportions.
+ */
+.view .tablewrap td { font-size: 13px; line-height: 1.55 }
+.view .tablewrap th { font-size: 11px }
+.view .footnote { font-size: 12.5px; line-height: 1.7 }
+.module-empty, .gated-why { font-size: 13.5px; line-height: 1.7 }
+.gated-inline .gated-k { font-size: 13px }
+#view-models .headrow p.tiny { overflow-wrap: anywhere }
+/* On a phone the state column of a workspace table is the point of the row,
+ * so the rows stack as cards instead of scrolling it out of view. */
+@media (max-width: 640px) {
+  .ws-table { min-width: 0 }
+  .ws-table thead { display: none }
+  .ws-table, .ws-table tbody, .ws-table tr, .ws-table th, .ws-table td { display: block; width: auto }
+  .ws-table tr { border-bottom: 1px solid var(--line); padding: 12px 0 }
+  .ws-table th, .ws-table td { border: 0; padding: 3px 0; background: transparent }
+  .ws-table .mono { word-break: break-all }
+}
+
+/* ==== Apple design layer (V6.2) ===========================================
+ * Requested by the product owner on 2026-10-16: the console should look and
+ * feel like a first-party Apple application. This layer *replaces* the V5
+ * visual identity (cream/ink, rust/sage, editorial serif) with Apple's system
+ * vocabulary — SF Pro type, system grays and accents, frosted translucent
+ * chrome, borderless cards with soft depth, pill buttons and segmented
+ * controls — in both appearances. It is CSS only: the V5 source stays frozen
+ * and byte-identical, the markup and every data/honesty rule are unchanged,
+ * and removing this block restores the V5 look exactly.
+ */
+:root {
+  color-scheme: light;
+  --bg: #f5f5f7; --panel: #ffffff; --card: #ffffff; --elev: #f2f2f7; --faint: #f5f5f7;
+  --ink: #1d1d1f; --muted: #6e6e73; --dim: #86868b; --line: #e3e3e8; --dark: #1d1d1f;
+  --sage: #34c759; --rust: #ff9500; --blue: #0071e3; --good: #248a3d; --caution: #c93400;
+  --accent: #0071e3; --accent-hover: #0077ed; --fill: rgba(118, 118, 128, .12); --fill-strong: rgba(118, 118, 128, .2);
+  --glass: rgba(251, 251, 253, .78); --hairline: rgba(0, 0, 0, .08);
+  --shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 10px 30px rgba(0, 0, 0, .07);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, .04), 0 4px 16px rgba(0, 0, 0, .05);
+  --radius-card: 18px; --radius-control: 10px;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif;
+  --font-ui: var(--font); --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+  --font-data: var(--font);
+  --mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; --font-mono: var(--mono);
+  --atlas-a: #0071e3; --atlas-b: #34c759; --atlas-c: #af52de; --atlas-wash: #eef5fe; --atlas-plot: #fbfbfd; --plot-accent: #0071e3;
+}
+:root[data-theme=dark] {
+  color-scheme: dark;
+  --bg: #000000; --panel: #1c1c1e; --card: #1c1c1e; --elev: #2c2c2e; --faint: #242426;
+  --ink: #f5f5f7; --muted: #a1a1a6; --dim: #8e8e93; --line: #38383a; --dark: #f5f5f7;
+  --sage: #30d158; --rust: #ff9f0a; --blue: #2997ff; --good: #30d158; --caution: #ffb340;
+  --accent: #0a84ff; --accent-hover: #409cff; --fill: rgba(118, 118, 128, .24); --fill-strong: rgba(118, 118, 128, .36);
+  --glass: rgba(22, 22, 23, .78); --hairline: rgba(255, 255, 255, .1);
+  --shadow: 0 10px 40px rgba(0, 0, 0, .6); --shadow-card: none;
+  --atlas-a: #0a84ff; --atlas-b: #30d158; --atlas-c: #bf5af2; --atlas-wash: #0d1b2a; --atlas-plot: #141416; --plot-accent: #0a84ff;
+}
+
+body { font-family: var(--font); font-size: 15px; line-height: 1.5; letter-spacing: -.012em; background: var(--bg) }
+:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px }
+
+/* Chrome: one frosted bar, no institutional strip, pill navigation. */
+.institutional-strip { display: none }
+.topbar {
+  background: var(--glass); border-bottom: 1px solid var(--hairline);
+  -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
+}
+.top-inner { min-height: 56px }
+.brand .mark {
+  width: 28px; height: 28px; border: 0; border-radius: 8px; transform: none;
+  background: linear-gradient(145deg, #2997ff 0%, #5e5ce6 55%, #bf5af2 100%);
+  box-shadow: inset 0 0 0 .5px rgba(255, 255, 255, .25);
+}
+.brand .mark::before, .brand .mark::after { display: none }
+.brandname { font-family: var(--font-display); font-size: 17px; font-weight: 600; letter-spacing: -.022em }
+.brandname em { font-style: normal }
+.wordmark-period { display: none }
+.brand small { font-size: 11px; letter-spacing: 0; color: var(--muted); text-transform: none }
+.topnav { gap: 2px }
+.topnav .navitem, .mobile-nav .navitem {
+  font-size: 13px; font-weight: 500; letter-spacing: -.01em; color: var(--ink); opacity: .8;
+  padding: 6px 12px; border-radius: 980px; border-bottom: 0; transition: background .2s, opacity .2s;
+}
+.topnav .navitem:hover, .mobile-nav .navitem:hover { opacity: 1; background: var(--fill) }
+.topnav .navitem.active, .mobile-nav .navitem.active { opacity: 1; background: var(--fill-strong); font-weight: 600 }
+.nav-rail { display: none }
+.mobile-nav { gap: 4px; padding: 6px 0 8px }
+.themebtn, .account { border: 0; background: var(--fill); border-radius: 980px; color: var(--ink) }
+.themebtn { width: 34px; height: 34px; font-size: 15px }
+.account { font-size: 12px; padding: 7px 12px }
+.auth-demo { border-radius: 50%; background: linear-gradient(145deg, #8e8e93, #636366); color: #fff }
+.topstatus { display: none }
+
+/* Type: SF Pro Display headlines, calm secondary text, no italic serif. */
+.hero { align-items: end; border-bottom: 0; padding-bottom: 8px }
+.hero h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 3.4vw, 44px); letter-spacing: -.03em; line-height: 1.08 }
+.title-whisper, .hero .title-whisper {
+  display: block; margin: 8px 0 0; font-family: var(--font-ui); font-style: normal; font-weight: 600;
+  font-size: 17px; letter-spacing: -.01em; color: var(--muted); text-transform: none;
+}
+.hero p { font-size: 17px; line-height: 1.47; color: var(--muted); letter-spacing: -.016em }
+.breadcrumb { font-size: 12px; letter-spacing: 0; color: var(--dim); text-transform: none }
+.breadcrumb b { color: var(--accent); font-weight: 600 }
+.section-h, .group-title h2 { font-family: var(--font-display); font-size: 22px; font-weight: 700; letter-spacing: -.022em }
+.heading-en { font-style: normal; font-size: 13px; font-weight: 500; color: var(--dim); letter-spacing: 0 }
+.smallmeta, .caps, .tiny { letter-spacing: 0 }
+.smallmeta { font-size: 12px; color: var(--dim) }
+.sect-sub, .ws-lede, .module-empty { color: var(--muted) }
+.mono, code, .doc-id { font-family: var(--mono) }
+
+/* Controls: pill buttons, filled fields, segmented controls. */
+.primary, .secondary {
+  border-radius: 980px; font-size: 13px; font-weight: 500; letter-spacing: -.01em;
+  padding: 8px 16px; transition: background .2s, transform .15s, opacity .2s;
+}
+.primary { background: var(--accent); color: #fff; border: 0 }
+.primary:hover:not(:disabled) { background: var(--accent-hover) }
+.secondary { background: var(--fill); color: var(--ink); border: 0 }
+.secondary:hover:not(:disabled) { background: var(--fill-strong) }
+.primary:active:not(:disabled), .secondary:active:not(:disabled) { transform: scale(.97) }
+a.secondary { text-decoration: none }
+.field input, .field select, .selector select, .chatcomposer input, .calls-filters .field input, .calls-filters .field select, [data-sdk-alias], .atlas-view input, .atlas-view select {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-control);
+  color: var(--ink); font-size: 14px; padding: 9px 12px;
+}
+.field input:focus, .field select:focus, .selector select:focus, [data-sdk-alias]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent) }
+.field .tiny, .field label { font-size: 12px; color: var(--muted); font-weight: 500 }
+.seg { background: var(--fill); padding: 2px; border-radius: 9px; gap: 0 }
+.seg button { border-radius: 7px; font-size: 13px; font-weight: 500; color: var(--ink); padding: 6px 14px }
+.seg button.active { background: var(--card); color: var(--ink); box-shadow: 0 3px 8px rgba(0, 0, 0, .12), 0 3px 1px rgba(0, 0, 0, .04) }
+:root[data-theme=dark] .seg button.active { background: #636366; color: #fff; box-shadow: none }
+.subnav { border: 0; gap: 6px }
+.subnav button { border-radius: 980px; font-size: 13px; color: var(--ink) }
+.subnav button.active, .calls-presets button.active, .ws-tabs button[aria-selected=true] { background: var(--accent); color: #fff; border-color: var(--accent) }
+.calls-filters { border: 0; background: var(--card); border-radius: var(--radius-card); padding: 18px 20px; box-shadow: var(--shadow-card) }
+.calls-filter-row > .caps { font-size: 13px; font-weight: 600; color: var(--ink) }
+
+/* Surfaces: borderless cards with soft depth; black-on-black in dark. */
+.flatpanel, .surface, .module-card, .infobox, .chatbox, .calls-insights, .ws-step, .gated-inline, .stats, .service-grid, .tablewrap, .atlas-analysis-panel {
+  background: var(--card); border: 0; border-radius: var(--radius-card); box-shadow: var(--shadow-card);
+}
+:root[data-theme=dark] .flatpanel, :root[data-theme=dark] .infobox, :root[data-theme=dark] .chatbox { box-shadow: none }
+.flatpanel, .surface, .infobox { padding: 22px 24px }
+.gated-inline { padding: 16px 20px; margin: 12px 0 }
+.flatpanel h3, .ws-step h3 { font-family: var(--font-display); font-size: 17px; font-weight: 600; letter-spacing: -.02em }
+.stats { overflow: hidden; margin-bottom: 28px }
+.stat { border-right-color: var(--line) }
+.stat strong, .number { font-family: var(--font-display); font-weight: 600; letter-spacing: -.03em }
+.stat span, .stat small { letter-spacing: 0 }
+.service-grid { overflow: hidden; padding: 0 }
+.service { padding: 22px; border-right-color: var(--line) }
+.service-icon { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; font-size: 18px; font-weight: 600; color: #fff; background: linear-gradient(145deg, #2997ff, #5e5ce6) }
+.service[data-platform=gateway] .service-icon { background: linear-gradient(145deg, #30d158, #0a9e5d) }
+.service[data-platform=metrics] .service-icon { background: linear-gradient(145deg, #ff9f0a, #ff6a00) }
+.service[data-platform=evalscope] .service-icon { background: linear-gradient(145deg, #bf5af2, #8944ab) }
+.service[data-platform=cloudcli] .service-icon, .service[data-platform=fleet] .service-icon { background: linear-gradient(145deg, #8e8e93, #636366) }
+.monogram-tail { display: none }
+.tablewrap { border-top: 0; padding: 4px 6px }
+.view td, .view th { background: transparent }
+.view th { font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--muted) }
+.view td { border-bottom: 1px solid var(--line) }
+.view tbody tr:last-child td, .view tbody tr:last-child th { border-bottom: 0 }
+.ws-table th, .ws-table td { border-bottom-color: var(--line) }
+.ws-step { box-shadow: var(--shadow-card) }
+.ws-step code, .ws-cmd, .codearea { background: var(--elev); color: var(--ink); border-radius: 12px; font-family: var(--mono) }
+
+/* Status language: tinted capsules instead of hairline boxes. */
+.badge { border-radius: 980px; font-size: 12px; font-weight: 500; letter-spacing: 0; padding: 4px 10px; background: var(--fill); color: var(--muted) }
+.badge.warn { background: color-mix(in srgb, var(--rust) 16%, transparent); color: var(--caution) }
+.badge.good { background: color-mix(in srgb, var(--sage) 18%, transparent); color: var(--good) }
+.ws-state { border: 0; border-radius: 980px; font-family: var(--font); font-size: 12px; font-weight: 500; padding: 4px 10px; background: var(--fill) }
+.ws-state[data-state=ready] { background: color-mix(in srgb, var(--sage) 18%, transparent); color: var(--good) }
+.ws-state[data-state=demo] { background: color-mix(in srgb, var(--rust) 16%, transparent); color: var(--caution) }
+.ws-state[data-state=denied], .ws-state[data-state=error], .ws-state[data-state=stale] { background: color-mix(in srgb, #ff3b30 14%, transparent); color: #d70015 }
+:root[data-theme=dark] .ws-state[data-state=denied], :root[data-theme=dark] .ws-state[data-state=error], :root[data-theme=dark] .ws-state[data-state=stale] { color: #ff6961 }
+.ws-state[data-state=loading] { color: var(--accent) }
+.demo-strip {
+  border-left: 0; border-radius: 14px; font-size: 13px; line-height: 1.5; color: var(--ink);
+  background: color-mix(in srgb, var(--rust) 12%, var(--card)); padding: 12px 16px;
+}
+.demo-strip .mono { font-family: var(--font); font-size: 11px; font-weight: 600; color: var(--caution) }
+.guard { border-left: 0; background: var(--elev); border-radius: 12px; padding: 12px 14px; font-size: 13px; color: var(--muted) }
+.guard.warn { background: color-mix(in srgb, var(--rust) 12%, var(--card)) }
+.calls-mix { height: 8px; border-radius: 980px }
+.calls-bar { border-radius: 980px; background: var(--accent) }
+.calls-mix-seg.ok { background: var(--sage) }
+.calls-mix-seg.bad { background: #ff3b30 }
+.calls-kv div { border-top-color: var(--line) }
+.calls-kv dd { font-family: var(--font-display); font-weight: 600 }
+
+/* Sheets: dialogs read as macOS sheets. */
+dialog { border: 0; border-radius: 20px; background: var(--card); box-shadow: 0 30px 80px rgba(0, 0, 0, .25) }
+dialog::backdrop { background: rgba(0, 0, 0, .28); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px) }
+.modal-body { font-size: 14px; line-height: 1.6 }
+
+.footbar { font-family: var(--font); font-size: 12px; color: var(--dim); letter-spacing: 0 }
+@media (max-width: 520px) {
+  .hero h1 { font-size: 30px }
+  .title-whisper, .hero .title-whisper { font-size: 15px }
+  .hero p { font-size: 15px }
+  .flatpanel, .surface, .infobox, .calls-filters { padding: 16px }
+}
+.brand small { display: none }
+.account-arrow { color: var(--dim) }
+.module-panel .statusrows:not(.flatpanel .statusrows, .surface .statusrows) {
+  background: var(--card); border-radius: var(--radius-card); box-shadow: var(--shadow-card); padding: 18px 22px 6px; gap: 0 28px;
+}
+.statusitem { border-bottom-color: var(--line) }
+.ws-panel .group-title { flex-wrap: wrap }
+@media (max-width: 520px) {
+  .seg button { padding: 6px 9px; font-size: 12px }
+  .ws-panel .group-title .actions { margin-left: 0 }
+}
+.atlas-table-controls > div { display: flex; flex-wrap: wrap; gap: 8px; align-items: center }
+#view-models .headrow { flex-wrap: wrap; row-gap: 10px }
+#view-models .headrow h2, #view-models .headrow .section-h { white-space: nowrap }
+@media (max-width: 640px) {
+  .tablewrap .ws-table tr { padding: 14px 12px }
+}
+</style>
+</head>
+<body>
+<a class="skip-link" href="#app-main">跳过导航，进入内容</a>
+<div class="institutional-strip"><div class="wrap strip-inner"><span class="strip-left">DELL LLM LAB <b> / </b> RESEARCH COMPUTE</span><span class="strip-center">PRIVATE INFRASTRUCTURE — DESIGNED FOR READABILITY</span><span class="strip-right">DESIGN STUDY <i>№ 06 / 2026</i></span></div></div>
+<header class="topbar"><div class="wrap top-inner">
+  <a href="#overview" class="brand" aria-label="LLM Lab 首页"><span class="mark" aria-hidden="true"></span><span><span class="brandname">Dell <em>LLM</em> Lab<span class="wordmark-period">.</span></span><small>RESEARCH SYSTEMS <span class="wordmark-rule">/</span> EST. 2026</small></span></a>
+  <nav class="topnav" aria-label="主导航"><button class="navitem active" data-page="overview">概览</button><button class="navitem" data-page="models">模型与对话</button><button class="navitem" data-page="api">API 管理</button><button class="navitem" data-page="calls">我的调用</button><button class="navitem" data-page="observability">监控与日志</button><button class="navitem" data-page="atlas">数据图谱</button><button class="navitem" data-page="evaluation">评测中心</button><button class="navitem" data-page="admin">管理</button></nav>
+  <div class="topright"><span class="badge topstatus"><span class="dot rust"></span>DESIGN PREVIEW</span><button class="themebtn" id="themeButton" aria-label="切换深浅主题" title="切换明暗主题">☾</button><button class="account" id="accountButton" aria-haspopup="dialog" data-account-state="preview"><span class="auth-demo" aria-hidden="true">L</span><span class="account-label" data-account-label>预览访问 · 未建立 Linux 会话</span><span class="account-arrow"> …</span></button></div>
+</div><div class="wrap mobile-nav" aria-label="手机导航"><button class="navitem active" data-page="overview">概览</button><button class="navitem" data-page="models">模型</button><button class="navitem" data-page="api">API</button><button class="navitem" data-page="calls">调用</button><button class="navitem" data-page="observability">监控</button><button class="navitem" data-page="atlas">图谱</button><button class="navitem" data-page="evaluation">评测</button><button class="navitem" data-page="admin">管理</button></div></header>
+<main class="wrap content" id="app-main">
+  <div class="demo-strip" role="note" data-demo-strip><span><strong data-strip-title>ATELIER 06 / 视觉与动效原型</strong> · <span data-demo-state>主机遥测正在连接；个人调用 / 评测数据需 Linux PAM 与 Gateway 授权后可见，未验证处显示 UNKNOWN。</span></span><span class="mono" data-strip-right>HOST TELEMETRY · USER DATA GATED</span></div>
+  <section class="view active" id="view-overview" aria-labelledby="overview-title">
+   <div class="editorial-index"><span><b>01</b> / OBSERVATORY</span><span class="index-rule" aria-hidden="true"></span><span>THE PRIVATE COMPUTE EDITION</span></div>
+   <div class="breadcrumb"><span>LLM LAB</span><span>/</span><b>OVERVIEW</b></div>
+   <div class="hero"><div><h1 id="overview-title">实验室概览 <em class="title-whisper">OBSERVATORY</em></h1><p>统一了解计算资源、模型状态、API 调用与评测。完整可观测性，始于清晰的数据血缘。</p></div><div class="hero-right"><div class="seg" role="group" aria-label="演示时间范围"><button class="active" data-range="24h">24 小时</button><button data-range="7d">7 天</button><button data-range="30d">30 天</button></div><span class="stamp">UI SPECIMEN · UPDATED OCT 2026</span></div></div>
+   <div class="lead-grid"><div><div class="lead-label"><span class="label-prefix">HARDWARE / 01</span> 本机 GPU 总显存</div><div class="hardware"><span class="big number">48</span><span class="unit">GB <small>GDDR6</small></span><span class="note">RTX A6000 · 标称规格，非可用 VRAM</span></div><div class="lead-meta"><span><strong>1</strong>计算节点</span><span><strong>3</strong>受管入口</span><span>单机资源调度 · 生产模型保护</span></div></div><div class="right-hardware"><div class="headrow"><h2>服务基础设施 <span class="serif-note">INFRASTRUCTURE</span></h2><span class="badge">演示状态</span></div><div class="value-row"><span class="tiny">模型引擎</span><span class="status"><span class="dot"></span><b>Strata · 文本服务</b></span></div><div class="value-row"><span class="tiny">API Gateway</span><span class="status"><span class="dot"></span><b>统一转发入口</b></span></div><div class="value-row"><span class="tiny">GPU 遥测</span><span class="mutedflag" style="font-size:12px">数据来源待验证 · UNKNOWN</span></div></div></div>
+   <div class="headrow" style="margin:31px 0 10px"><div><h2 class="section-h">调用与用量 <em class="heading-en">/ GATEWAY BFF</em></h2><div class="sect-sub">按 Linux 主体与项目授权从 Gateway 读取；未授权时不显示任何数字</div></div><span class="badge warn" data-source-badge="gated"><span class="dot rust"></span>待授权 · NOT CONNECTED</span></div>
+<div class="stats" data-demo-only><div class="stat"><span>请求总量</span><strong class="number" data-demo-value="1,248">—</strong><small data-stat-note>待 Gateway BFF</small></div><div class="stat"><span>成功率</span><strong class="number" data-demo-value="99.4%">—</strong><small data-stat-note>待 Gateway BFF</small></div><div class="stat"><span>响应 p95</span><strong class="number" data-demo-value="1.42 s">—</strong><small data-stat-note>待 Gateway BFF</small></div><div class="stat"><span>输出 Tokens</span><strong class="number" data-demo-value="482k">—</strong><small data-stat-note>待 Gateway BFF</small></div></div>
+<div class="gated-inline" data-live-only data-gated><div class="gated-row"><span class="gated-k">请求总量 · 成功率 · p95 · Tokens</span><span class="badge warn">待授权</span></div><p class="gated-why">需要 Linux PAM 会话 + Gateway usage BFF 的服务端授权；本预览不推任何按用户聚合的调用数。此前的演示数值不再默认展示。</p></div>
+   <div class="explorer"><div class="plot-side"><div class="headrow"><div><h2 class="section-h">调用量与性能 <em class="heading-en">/ TELEMETRY</em></h2><div class="sect-sub">统一窗口 · 浏览器仅接收授权范围内的聚合数据</div></div><div class="seg" id="chartToggles" role="group" aria-label="切换图表指标"><button class="active" data-chart="calls">请求量</button><button data-chart="latency">p95 延迟</button><button data-chart="tokens">Tokens</button></div></div><div class="plot"><svg id="timelineChart" viewBox="0 0 730 328" role="img" aria-label="演示用的近 24 小时调用与性能折线图"></svg></div><div class="legendline"><span><span class="dot rust"></span> Gateway 计量</span><span><span class="dot"></span> 成功请求</span><button type="button" class="atlas-inline-link" data-go="atlas">探索调用结构 ↗</button><span class="mono">DEMO · 24 POINTS</span></div></div><div class="side-side"><div class="headrow"><span class="caps">MODEL REGISTRY / ACTIVE ROUTE</span><span class="badge warn"><span class="dot rust"></span>示意 · 非真实加载</span></div><div class="model-name">Qwen3.8 Flash Next</div><div class="tiny mono">qwen3.8-flash-next-iq2_xs</div><div class="tags" style="margin-top:13px"><span class="tag">Strata engine</span><span class="tag">OpenAI chat</span><span class="tag">Image capability · 待验收</span></div><dl class="model-detail"><div><dt>上下文长度</dt><dd class="number">32,768 <span class="tiny">tokens</span></dd></div><div><dt>量化格式</dt><dd>IQ2_XS</dd></div><div><dt>推理队列</dt><dd>1 <span class="tiny">running</span></dd></div><div><dt>显存可用量</dt><dd>— <span class="tiny">unknown</span></dd></div></dl><button class="secondary" data-go="models">进入模型工作台 ↗</button><div class="source-foot">数据血缘：Gateway 负责实际请求统计，Strata 报告引擎健康，GPU/NVML 不可靠时不得推断真实可用显存。<b>当前为设计演示。</b></div></div></div>
+   <div class="group-title" style="margin-top:34px"><h2>平台与数据来源</h2><span class="smallmeta">PLATFORM SURFACES · 已运行 ≠ 已接线</span></div>
+<p class="module-empty" data-platform-note>本机平台进程是否运行，与 Portal 是否已接入其数据是两件事。下列按钮只做站内导航；未接线的一律显示 UNKNOWN，不渲染任何真实数字，也不提供引擎端口直连。</p>
+<div class="service-grid">
+  <article class="service" data-platform="strata"><div class="service-icon">S</div><h3>Strata</h3><p>模型执行引擎。对话与调用经受管 Gateway，不开放引擎端口直连。</p><div class="service-foot"><span class="badge warn">未接线</span><span>需同源 BFF 适配器</span></div><button type="button" class="secondary" data-go="models">进入模型工作台</button></article>
+  <article class="service" data-platform="gateway"><div class="service-icon">G<span class="monogram-tail">.</span></div><h3>Gateway</h3><p>统一模型路由、请求计量、Key 与限额的可信服务端来源。</p><div class="service-foot"><span class="badge warn">未接线</span><span>需同源 usage BFF</span></div><button type="button" class="secondary" data-go="api">进入 API 管理</button></article>
+  <article class="service" data-platform="metrics"><div class="service-icon">P<span class="monogram-tail">.</span></div><h3>Prometheus / Grafana</h3><p>指标采集与深度图表。Grafana 原生界面经可信反代与统一权限校验进入，不对外暴露 3000 端口。</p><div class="service-foot"><span class="badge warn">未接线</span><span>需反代与 ACL</span></div><button type="button" class="secondary" data-go="observability">进入监控与日志</button></article>
+  <article class="service" data-platform="evalscope"><div class="service-icon">E</div><h3>EvalScope</h3><p>评测数据、运行记录与报告汇总。原生工具端口不直接暴露浏览器。</p><div class="service-foot"><span class="badge warn">未接线</span><span>需报告适配器</span></div><button type="button" class="secondary" data-go="evaluation">进入评测中心</button></article>
+</div>
+<div class="group-title" style="margin-top:26px"><h2>控制面入口</h2><span class="smallmeta">CONTROL PLANE · 独立授权</span></div>
+<p class="module-empty">CloudCLI / Fleet 属独立控制面：须以固定的同 Tailnet HTTPS(443) 地址接入，并带明确的服务端授权范围。Portal 默认不代理、不模拟其登录，也不在此登记任何地址或凭据；接线前一律「待接线」。</p>
+<div class="service-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+  <article class="service" data-platform="cloudcli"><div class="service-icon">C</div><h3>CloudCLI</h3><p>独立控制面。不通过 Portal 模拟登录，也不暴露其特权后台权限。</p><div class="service-foot"><span class="badge">待接线</span><span>需固定 Tailnet HTTPS:443 + ACL</span></div><button type="button" class="secondary unavailable" disabled title="控制面未接线：需服务端 allowlist 与授权范围">待接线</button></article>
+  <article class="service" data-platform="fleet"><div class="service-icon">F</div><h3>Fleet</h3><p>独立控制面。跨设备管理权限不由此预览授予。</p><div class="service-foot"><span class="badge">待接线</span><span>需固定 Tailnet HTTPS:443 + ACL</span></div><button type="button" class="secondary unavailable" disabled title="控制面未接线：需服务端 allowlist 与授权范围">待接线</button></article>
+</div>
+   <div class="group-title" style="margin-top:34px"><h2>模型服务一览</h2><span class="smallmeta">REGISTERED IS NOT LOADED</span></div>
+   <div class="tablewrap"><table><thead><tr><th>模型 / 引擎</th><th>协议</th><th>登记</th><th>运行状态</th><th>授权范围</th><th>入口</th></tr></thead><tbody><tr><td><span class="rowtitle">Qwen3.8 Flash Next</span><span class="rowmuted mono">Strata · qwen3.8-flash-next-iq2_xs</span></td><td>OpenAI Chat</td><td><span class="badge">已登记</span></td><td><span class="badge good"><span class="dot"></span>示意可用</span></td><td>受管项目</td><td><button class="secondary" data-go="models">查看 ↗</button></td></tr><tr><td><span class="rowtitle">vLLM</span><span class="rowmuted">候选推理引擎</span></td><td>兼容层待验</td><td><span class="badge">计划中</span></td><td><span class="badge">未安装</span></td><td>未授权</td><td>—</td></tr><tr><td><span class="rowtitle">SGLang</span><span class="rowmuted">候选推理引擎</span></td><td>兼容层待验</td><td><span class="badge">计划中</span></td><td><span class="badge">未安装</span></td><td>未授权</td><td>—</td></tr></tbody></table></div>
+  </section>
+  <section class="view" id="view-models" aria-labelledby="models-title"><div class="breadcrumb">LLM LAB / <b>MODELS & CHAT</b></div><div class="hero"><div><h1 id="models-title">模型与对话 <em class="title-whisper">Models & Dialogue.</em></h1><p>一个聊天界面访问已授权模型；引擎部署状态、模态能力和调用协议保持清晰分离。</p></div><div class="hero-right"><span class="badge">受管模型选择 · DEMO</span></div></div><div class="columns"><div><div class="headrow" style="margin-bottom:15px"><h2 class="section-h">对话工作台</h2><div class="selector"><span class="tiny">模型</span><select aria-label="演示模型"><option>Qwen3.8 Flash Next / Strata</option><option disabled>vLLM · 未安装</option><option disabled>SGLang · 未安装</option></select></div></div><div class="chatbox"><div class="chatlog" id="chatLog"><div class="chatbubble bot">欢迎进入 LLM Lab。这是设计原型，未连接真实推理服务。正式系统将通过 Gateway 代理文本、图片和流式响应。</div><div class="chatbubble me">帮我梳理本周推理延迟和异常调用。</div><div class="chatbubble bot">在正式系统中，我将从您有权限访问的 Gateway 调用元数据中总结，不读取其他用户的数据，也不会默认保存请求原文。</div></div><form class="chatcomposer" id="chatForm"><input id="chatInput" aria-label="输入演示消息" placeholder="输入消息以预览界面状态（不会发送模型）"><button class="primary" type="submit">发送 ↗</button></form></div></div><div class="flatpanel"><h3>当前模型能力</h3><div class="statusrows"><div class="statusitem"><div class="tiny">文本</div><strong>支持</strong></div><div class="statusitem"><div class="tiny">图片理解</div><strong>待在线 E2E 验收</strong></div><div class="statusitem"><div class="tiny">OpenAI Chat</div><strong>通过 Gateway</strong></div><div class="statusitem"><div class="tiny">其他协议</div><strong>需 Adapter</strong></div></div><div class="guard warn">图片能力须以线上图片→文本推理通过为准，不能仅凭 encoder 离线测试或布尔健康值宣告完整可用。</div><button class="secondary" data-go="api">查看 API 接入方式 ↗</button></div></div><section class="page-block module-panel" data-module="engines" aria-labelledby="module-engines-title">
+  <div class="editorial-index"><b>06</b><span>ENGINES &amp; DEPLOYMENTS</span><span class="index-rule"></span><span class="mono" data-module-state="engines">等待会话</span></div>
+  <div class="group-title">
+    <h2 class="section-h" id="module-engines-title">引擎与部署</h2>
+    <span class="smallmeta">FAIL-CLOSED · 无来源即 UNKNOWN</span>
+  </div>
+  <div class="module-body" id="module-engines-body">
+    <p class="module-empty">需要已认证的会话与服务端模块授权。授权确认之前，这里不显示引擎版本、显存或部署状态——尤其不会显示一个看起来正常的 GPU 数字。</p>
+  </div>
+</section>
+</section>
+  <section class="view" id="view-api" aria-labelledby="api-title"><div class="breadcrumb">LLM LAB / <b>API CONTROL</b></div><div class="hero"><div><h1 id="api-title">API 管理 <em class="title-whisper">API Control.</em></h1><p>个人与团队的 Endpoint、凭据、用量和限额由同一服务端权限规则管理。</p></div><div class="hero-right"><span class="badge">只读演示 · 真实签发未启用</span></div></div><div class="stats"><div class="stat"><span>我的 Endpoints</span><strong class="number" data-demo-value="02">—</strong><small data-stat-note>待 Gateway BFF</small></div><div class="stat"><span>个人 Key</span><strong class="number" data-demo-value="02">—</strong><small data-stat-note>待授权签发</small></div><div class="stat"><span>本月调用</span><strong class="number" data-demo-value="8,412">—</strong><small data-stat-note>待 Gateway BFF</small></div><div class="stat"><span>剩余预算</span><strong class="number">—</strong><small>未配置</small></div></div><div class="group-title"><h2>Endpoints</h2><button class="secondary" id="newEndpoint">申请新 Endpoint ↗</button></div><div class="tablewrap"><table><thead><tr><th>名称</th><th>调用协议</th><th>发布范围</th><th>模型</th><th>状态</th></tr></thead><tbody><tr><td><span class="rowtitle">my-chat</span><span class="rowmuted mono">/v1/chat/completions</span></td><td>OpenAI Chat</td><td>Private</td><td>Qwen3.8</td><td><span class="badge good">演示就绪</span></td></tr><tr><td><span class="rowtitle">team-vision</span><span class="rowmuted mono">/v1/chat/completions</span></td><td>Images / Chat</td><td>Team · 需授权</td><td>Qwen3.8</td><td><span class="badge warn">E2E 待验</span></td></tr></tbody></table></div><div class="columns api-keys"><section><div class="group-title"><h2>个人 API Keys</h2><span class="smallmeta">SECRET IS NEVER LISTED</span></div><div class="tablewrap"><table style="min-width:450px"><thead><tr><th>名称</th><th>前缀</th><th>Scope</th><th>状态</th></tr></thead><tbody><tr><td><span class="rowtitle">workstation</span></td><td><span class="key">llk_••••8m</span></td><td>models.read</td><td><span class="badge good">演示有效</span></td></tr><tr><td><span class="rowtitle">team-ci</span></td><td><span class="key">llk_••••2a</span></td><td>usage.read</td><td><span class="badge">演示密钥</span></td></tr></tbody></table></div><div class="guard">正式系统仅在签发时展示一次明文；服务端保存摘要，按项目和 Endpoint 审核 scope、到期与撤销。</div></section><aside class="flatpanel"><h3>SDK 接入示意</h3><p>所有外部应用通过 Gateway 的受管 API，绝不直接拿到 Strata 上游主密钥。</p><div class="codearea" id="curlExample">curl https://lab.example/v1/chat/completions \
+  -H 'Authorization: Bearer &lt;YOUR_SCOPED_KEY&gt;' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"qwen3.8-flash-next-iq2_xs","messages":[]}'</div><div class="actions"><button class="secondary" id="copyCurl">复制示例</button><span class="tiny">示例地址与 Key 占位符，不可直接调用</span></div></aside></div><section class="page-block module-panel" data-module="playground" aria-labelledby="module-playground-title">
+  <div class="editorial-index"><b>07</b><span>PLAYGROUND &amp; ENDPOINT VISIBILITY</span><span class="index-rule"></span><span class="mono" data-module-state="playground">等待会话</span></div>
+  <div class="group-title">
+    <h2 class="section-h" id="module-playground-title">Playground 与 Endpoint 可见性</h2>
+    <span class="smallmeta">SYNTHETIC DISABLED UNTIL BACKED BY AUTH</span>
+  </div>
+  <div class="module-body" id="module-playground-body">
+    <p class="module-empty">需要已认证的会话与服务端模块授权。Endpoint 的可见性由服务端按 principal × 项目判定，默认 <b>Private</b>；本页面只呈现判定结果，不接受客户端把它改成 Shared。</p>
+  </div>
+</section>
+</section>
+  <section class="view" id="view-observability" aria-labelledby="obs-title"><div class="breadcrumb">LLM LAB / <b>OBSERVABILITY</b></div><div class="hero"><div><h1 id="obs-title">监控与日志 <em class="title-whisper">Observability.</em></h1><p>在 Portal 查看关键指标和调用溯源；完整 Grafana 原生大盘用于深度排障。</p></div><div class="hero-right"><span class="badge">来源与新鲜度优先</span></div></div><div class="service-grid" style="grid-template-columns:repeat(3,minmax(0,1fr))"><article class="service"><div class="service-icon">P<span class="monogram-tail">.</span></div><h3>Prometheus</h3><p>采集计算资源、服务健康、吞吐量与时间序列。</p><div class="service-foot">SERVER QUERIES <span>受控</span></div></article><article class="service"><div class="service-icon">G<span class="monogram-tail">.</span></div><h3>Grafana</h3><p>原生完整交互图表，经可信反代与统一权限校验进入。</p><div class="service-foot">DEEP VIEW <span>待接线</span></div></article><article class="service"><div class="service-icon">L<span class="monogram-tail">.</span></div><h3>Gateway 日志</h3><p>按 request metadata、key_id、项目查询，不默认记录消息正文。</p><div class="service-foot">ACCESS METADATA <span>按权限</span></div></article></div><div class="group-title" style="margin-top:36px"><h2>观测指标</h2><span class="smallmeta">FAIL-CLOSED · UNKNOWN ≠ ZERO</span></div><div class="tablewrap"><table><thead><tr><th>指标</th><th>当前显示</th><th>权威来源</th><th>数据口径</th></tr></thead><tbody><tr><td class="rowtitle">p95 响应延迟</td><td>—</td><td>Gateway usage</td><td>成功请求且具有效样本</td></tr><tr><td class="rowtitle">GPU 可用显存</td><td>UNKNOWN</td><td>NVML / Strata</td><td>仅可信观测数据，明确来源</td></tr><tr><td class="rowtitle">API 请求数 / 429</td><td>—</td><td>Gateway usage</td><td>key_id → principal/project</td></tr><tr><td class="rowtitle">TTFT</td><td>—</td><td>Gateway streaming</td><td>仅流式且有效样本</td></tr></tbody></table></div><section class="page-block module-panel" data-module="observability" aria-labelledby="module-obs-title">
+  <div class="editorial-index"><b>08</b><span>READ-ONLY DATA SOURCES</span><span class="index-rule"></span><span class="mono" data-module-state="observability">等待会话</span></div>
+  <div class="group-title">
+    <h2 class="section-h" id="module-obs-title">数据源与只读入口</h2>
+    <span class="smallmeta">UNKNOWN ≠ ZERO · 只读</span>
+  </div>
+  <div class="module-body" id="module-observability-body">
+    <p class="module-empty">需要已认证的会话与服务端模块授权。没有配置可信数据源的指标一律显示 UNKNOWN，而不是 0；Grafana / Prometheus 的入口只在服务端确认已接线时才出现。</p>
+  </div>
+</section>
+</section>
+  <section class="view atlas-view" id="view-atlas" aria-labelledby="atlas-title">
+  <div class="breadcrumb">LLM LAB / <b>TRAFFIC ATLAS</b></div>
+  <div class="hero">
+    <div>
+      <h1 id="atlas-title">调用结构图谱 <em class="title-whisper">Traffic Atlas.</em></h1>
+      <p class="atlas-hero-sub">从调用类型到性能离散度：用联动结构图、排序、分布与热力矩阵理解一次工作负载，而不是只看一个平均值。</p>
+    </div>
+    <div class="hero-right"><span class="badge warn">九类合成工作负载 · 仅用于交互展示</span></div>
+  </div>
+  <div class="atlas-meta">
+    <span class="atlas-overline">DATA STUDY / 09 WORKLOADS · ALL VALUES SYNTHETIC</span>
+    <div class="atlas-toggle" aria-label="演示统计窗口">
+      <button type="button" data-atlas-range="24h" aria-pressed="true">24 小时</button><button type="button" data-atlas-range="7d" aria-pressed="false">7 天</button><button type="button" data-atlas-range="30d" aria-pressed="false">30 天</button>
+    </div>
+  </div>
+  <div class="atlas-metrics" aria-label="演示数据概览">
+    <div class="atlas-metric"><div class="label">调用请求</div><strong id="atlasCalls" data-demo-value="1,248">—</strong><small id="atlasCallsNote">24h · 合成窗口</small></div>
+    <div class="atlas-metric"><div class="label">工作负载</div><strong id="atlasActive">09</strong><small>3 个业务方向</small></div>
+    <div class="atlas-metric"><div class="label">输出 Tokens</div><strong id="atlasTokens" data-demo-value="482k">—</strong><small>合成记录 · 仅示意</small></div>
+    <div class="atlas-metric"><div class="label">p95 延迟</div><strong id="atlasP95">—</strong><small>总体 p95 不由子群分位数求平均</small></div>
+  </div>
+  <div class="atlas-controlbar">
+    <div class="atlas-filters" role="group" aria-label="按工作负载类型筛选">
+      <button type="button" data-atlas-group="all" aria-pressed="true">全部负载</button>
+      <button type="button" data-atlas-group="conversation" aria-pressed="false"><i class="atlas-dot"></i>交互与内容</button>
+      <button type="button" data-atlas-group="developer" aria-pressed="false"><i class="atlas-dot b"></i>开发自动化</button>
+      <button type="button" data-atlas-group="evaluation" aria-pressed="false"><i class="atlas-dot c"></i>实验评测</button>
+    </div>
+    <span class="atlas-overline">HOVER / CLICK · 1–3 切换图 · ESC 取消 · / 搜索</span>
+  </div>
+  <div class="atlas-stage-grid">
+    <div class="atlas-primary">
+      <div class="atlas-sectionhead"><div><h2>调用结构探索</h2><p>业务方向 / 工作负载两级分组 · 三种对应同一批样本的数据视图</p></div>
+        <div class="atlas-toggle" role="group" aria-label="切换调用结构图">
+          <button type="button" data-atlas-view="sunburst" aria-pressed="true">旭日图</button>
+          <button type="button" data-atlas-view="treemap" aria-pressed="false">矩形图</button>
+          <button type="button" data-atlas-view="dots" aria-pressed="false">点阵图</button>
+        </div>
+      </div>
+      <div class="atlas-breadcrumb" id="atlasBreadcrumb"><button type="button" id="atlasReset">全部工作负载</button> / 09 类</div>
+      <div class="atlas-chart-frame" id="atlasChartFrame">
+        <svg id="atlasMainChart" viewBox="0 0 760 560" role="img" aria-label="合成调用量层级旭日图，可点击工作负载筛选并查看详情"></svg>
+        <canvas id="atlasDotCanvas" aria-label="调用点阵，演示数据每个点代表一次调用" role="img" hidden></canvas>
+      </div>
+      <div class="atlas-rail"><span id="atlasScope">待授权数据源</span><span id="atlasBasis">无授权分母</span></div>
+      <div class="atlas-mini-strip" id="atlasMiniStrip" aria-hidden="true"></div>
+    </div>
+    <aside class="atlas-secondary" aria-label="当前筛选及工作负载详情">
+      <div class="atlas-sectionhead"><div><h2>调用组成</h2><p>三个方向占比 · 与结构图联动</p></div></div>
+      <div class="atlas-donut-area"><svg viewBox="0 0 200 200" id="atlasDonut" role="img" aria-label="三大方向合成请求量占比环形图"></svg><div class="atlas-legend" id="atlasLegend"></div></div>
+      <div class="atlas-focus" aria-live="polite" id="atlasDetail"></div>
+    </aside>
+  </div>
+  <section class="atlas-subsection" aria-labelledby="atlas-rank-title">
+    <div class="atlas-subsection-title"><h2 id="atlas-rank-title">工作负载排名</h2><small>02 / DISCOVER · 搜索、排序、联动高亮</small></div>
+    <div class="atlas-table-controls"><label class="atlas-search">⌕ <input type="search" id="atlasSearch" placeholder="搜索负载或业务方向" aria-label="搜索工作负载"></label>
+      <div style="display:flex;gap:8px;align-items:center"><label for="atlasSort" class="tiny">排序依据</label><select id="atlasSort"><option value="calls">调用量</option><option value="p95">p95 延迟</option><option value="tokens">输出 Tokens</option></select>
+        <button type="button" class="secondary" id="atlasExport" style="font-size:12px">CSV ↗</button><button type="button" class="secondary" id="atlasExportJSON" style="font-size:12px">JSON ↗</button></div></div>
+    <div class="atlas-rank" id="atlasRanking" role="region" aria-label="可交互工作负载排序表">
+      <div class="atlas-rankhead"><span>#</span><span>工作负载</span><span>相对规模</span><span style="text-align:right">数值</span><span style="text-align:right">p95</span><span>对比</span></div>
+      <div id="atlasRankRows"></div>
+    </div>
+  </section>
+  <section class="atlas-subsection" aria-labelledby="atlas-analysis-title">
+    <div class="atlas-subsection-title"><h2 id="atlas-analysis-title">分布与关联分析</h2><small>03 / ANALYSIS · 跟随当前筛选自动重算</small></div>
+    <div class="atlas-analysis-grid">
+      <div class="atlas-analysis-panel"><h3>请求集中度 / Pareto</h3><p>累计占比以及达到 80% 调用量所需的工作负载数</p><svg id="atlasPareto" role="img" viewBox="0 0 610 300" aria-label="工作负载调用量帕累托曲线"></svg><div class="atlas-overline" id="atlasParetoNote">—</div></div>
+      <div class="atlas-analysis-panel"><h3>调用规模 × 延迟</h3><p>每个点为一类工作负载；横轴为调用量（对数），纵轴为 p95</p><svg id="atlasScatter" role="img" viewBox="0 0 610 300" aria-label="调用量与 p95 延迟散点图"></svg><div class="atlas-overline">分位数不能相加；点的大小只编码输出 Tokens</div></div>
+    </div>
+    <div class="atlas-heatmap">
+      <div class="atlas-heatmap-row"><div><h3>每小时活跃度 / Activity matrix</h3><p>7 天 × 24 小时 · 颜色深浅只表示模拟请求强度，并非 Dell 生产历史</p></div>
+        <div class="atlas-toggle"><button type="button" data-atlas-heat="volume" aria-pressed="true">请求强度</button><button type="button" data-atlas-heat="latency" aria-pressed="false">延迟压力</button></div></div>
+      <div class="atlas-h-scroll"><svg id="atlasHeatmap" class="atlas-heatmap-svg" viewBox="0 0 880 265" role="grid" aria-label="合成的七日二十四小时活跃度热力图，方向键可浏览格子"></svg></div>
+      <div class="atlas-heatmap-output" id="atlasHeatReadout" aria-live="polite">点击或使用方向键浏览一个格子。</div>
+    </div>
+  </section>
+  <section class="atlas-compare" id="atlasCompare" hidden aria-labelledby="atlas-compare-title">
+    <div class="atlas-compare-head"><h3 id="atlas-compare-title">选中工作负载对比 <span id="atlasCompareCount" class="tiny"></span></h3><button type="button" id="atlasCompareClear">清空选择</button></div>
+    <div id="atlasCompareGrid" class="atlas-compare-grid"></div>
+  </section>
+  <div class="atlas-note">设计验证模式：本页所有调用、延迟、Tokens、活跃度与分组数据均由页面内的静态演示样本生成。没有查询生产 Gateway usage.jsonl、Prometheus、Grafana、Strata 或 EvalScope。真实接入时必须由 Portal 后端先完成项目权限过滤，再传入聚合 DTO；缺失指标保持 UNKNOWN，不以 0 代替。</div>
+</section>
+<div class="atlas-tip" id="atlasTip" role="tooltip" data-open="false" hidden></div>
+
+<section class="view" id="view-evaluation" aria-labelledby="eval-title"><div class="breadcrumb">LLM LAB / <b>EVALUATION</b></div><div class="hero"><div><h1 id="eval-title">评测中心 <em class="title-whisper">Evaluation.</em></h1><p>EvalScope 负责评测任务与报告，Portal 负责展示授权的结果、运行状态和资源预算。</p></div><div class="hero-right"><span class="badge">当前未连接真实评测 Job</span></div></div><div class="columns"><div class="infobox"><div class="headrow"><h2 class="section-h">EvalScope 集成</h2><span class="badge warn">待接线</span></div><p class="muted" style="font-size:12px;max-width:520px;margin:10px 0 26px">已保存评测结果由服务端 Adapter 安全读取；原生 UI 仅在资源路径、子路径代理与身份边界完整验证之后开放。</p><ol class="steps"><li><span class="count">01</span><div><b>模型 / Endpoint 选择</b><p>从已授权的模型版本和 API 别名中选择评测目标。</p></div></li><li><span class="count">02</span><div><b>数据集、预算与排队</b><p>评测资源预检，不抢占现有 Strata GPU 服务。</p></div></li><li><span class="count">03</span><div><b>报告索引与对比</b><p>记录数据集版本、模型版本、指标及可复现实验信息。</p></div></li></ol></div><aside class="flatpanel"><h3>当前结果</h3><p>尚无经授权读取的真实评测记录。</p><div class="surface"><span class="caps">EMPTY STATE</span><div style="font-size:22px;letter-spacing:-.04em;margin:12px 0">等待数据接入</div><span class="tiny">这不是评测失败，也不代表已有模型得分为 0。</span></div><div class="guard">基准测试和实际部署是两条独立资源工作流；正式使用前需建立隔离队列与版本审计。</div></aside></div><section class="page-block module-panel" data-module="evaluation" aria-labelledby="module-eval-title">
+  <div class="editorial-index"><b>09</b><span>EVALSCOPE</span><span class="index-rule"></span><span class="mono" data-module-state="evaluation">等待会话</span></div>
+  <div class="group-title">
+    <h2 class="section-h" id="module-eval-title">EvalScope 入口授权</h2>
+    <span class="smallmeta">AUTHORIZED ENTRY ONLY</span>
+  </div>
+  <div class="module-body" id="module-evaluation-body">
+    <p class="module-empty">需要已认证的会话与服务端模块授权。EvalScope 的原生界面入口只在身份边界与子路径代理验证通过后开放；未开放时这里说明原因，而不是给一个点了没反应的按钮。</p>
+  </div>
+</section>
+</section>
+  <section class="view" id="view-admin" aria-labelledby="admin-title"><div class="breadcrumb">LLM LAB / <b>ADMINISTRATION</b></div><div class="hero"><div><h1 id="admin-title">团队与系统管理 <em class="title-whisper">Administration.</em></h1><p>Linux 账号（PAM）负责登录身份；Portal 控制用户、项目、模型与 API 权限。物理部署仍需独立审批。</p></div><div class="hero-right"><button class="secondary" id="previewAuth">查看 Linux 登录方案</button></div></div><div class="columns"><div><div class="group-title"><h2>身份与权限</h2><span class="smallmeta">AUTHN IS NOT AUTHZ</span></div><div class="statusrows"><div class="statusitem"><div class="tiny">统一入口</div><strong>Linux 账号 / PAM</strong><div class="badge warn" style="margin-top:10px">预览未接线 · 需服务端 PAM 会话</div></div><div class="statusitem"><div class="tiny">Portal 会话</div><strong>HttpOnly Cookie + CSRF</strong><div class="badge" style="margin-top:10px">服务端授权</div></div><div class="statusitem"><div class="tiny">角色</div><strong>Viewer / User / Operator / Admin</strong></div><div class="statusitem"><div class="tiny">项目资源</div><strong>Principal × Project × Scope</strong></div></div><div class="group-title" style="margin-top:31px"><h2>权限边界</h2><span class="smallmeta">TRUST BOUNDARIES</span></div><div class="tablewrap"><table><thead><tr><th>身份凭据</th><th>主要用途</th><th>绝不能替代</th></tr></thead><tbody><tr><td>Linux PAM 会话</td><td>浏览器登录 Portal</td><td>Gateway API Key</td></tr><tr><td>个人 Token</td><td>llmlab CLI / 管理 REST</td><td>管理员 / Fleet Master</td></tr><tr><td>Endpoint Key</td><td>应用调用模型</td><td>Linux / Portal 登录</td></tr><tr><td>Strata 上游密钥</td><td>Gateway 到推理引擎</td><td>公开到浏览器</td></tr></tbody></table></div></div><aside class="flatpanel"><h3>实体部署安全流程</h3><p>平台不从 Web 按钮直接执行系统命令，更不会在后台替换运行中的他人模型服务。</p><ol class="steps"><li><span class="count">01</span><div><b>Deployment Profile</b><p>模型版本、引擎、显存预算和协议能力。</p></div></li><li><span class="count">02</span><div><b>Preflight / Dry-run</b><p>检查 NVML、资源占用、维护窗口与备份。</p></div></li><li><span class="count">03</span><div><b>管理员审批</b><p>申请与实际执行分离；保留审计。</p></div></li><li><span class="count">04</span><div><b>执行 / Canary / 回滚</b><p>仅在专门授权维护任务中执行。</p></div></li></ol><button class="secondary unavailable" type="button" disabled title="正式部署功能尚未上线">执行部署 · 尚未开放</button></aside></div><section class="page-block module-panel" data-module="administration" aria-labelledby="module-admin-title">
+  <div class="editorial-index"><b>10</b><span>VIEW FILTERING &amp; RBAC</span><span class="index-rule"></span><span class="mono" data-module-state="administration">等待会话</span></div>
+  <div class="group-title">
+    <h2 class="section-h" id="module-admin-title">视图过滤与权限边界</h2>
+    <span class="smallmeta">AUTHN IS NOT AUTHZ · 服务端判定</span>
+  </div>
+  <div class="module-body" id="module-administration-body">
+    <p class="module-empty">需要已认证的会话。下面显示的是服务端按你的会话主体算出的可见范围（角色、scope、项目、可见模块），不是客户端选择的结果。</p>
+  </div>
+</section>
+</section>
+<section class="view" id="view-calls" aria-labelledby="calls-title">
+  <div class="breadcrumb">LLM LAB / <b>MY CALL LOG</b></div>
+  <div class="hero">
+    <div>
+      <h1 id="calls-title">我的调用日志 <em class="title-whisper">My Calls.</em></h1>
+      <p>只列出你名下 key 的逐条调用：时间、状态、Token、排队与 <span class="mono">request_id</span>。归属只看服务端 key 目录里的 principal 是否等于你的会话主体，请求里的任何自报字段都不参与。</p>
+    </div>
+    <div class="hero-right"><span class="badge" id="callsSourceBadge">来源未定 · 等待会话</span></div>
+  </div>
+
+  <div class="calls-filters" id="callsFilters" role="group" aria-label="调用日志筛选">
+    <div class="calls-filter-row">
+      <span class="caps">时间窗</span>
+      <div class="calls-presets" role="group" aria-label="快捷时间窗">
+        <button type="button" class="secondary" data-calls-preset="1h" aria-pressed="false">近 1 小时</button>
+        <button type="button" class="secondary" data-calls-preset="24h" aria-pressed="false">近 24 小时</button>
+        <button type="button" class="secondary" data-calls-preset="7d" aria-pressed="false">近 7 天</button>
+      </div>
+      <label class="field"><span class="tiny">起（本地时间）</span><input type="datetime-local" id="callsFrom" name="from"></label>
+      <label class="field"><span class="tiny">止（本地时间，不含）</span><input type="datetime-local" id="callsTo" name="to"></label>
+    </div>
+    <div class="calls-filter-row">
+      <span class="caps">筛选</span>
+      <label class="field"><span class="tiny">结果</span><select id="callsOutcome" aria-label="调用结果">
+        <option value="all">全部结果</option>
+        <option value="success">成功</option>
+        <option value="failed">失败</option>
+        <option value="cancelled">已取消</option>
+      </select></label>
+      <label class="field"><span class="tiny">Key</span><select id="callsKey" aria-label="key"><option value="">全部（我名下的 key）</option></select></label>
+      <label class="field"><span class="tiny">模型</span><input type="text" id="callsModel" name="model" placeholder="例如 llm-a"></label>
+      <label class="field calls-limit"><span class="tiny">每页条数</span><input type="number" id="callsLimit" name="limit" min="1" max="200" step="1" value="50"></label>
+      <div class="calls-filter-actions">
+        <button class="primary" type="button" id="callsApply">应用筛选</button>
+        <button class="secondary" type="button" id="callsReset">重置</button>
+      </div>
+    </div>
+    <div class="calls-filter-row calls-export-row">
+      <span class="tiny" id="callsWindow">尚未取到生效窗口</span>
+      <span class="calls-export">
+        <span class="tiny" id="callsExportNote">导出：没有已加载的行</span>
+        <button type="button" class="secondary" id="callsExportCsv" disabled title="没有已加载的调用可导出">CSV ↓</button>
+        <button type="button" class="secondary" id="callsExportJson" disabled title="没有已加载的调用可导出">JSON ↓</button>
+      </span>
+    </div>
+  </div>
+
+  <div id="callsHost" aria-live="polite">
+    <div class="surface">
+      <span class="caps">WAITING FOR SESSION</span>
+      <p class="module-empty" style="margin-top:11px">尚未向服务端确认你的会话与调用归属。确认之前这里不会出现任何数字——空态不是「零次调用」，而是「还没问过」。</p>
+    </div>
+  </div>
+</section>
+  <footer class="footbar"><span>DELL LLM LAB / ATELIER OBSERVATORY Nº 06</span><span>MOTION · CLARITY · RESTRAINT &nbsp; / &nbsp; 只读预览 · 无真实密钥 · 未接入用户数据</span></footer>
+</main>
+<dialog id="explainDialog" aria-labelledby="modalTitle"><div class="modal-head"><h2 id="modalTitle">功能说明</h2><button class="close" id="closeDialog" aria-label="关闭说明">×</button></div><div class="modal-body" id="modalBody"></div><div class="modal-actions"><button class="primary" id="confirmDialog">了解</button></div></dialog>
+<script>
+(()=>{
+  const $$=(s)=>[...document.querySelectorAll(s)]; const $=(s)=>document.querySelector(s);
+  const pages=['overview','models','api','observability','atlas','evaluation','admin'];
+  // The header never leaves the screen; the content is the only transition target.
+  const reduceMotion=()=>window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let activePage='overview', currentTransition=null;
+  const pageNames={overview:'实验室概览',models:'模型与对话',api:'API 管理',observability:'监控与日志',atlas:'调用结构图谱',evaluation:'评测中心',admin:'管理'};
+  const navs=[document.querySelector('.topnav'),document.querySelector('.mobile-nav')].filter(Boolean);
+  for(const nav of navs){const rail=document.createElement('span');rail.className='nav-rail';rail.setAttribute('aria-hidden','true');nav.appendChild(rail);}
+  function positionRails(instant=false){
+    for(const nav of navs){const rail=nav.querySelector('.nav-rail');const selected=nav.querySelector('.navitem.active');
+      if(!rail||!selected||!nav.offsetWidth){if(rail)rail.style.opacity='0';continue;}
+      const x=selected.getBoundingClientRect().left-nav.getBoundingClientRect().left+nav.scrollLeft;
+      if(instant)rail.style.transition='none';rail.style.width=selected.offsetWidth+'px';rail.style.transform='translateX('+x+'px)';rail.style.opacity='1';
+      if(instant)requestAnimationFrame(()=>{rail.style.transition='';});
+    }
+  }
+  function commitPage(name,keyboardFocus){
+    $$('.view').forEach(v=>{const selected=v.id==='view-'+name;v.classList.toggle('active',selected);v.setAttribute('aria-hidden',String(!selected));});
+    $$('[data-page]').forEach(b=>{const selected=b.dataset.page===name;b.classList.toggle('active',selected);if(selected)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
+    activePage=name;document.title='Dell LLM Lab · '+pageNames[name];
+    window.scrollTo({top:0,behavior:'instant'});
+    positionRails();
+    if(keyboardFocus){const h=$('#view-'+name+' h1');if(h){h.setAttribute('tabindex','-1');h.focus({preventScroll:true});}}
+  }
+  function goto(name,options={}){
+    if(!pages.includes(name))return;
+    const same=activePage===name;
+    if(!options.fromHistory){const next='#'+name;if(location.hash!==next){
+      // Internal paths are hash-only: this works in a downloaded HTML preview.
+      try{history.pushState({page:name},'',next)}catch(_){location.hash=next}
+    }}
+    if(same){positionRails(true);return;}
+    if(currentTransition){currentTransition.skipTransition();currentTransition=null;}
+    const update=()=>commitPage(name,!!options.keyboardFocus);
+    if(!options.instant&&!reduceMotion()&&typeof document.startViewTransition==='function'){
+      try{currentTransition=document.startViewTransition(update);
+        const t=currentTransition;t.finished.catch(()=>{}).finally(()=>{if(currentTransition===t)currentTransition=null;});
+      }catch(_){update();}
+    }else update();
+  }
+  $$('[data-page], [data-go]').forEach(el=>el.addEventListener('click',e=>{e.preventDefault();goto(el.dataset.page||el.dataset.go,{keyboardFocus:e.detail===0&&e.isTrusted});}));
+  window.addEventListener('popstate',()=>goto(pages.includes(location.hash.slice(1))?location.hash.slice(1):'overview',{fromHistory:true}));
+  window.addEventListener('hashchange',()=>{const name=location.hash.slice(1);if(pages.includes(name)&&name!==activePage)goto(name,{fromHistory:true});});
+  window.addEventListener('resize',()=>positionRails(true),{passive:true});
+  navs.forEach(nav=>nav.addEventListener('scroll',()=>positionRails(true),{passive:true}));
+  if(document.fonts?.ready)document.fonts.ready.then(()=>positionRails(true));
+  const initial=location.hash.slice(1);
+  commitPage(pages.includes(initial)?initial:'overview',false);
+  positionRails(true);
+  const themeBtn=$('#themeButton');function applyTheme(t){document.documentElement.dataset.theme=t;themeBtn.textContent=t==='light'?'☾':'☼';themeBtn.title=t==='light'?'切换深色模式':'切换明亮模式'}applyTheme('light');themeBtn.addEventListener('click',()=>applyTheme(document.documentElement.dataset.theme==='light'?'dark':'light'));
+  $$('[data-range]').forEach(b=>b.addEventListener('click',()=>{$$('[data-range]').forEach(a=>a.classList.toggle('active',a===b));$('#timelineChart').setAttribute('aria-label','示例图表 · '+b.textContent+' · 不代表真实历史数据')}));
+  const data={calls:[22,18,21,25,20,24,28,27,31,38,49,45,51,53,56,51,43,49,46,42,52,62,58,54],latency:[31,35,28,34,36,32,39,39,37,44,46,39,47,40,43,52,51,48,46,57,61,55,49,45],tokens:[20,21,23,18,24,23,34,40,36,38,47,55,52,58,51,49,46,47,48,51,60,56,62,58]};
+  let chartMetric='calls',chartPoints=[],chartData=[],chartProbeIndex=null;
+  const chartColor={calls:'var(--rust)',latency:'var(--sage)',tokens:'var(--blue)'};
+  const chartUnits={calls:'请求',latency:'ms · p95',tokens:'k tokens'};
+  function chart(kind){
+    chartMetric=kind;const v=data[kind]||data.calls;chartData=v;
+    const W=730,H=328,L=42,R=12,T=20,B=44,PW=W-L-R,PH=H-T-B,mi=12,ma=70;
+    const svg=$('#timelineChart');svg.parentElement.dataset.metric=kind;
+    let lines='';for(let i=0;i<5;i++){const yy=T+i*PH/4;lines+=`<line x1="${L}" y1="${yy}" x2="${W-R}" y2="${yy}" stroke="var(--line)" stroke-width=".8"/><text x="${L-11}" y="${yy+4}" text-anchor="end" fill="var(--dim)" font-size="10">${Math.round(ma-i*(ma-mi)/4)}</text>`;}
+    chartPoints=v.map((d,i)=>[L+i*PW/(v.length-1),T+(ma-d)/(ma-mi)*PH]);
+    const line=chartPoints.map(([x,y],i)=>`${i?'L':'M'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+    const area=line+` L${(L+PW).toFixed(1)},${T+PH} L${L},${T+PH} Z`;
+    const periods=['00:00','04:00','08:00','12:00','16:00','20:00','23:00'];
+    const labels=periods.map((t,i)=>`<text x="${L+(i/6)*PW}" y="${H-14}" text-anchor="${i===0?'start':i===6?'end':'middle'}" fill="var(--dim)" font-size="10">${t}</text>`).join('');
+    svg.innerHTML=`<defs><linearGradient id="fillTrend" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${chartColor[kind]}" stop-opacity=".14"/><stop offset="1" stop-color="${chartColor[kind]}" stop-opacity="0"/></linearGradient></defs>${lines}<path d="${area}" fill="url(#fillTrend)"/><path class="series-path" data-series-line d="${line}" fill="none" stroke="${chartColor[kind]}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>${chartPoints.filter((_,i)=>i===10||i===21).map(([x,y])=>`<circle cx="${x}" cy="${y}" r="4.2" fill="${chartColor[kind]}" stroke="var(--bg)" stroke-width="2.6"/>`).join('')}${labels}<g class="plot-cursor" data-chart-probe visibility="hidden"></g>`;
+    svg.setAttribute('tabindex','0');svg.setAttribute('aria-label','交互式演示图表：'+({calls:'请求量',latency:'p95 延迟',tokens:'Tokens'}[kind])+'，移动指针或按左右方向键查看示意数值');
+    chartProbeIndex=null;
+    if(!reduceMotion()&&svg.getAnimations){
+      const path=svg.querySelector('[data-series-line]');
+      if(path&&typeof path.getTotalLength==='function'){
+        const length=path.getTotalLength();
+        path.animate([{strokeDasharray:`${length} ${length}`,strokeDashoffset:length,opacity:.28},{strokeDasharray:`${length} ${length}`,strokeDashoffset:0,opacity:1}],{duration:550,easing:'cubic-bezier(.22,1,.36,1)'});
+      }
+    }
+  }
+  function renderProbe(i,fromKeyboard=false){
+    const svg=$('#timelineChart');const group=svg.querySelector('[data-chart-probe]');
+    if(!group||!chartPoints.length)return;
+    i=Math.max(0,Math.min(chartPoints.length-1,i));chartProbeIndex=i;
+    const [x,y]=chartPoints[i];const bx=Math.max(50,Math.min(618,x-54)),by=Math.max(12,y-57);
+    const time=String(Math.round(i*23/(chartPoints.length-1))).padStart(2,'0')+':00';
+    group.innerHTML=`<line x1="${x}" y1="20" x2="${x}" y2="284" stroke="var(--ink)" stroke-opacity=".35" stroke-width=".9" stroke-dasharray="3 5"/><circle cx="${x}" cy="${y}" r="6" stroke="var(--bg)" stroke-width="3" fill="${chartColor[chartMetric]}"/><rect x="${bx}" y="${by}" width="112" height="41" rx="5" fill="var(--dark)"/><text x="${bx+9}" y="${by+15}" fill="var(--bg)" font-size="10" opacity=".8">${time} · DEMO</text><text x="${bx+9}" y="${by+32}" fill="var(--bg)" font-size="12" font-weight="600">${chartData[i]} ${chartUnits[chartMetric]}</text>`;
+    group.setAttribute('visibility','visible');
+    if(fromKeyboard)svg.setAttribute('aria-label',time+'，演示 '+chartUnits[chartMetric]+' '+chartData[i]+'。左右方向键浏览数据点');
+  }
+  const timeline=$('#timelineChart');
+  timeline.addEventListener('pointermove',e=>{
+    if(e.pointerType==='touch'||!chartPoints.length)return;
+    const bounds=timeline.getBoundingClientRect();const svgX=(e.clientX-bounds.left)/bounds.width*730;
+    const i=Math.round((svgX-42)/(730-42-12)*(chartPoints.length-1));
+    if(i!==chartProbeIndex)renderProbe(i);
+  });
+  timeline.addEventListener('pointerleave',()=>{const g=timeline.querySelector('[data-chart-probe]');if(g)g.setAttribute('visibility','hidden');chartProbeIndex=null;});
+  timeline.addEventListener('keydown',e=>{if(e.key!=='ArrowRight'&&e.key!=='ArrowLeft')return;e.preventDefault();renderProbe((chartProbeIndex??0)+(e.key==='ArrowRight'?1:-1),true);});
+  timeline.addEventListener('blur',()=>{const g=timeline.querySelector('[data-chart-probe]');if(g)g.setAttribute('visibility','hidden');chartProbeIndex=null;});
+  chart('calls');$$('[data-chart]').forEach(b=>b.addEventListener('click',()=>{$$('[data-chart]').forEach(a=>a.classList.toggle('active',a===b));chart(b.dataset.chart)}));
+  window.__ATELIER__={get page(){return activePage},get chartMetric(){return chartMetric},get reducedMotion(){return reduceMotion()},version:'5.0.0'};
+  const dlg=$('#explainDialog');function explain(title,text){$('#modalTitle').textContent=title;$('#modalBody').innerHTML=text;dlg.showModal();}$('#closeDialog').onclick=()=>dlg.close();$('#confirmDialog').onclick=()=>dlg.close();
+  $('#accountButton').onclick=()=>explain('Linux 账号登录（待接线）','<p>正式登录将使用 <strong>Dell Linux 账号（PAM）</strong> 建立服务端 Session，再由 Portal RBAC 授予用户、项目与 API 权限。</p><p><strong>当前仅为受 Basic Auth 保护的合成预览（Synthetic Preview）</strong>，尚未接入 PAM：本页不索取 Linux 密码，不向 /auth/linux/login 提交任何凭据，也不伪造登录状态。</p><p>正式接线需服务端 PAM 会话、Cookie / CSRF 与信任边界，另行立项。</p>');
+  $('#previewAuth').onclick=$('#accountButton').onclick;
+  $('#newEndpoint').onclick=()=>explain('申请 Endpoint','<p>正式流程为：<strong>选择模型 → 配置 Deployment Profile → Dry-run → 项目审批 → 发布私有 Endpoint</strong>。</p><p>此演示不创建任何 Endpoint、不占用 GPU、不开放端口。生产发布必须额外授权。</p>');
+  $('#copyCurl').onclick=async()=>{const str="curl https://lab.example/v1/chat/completions -H 'Authorization: Bearer <YOUR_SCOPED_KEY>' -H 'Content-Type: application/json' -d '{\"model\":\"qwen3.8-flash-next-iq2_xs\",\"messages\":[]}'";try{await navigator.clipboard.writeText(str);explain('示例已复制','<p>复制的是<strong>占位符请求</strong>，无实际 API Key，也不指向真实服务器。</p>')}catch(e){explain('复制提示','<p>浏览器未授予剪贴板权限，可从代码块手动复制；不需要任何真实密钥。</p>')}};
+  $('#chatForm').addEventListener('submit',e=>{e.preventDefault();const input=$('#chatInput');const val=input.value.trim();if(!val)return;const mine=document.createElement('div');mine.className='chatbubble me';mine.textContent=val;$('#chatLog').append(mine);const response=document.createElement('div');response.className='chatbubble bot';response.textContent='这是离线设计原型：消息未发送到 Gateway 或 Strata。正式页面会显示流式响应、模型来源和用量归属。';$('#chatLog').append(response);input.value='';response.scrollIntoView({behavior:reduceMotion()?'instant':'smooth',block:'nearest'})});
+})();
+</script>
+
+<script>/* Atelier 05 · Traffic Atlas
+   Adapted interaction concepts: two-level sunburst, treemap, one-call-one-dot,
+   linked focus, top-N ranking, cumulative curve, scatter, weekly heatmap.
+   ALL RECORDS ARE SYNTHETIC AND LOCAL. NO NETWORK REQUESTS. */
+(()=>{
+'use strict';
+const NS='http://www.w3.org/2000/svg';
+const $=q=>document.querySelector(q), $$=q=>[...document.querySelectorAll(q)];
+const source=[
+ {id:'chat',g:'conversation',name:'日常对话',calls:320,p95:680,tokens:115,desc:'常规聊天与知识问答的示意流量'},
+ {id:'resume',g:'conversation',name:'简历解析',calls:210,p95:1420,tokens:88,desc:'长文本与多页文档处理示意'},
+ {id:'vision',g:'conversation',name:'视觉问答',calls:160,p95:1180,tokens:71,desc:'多模态业务类型，仅作演示，不代表真实能力验收'},
+ {id:'code',g:'developer',name:'编码协作',calls:142,p95:920,tokens:69,desc:'代码补全与长轮次协作示意'},
+ {id:'tools',g:'developer',name:'工具调用',calls:126,p95:820,tokens:49,desc:'结构化工具调用的演示流量'},
+ {id:'ci',g:'developer',name:'CI 助手',calls:108,p95:1560,tokens:33,desc:'持续集成工作流的演示流量'},
+ {id:'eval',g:'evaluation',name:'离线测评',calls:74,p95:2070,tokens:24,desc:'合成的评测请求，并非真实 EvalScope Job'},
+ {id:'regression',g:'evaluation',name:'回归验收',calls:60,p95:1230,tokens:20,desc:'稳定性回归模拟负载'},
+ {id:'stress',g:'evaluation',name:'压力测试',calls:48,p95:2380,tokens:13,desc:'仅是界面模拟数据，没有执行真实压测'}
+];
+const groups=[{id:'conversation',name:'交互与内容',color:'--atlas-a'},{id:'developer',name:'开发自动化',color:'--atlas-b'},{id:'evaluation',name:'实验评测',color:'--atlas-c'}];
+const state={range:'24h',group:'all',view:'sunburst',selected:null,preview:null,sort:'calls',search:'',heat:'volume',compare:[],heatFocus:null};
+const scales={'24h':1,'7d':5.3,'30d':22.7},windowNames={'24h':'24 小时','7d':'7 天','30d':'30 天'};
+const svg=$('#atlasMainChart'),canvas=$('#atlasDotCanvas'),tip=$('#atlasTip');
+const fmt=n=>Number(n).toLocaleString('zh-CN'),num=(n,nf=1)=>Number(n).toFixed(nf),escapeHtml=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const reduce=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
+const css=k=>getComputedStyle(document.documentElement).getPropertyValue(k).trim();
+const col=g=>css(groups.find(x=>x.id===g)?.color||'--atlas-a');
+const ink=()=>css('--ink'),dim=()=>css('--dim'),rule=()=>css('--line');
+const visible=()=>source.filter(d=>state.group==='all'||d.g===state.group).map(d=>({...d,calls:Math.round(d.calls*scales[state.range]),tokens:Math.round(d.tokens*scales[state.range])}));
+const allRows=()=>source.map(d=>({...d,calls:Math.round(d.calls*scales[state.range]),tokens:Math.round(d.tokens*scales[state.range])}));
+const sum=(rows,key)=>rows.reduce((n,d)=>n+(+d[key]||0),0);
+const hit=()=>state.preview||state.selected;
+const groupName=id=>groups.find(g=>g.id===id)?.name||'全部工作负载';
+function el(tag,attrs={},parent,text){const x=document.createElementNS(NS,tag);for(const [k,v] of Object.entries(attrs))x.setAttribute(k,String(v));if(text!==undefined)x.textContent=String(text);if(parent)parent.appendChild(x);return x;}
+function t(parent,s,x,y,size=12,fill=ink(),extra={}){return el('text',{x,y,'font-size':size,fill,'dominant-baseline':'middle',...extra},parent,s)}
+function point(cx,cy,r,a){const theta=(a-90)*Math.PI/180;return [cx+r*Math.cos(theta),cy+r*Math.sin(theta)];}
+function arc(cx,cy,r0,r1,start,end){if(end-start>=359.999)end=start+359.999;const A=point(cx,cy,r1,start),B=point(cx,cy,r1,end),C=point(cx,cy,r0,end),D=point(cx,cy,r0,start),large=end-start>180?1:0;return `M${A[0]} ${A[1]} A${r1} ${r1} 0 ${large} 1 ${B[0]} ${B[1]} L${C[0]} ${C[1]} A${r0} ${r0} 0 ${large} 0 ${D[0]} ${D[1]}Z`;}
+function clear(node){while(node.firstChild)node.removeChild(node.firstChild)}
+function findRow(id){return allRows().find(d=>d.id===id)||null}
+function showTip(text,e){if(!e||e.pointerType==='touch'||innerWidth<541)return;tip.hidden=false;tip.innerHTML=text;const b=tip.getBoundingClientRect();const x=Math.max(8,Math.min(innerWidth-b.width-10,e.clientX+15));const y=Math.max(8,Math.min(innerHeight-b.height-10,e.clientY+14));tip.style.left=x+'px';tip.style.top=y+'px';tip.dataset.open='true';}
+function hideTip(){tip.dataset.open='false';tip.hidden=true}
+function preview(id){if(state.preview===id)return;state.preview=id;renderDetail();updateFocus();if(state.view==='dots')drawDots();}
+function unpreview(){if(state.preview===null)return;state.preview=null;hideTip();renderDetail();updateFocus();if(state.view==='dots')drawDots()}
+function select(id){state.preview=null;state.selected=state.selected===id?null:id;hideTip();renderDetail();updateFocus();renderBreadcrumb();if(state.view==='dots')drawDots();}
+function bind(node,d){node.classList.add('atlas-hit');node.dataset.atlasItem=d.id;node.setAttribute('role','button');node.setAttribute('tabindex','0');node.setAttribute('aria-label',`${d.name}，${fmt(d.calls)} 次调用；p95 ${fmt(d.p95)} 毫秒，演示数据`);
+ node.addEventListener('pointerenter',e=>{preview(d.id);showTip(`<strong>${escapeHtml(d.name)}</strong><small>${fmt(d.calls)} 次 · p95 ${fmt(d.p95)} ms</small>`,e)});
+ node.addEventListener('pointermove',e=>showTip(`<strong>${escapeHtml(d.name)}</strong><small>${fmt(d.calls)} 次 · p95 ${fmt(d.p95)} ms</small>`,e));
+ node.addEventListener('pointerleave',unpreview);node.addEventListener('focus',()=>preview(d.id));node.addEventListener('blur',unpreview);
+ node.addEventListener('click',e=>{e.stopPropagation();select(d.id)});
+ node.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();select(d.id)}})
+}
+function bindGroup(node,g){node.classList.add('atlas-hit');node.dataset.atlasGroup=g.id;node.setAttribute('role','button');node.setAttribute('tabindex','0');node.setAttribute('aria-label',`筛选 ${g.name}`);
+ node.addEventListener('click',()=>setGroup(state.group===g.id?'all':g.id));node.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();setGroup(state.group===g.id?'all':g.id)}});
+}
+function renderBreadcrumb(){const base=$('#atlasBreadcrumb');clear(base);const btn=document.createElement('button');btn.type='button';btn.textContent='全部工作负载';btn.onclick=reset;btn.setAttribute('aria-label','恢复全部负载与清除锁定');base.append(btn);
+ const rest=document.createElement('span');rest.textContent=' / '+(state.group==='all'?'全部方向':groupName(state.group));base.append(rest);
+ if(state.selected){const d=findRow(state.selected);if(d){const s=document.createElement('span');s.textContent=' / '+d.name;base.append(s)}}
+}
+function updateFocus(){const id=hit();$$('#view-atlas [data-atlas-item]').forEach(e=>{const active=!!id&&e.dataset.atlasItem===id;e.dataset.highlight=String(active);e.dataset.dimmed=String(!!id&&!active);if(e.closest('#atlasRanking'))e.dataset.selected=String(active);});
+ $$('[data-atlas-group]').forEach(e=>{const active=state.group!=='all'&&e.dataset.atlasGroup===state.group;e.setAttribute('aria-pressed',String(active));});
+}
+function setGroup(id){state.group=id;state.selected=null;state.preview=null;hideTip();renderAll();}
+function reset(){state.group='all';state.selected=null;state.preview=null;state.search='';$('#atlasSearch').value='';hideTip();renderAll()}
+function renderSun(){clear(svg);svg.setAttribute('aria-label','合成调用两级旭日图。内环为业务方向、外环为九类工作负载；点击筛选。');const rows=visible(),total=sum(rows,'calls'),cx=380,cy=277;
+ for(const r of [105,158,166,253])el('circle',{cx,cy,r,fill:'none',stroke:rule(),'stroke-width':.65},svg);
+ let angle=0;const lens=[];
+ groups.forEach(g=>{const entries=rows.filter(d=>d.g===g.id);if(!entries.length)return;const part=sum(entries,'calls'),start=angle,end=angle+part/total*360;
+  const sector=el('path',{d:arc(cx,cy,110,158,start,end),fill:col(g.id),stroke:css('--bg'),'stroke-width':2.3,'fill-opacity':.92},svg);bindGroup(sector,g);
+  const sp=end-start;if(sp>26){const p=point(cx,cy,132,(start+end)/2);t(svg,g.name,p[0],p[1],sp>85?12:10,css('--bg'),{'text-anchor':'middle','font-weight':650});}
+  let a=start;entries.forEach(d=>{const de=a+d.calls/total*360,mid=(a+de)/2,span=de-a;const path=el('path',{d:arc(cx,cy,168,253,a,de),fill:col(d.g),stroke:css('--bg'),'stroke-width':2.5,'fill-opacity':.77},svg);bind(path,d);
+    if(span>14){const p=point(cx,cy,210,mid);const name=d.name;const size=span>50?15:span>27?12:10;t(svg,name,p[0],p[1],size,css('--bg'),{'text-anchor':'middle','font-weight':610});}
+    lens.push({id:d.id,angle:mid});a=de;});angle=end;
+ });
+ el('circle',{cx,cy,r:100,fill:css('--bg'),stroke:rule(),'stroke-width':.75},svg);
+ t(svg,windowNames[state.range]+' · DEMO',cx,cy-35,12,dim(),{'text-anchor':'middle'});
+ t(svg,fmt(total),cx,cy+8,47,ink(),{'text-anchor':'middle','font-weight':620,'letter-spacing':'-2px'});
+ t(svg,'调用请求',cx,cy+42,12,dim(),{'text-anchor':'middle'});
+ t(svg,'内环 / 业务方向   外环 / 工作负载',380,533,12,dim(),{'text-anchor':'middle'});
+ updateFocus();
+}
+function squarify(list,rect){const total=sum(list,'value');if(!total)return[];const items=list.map(d=>({...d,area:d.value/total*rect.w*rect.h})).sort((a,b)=>b.area-a.area);let box={...rect},result=[];
+ const worst=(row,side)=>{if(!row.length||!side)return Infinity;const S=sum(row,'area'),largest=Math.max(...row.map(x=>x.area)),smallest=Math.min(...row.map(x=>x.area));return Math.max(side*side*largest/(S*S),(S*S)/(side*side*smallest));};
+ function place(row){const S=sum(row,'area');if(box.w>=box.h){let w=S/box.h,y=box.y;row.forEach(d=>{let h=d.area/w;result.push({...d,x:box.x,y,w,h});y+=h});box.x+=w;box.w=Math.max(0,box.w-w)}else{let h=S/box.w,x=box.x;row.forEach(d=>{let w=d.area/h;result.push({...d,x,y:box.y,w,h});x+=w});box.y+=h;box.h=Math.max(0,box.h-h)}}
+ while(items.length){const row=[items.shift()];while(items.length&&worst([...row,items[0]],Math.min(box.w,box.h))<=worst(row,Math.min(box.w,box.h)))row.push(items.shift());place(row)}return result;
+}
+function renderTree(){clear(svg);svg.setAttribute('aria-label','合成请求量矩形图，可点击色块查看工作负载');const rows=visible();const gs=groups.map(g=>({...g,value:sum(rows.filter(d=>d.g===g.id),'calls')})).filter(g=>g.value);
+ const blocks=squarify(gs,{x:11,y:15,w:738,h:510});const darkTheme=document.documentElement.dataset.theme==='dark';const textFill=darkTheme?'#15221c':'#fffef9';
+ blocks.forEach(b=>{el('rect',{x:b.x,y:b.y,width:b.w,height:b.h,rx:3,fill:css('--atlas-wash'),stroke:rule(),'stroke-width':1},svg);const pad=Math.max(4,Math.min(10,b.w*.025)),top=b.h>80?29:7;
+ if(b.h>55&&b.w>115)t(svg,`${b.name}`,b.x+pad,b.y+17,13,ink(),{'font-weight':650});
+ const leaves=rows.filter(d=>d.g===b.id).map(d=>({...d,value:d.calls}));if(!leaves.length)return;
+ const itemRects=squarify(leaves,{x:b.x+pad,y:b.y+top,w:Math.max(1,b.w-2*pad),h:Math.max(1,b.h-top-pad)});
+ itemRects.forEach(r=>{const inner=el('rect',{x:r.x+1.2,y:r.y+1.2,width:Math.max(1,r.w-2.4),height:Math.max(1,r.h-2.4),rx:2,fill:col(r.g),'fill-opacity':.85},svg);bind(inner,r);
+ if(r.w>75&&r.h>48){t(svg,r.name,r.x+10,r.y+19,Math.min(13,r.w/7),textFill,{'font-weight':650});if(r.h>75)t(svg,fmt(r.calls)+' 次',r.x+10,r.y+43,17,textFill,{'font-weight':610})}
+ });
+ });
+ updateFocus();
+}
+let dotLayout=null;
+function renderDots(){svg.setAttribute('hidden','');canvas.hidden=false;requestAnimationFrame(drawDots)}
+function drawDots(){if(state.view!=='dots'||!$('#view-atlas').classList.contains('active'))return;const rows=visible(),N=sum(rows,'calls'),rect=canvas.getBoundingClientRect(),W=rect.width||720,H=rect.height||480,dpr=Math.min(devicePixelRatio||1,2);
+ canvas.width=Math.max(1,Math.round(W*dpr));canvas.height=Math.max(1,Math.round(H*dpr));const ctx=canvas.getContext('2d',{alpha:false});ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle=css('--bg');ctx.fillRect(0,0,W,H);
+ const cols=Math.ceil(Math.sqrt(N*(W-35)/(H-42))),nrows=Math.ceil(N/cols),step=Math.min((W-30)/cols,(H-44)/nrows),x0=(W-cols*step)/2,y0=(H-nrows*step)/2;let start=0;dotLayout={W,H,cols,nrows,step,x0,y0,blocks:rows.map(d=>{const b={d,start,end:start+d.calls};start=b.end;return b;})};
+ const id=hit();for(const b of dotLayout.blocks){ctx.fillStyle=col(b.d.g);ctx.globalAlpha=(id&&id!==b.d.id)?0.13:0.83;const sz=Math.max(1,step*.73);for(let i=b.start;i<b.end;i++){const x=x0+(i%cols+.5)*step,y=y0+(Math.floor(i/cols)+.5)*step;ctx.fillRect(x-sz/2,y-sz/2,sz,sz)}}ctx.globalAlpha=1;
+ ctx.fillStyle=dim();ctx.font='12px sans-serif';ctx.textAlign='left';ctx.fillText('1 点 = 1 次模拟调用',12,H-11);ctx.textAlign='right';ctx.fillText(fmt(N)+' 点',W-12,H-11);
+}
+function dotDatum(event){if(!dotLayout)return null;const r=canvas.getBoundingClientRect(),{cols,step,x0,y0,blocks,nrows}=dotLayout;
+ const x=event.clientX-r.left,y=event.clientY-r.top,c=Math.floor((x-x0)/step),row=Math.floor((y-y0)/step);if(c<0||c>=cols||row<0||row>=nrows)return null;const i=row*cols+c;const b=blocks.find(x=>i>=x.start&&i<x.end);return b?.d||null}
+canvas.addEventListener('pointermove',e=>{const d=dotDatum(e);if(d){preview(d.id);showTip(`<strong>${escapeHtml(d.name)}</strong><small>1 点 = 1 次 · 共 ${fmt(d.calls)} 点</small>`,e)}else unpreview()});
+canvas.addEventListener('pointerleave',unpreview);canvas.addEventListener('click',e=>{const d=dotDatum(e);if(d)select(d.id);else{state.selected=null;unpreview();renderDetail();updateFocus()}});
+function renderStructure(){svg.toggleAttribute('hidden',state.view==='dots');canvas.hidden=state.view!=='dots';if(state.view==='sunburst')renderSun();else if(state.view==='treemap')renderTree();else renderDots();
+ $('#atlasScope').textContent=(state.group==='all'?'全部':groupName(state.group))+' / '+visible().length+' 类工作负载';$('#atlasBasis').textContent='分母 '+fmt(sum(visible(),'calls'))+' 次 · 完全合成';const strip=$('#atlasMiniStrip');strip.replaceChildren();visible().forEach(d=>{const s=document.createElement('span');s.style.flex=d.calls;s.style.background=col(d.g);s.title=d.name+' '+fmt(d.calls)+' 次（演示）';strip.append(s)});
+}
+function renderDonut(){const svg=$('#atlasDonut');clear(svg);let angle=0,total=sum(allRows(),'calls');groups.forEach(g=>{const n=sum(allRows().filter(d=>d.g===g.id),'calls'),end=angle+n/total*360;const path=el('path',{d:arc(100,100,60,91,angle,end),fill:col(g.id),stroke:css('--bg'),'stroke-width':2,'fill-opacity':state.group!=='all'&&state.group!==g.id?.3:.94},svg);bindGroup(path,g);angle=end});
+ el('circle',{cx:100,cy:100,r:55,fill:css('--bg')},svg);t(svg,'合成总量',100,88,10,dim(),{'text-anchor':'middle'});t(svg,fmt(total),100,112,23,ink(),{'text-anchor':'middle','font-weight':650});const legend=$('#atlasLegend');legend.replaceChildren();groups.forEach(g=>{const n=sum(allRows().filter(d=>d.g===g.id),'calls');const b=document.createElement('button');b.type='button';const part=document.createElement('span');part.innerHTML=`<i class="atlas-dot" style="background:${col(g.id)}"></i> ${escapeHtml(g.name)}`;const count=document.createElement('b');count.textContent=num(100*n/total)+'%';b.append(part,count);b.onclick=()=>setGroup(state.group===g.id?'all':g.id);b.setAttribute('aria-label',`查看${g.name}，占总数${num(100*n/total)}%`);legend.append(b)})}
+function renderDetail(){const node=$('#atlasDetail'),d=findRow(hit());const subset=visible(),total=sum(subset,'calls');let groupText=state.group==='all'?'全局工作负载':groupName(state.group);
+ if(!d){node.innerHTML=`<div class="context">当前范围 · ${escapeHtml(groupText)}</div><h3>调用结构总览</h3><div class="focus-number">${fmt(total)}<small>请求 · DEMO</small></div><dl><div><dt>负载数量</dt><dd>${subset.length}</dd></div><div><dt>输出 Tokens</dt><dd>${fmt(sum(subset,'tokens'))}k</dd></div><div><dt>业务方向</dt><dd>${state.group==='all'?3:1}</dd></div><div><dt>合成 p95</dt><dd>不聚合</dd></div></dl><div class="atlas-focus-note">悬停预览、点击锁定单项。不同请求集的 p95 不能直接相加或加权平均。</div>`;return}
+ const share=d.calls/Math.max(total,1)*100;node.innerHTML=`<div class="context">${escapeHtml(groupName(d.g))} · ${state.preview?'临时预览':'已锁定'}</div><h3>${escapeHtml(d.name)}</h3><div class="focus-number">${fmt(d.calls)}<small>调用请求</small></div><dl><div><dt>当前范围占比</dt><dd>${num(share)}%</dd></div><div><dt>p95 延迟</dt><dd>${fmt(d.p95)} ms</dd></div><div><dt>输出 Tokens</dt><dd>${fmt(d.tokens)}k</dd></div><div><dt>计量口径</dt><dd>合成样本</dd></div></dl><div class="atlas-focus-note">${escapeHtml(d.desc)}。再点一次取消锁定；可在排名区加入对比。</div>`;
+}
+function renderRanking(){const search=state.search.trim().toLowerCase();const order=visible().filter(d=>(d.name+' '+groupName(d.g)).toLowerCase().includes(search)).sort((a,b)=>b[state.sort]-a[state.sort]||a.name.localeCompare(b.name,'zh-CN'));const host=$('#atlasRankRows');host.replaceChildren();if(!order.length){host.innerHTML='<div style="padding:25px;color:var(--muted);font-size:13px">当前条件没有匹配的工作负载。</div>';return}
+ const max=Math.max(...order.map(d=>d[state.sort]));order.forEach((d,i)=>{const row=document.createElement('div');row.className='atlas-rankrow';row.dataset.atlasItem=d.id;row.setAttribute('role','row');row.setAttribute('tabindex','0');row.setAttribute('aria-label',`${d.name}，${fmt(d.calls)} 次请求，p95 ${fmt(d.p95)} 毫秒，点击选中`);
+ const value=state.sort==='calls'?fmt(d.calls):state.sort==='p95'?fmt(d.p95)+'ms':fmt(d.tokens)+'k';const pct=d[state.sort]/max*100;
+ row.innerHTML=`<div class="rank-index">${String(i+1).padStart(2,'0')}</div><div><div class="rank-name">${escapeHtml(d.name)}</div><div class="rank-sub">${escapeHtml(groupName(d.g))}</div></div><div class="bar"><span style="width:${pct.toFixed(2)}%;background:${col(d.g)}"></span></div><div class="rank-val">${value}</div><div class="rank-p95">${fmt(d.p95)} ms</div><button class="rank-add" type="button" aria-label="${state.compare.includes(d.id)?'移出':'加入'}${escapeHtml(d.name)}对比" title="加入/移出对比">${state.compare.includes(d.id)?'−':'+'}</button>`;
+ row.addEventListener('mouseenter',()=>preview(d.id));row.addEventListener('mouseleave',unpreview);row.addEventListener('focus',e=>{if(e.target===row)preview(d.id)});row.addEventListener('blur',e=>{if(e.target===row)unpreview()});row.addEventListener('click',e=>{if(e.target.closest('.rank-add'))return;select(d.id)});row.addEventListener('keydown',e=>{if(e.target!==row)return;if(e.key==='Enter'||e.key===' '){e.preventDefault();select(d.id)}});
+ row.querySelector('.rank-add').addEventListener('click',e=>{e.stopPropagation();toggleCompare(d.id)});host.append(row)});updateFocus();}
+function toggleCompare(id){if(state.compare.includes(id))state.compare=state.compare.filter(s=>s!==id);else if(state.compare.length<4)state.compare.push(id);else{const n=$('#atlasCompareCount');n.textContent='最多 4 项，请先移除一项';return}renderCompare();renderRanking()}
+function renderCompare(){const panel=$('#atlasCompare');panel.hidden=!state.compare.length;$('#atlasCompareCount').textContent=state.compare.length+' / 4';if(!state.compare.length)return;const host=$('#atlasCompareGrid');host.replaceChildren();const rows=state.compare.map(findRow).filter(Boolean),max=Math.max(...rows.map(d=>d.calls));rows.forEach(d=>{const c=document.createElement('article');c.className='atlas-compare-item';c.innerHTML=`<h4>${escapeHtml(d.name)}</h4><div class="big">${fmt(d.calls)} <small>次</small></div><div style="height:4px;background:var(--faint);margin-bottom:13px"><div style="height:100%;width:${(d.calls/max*100).toFixed(2)}%;background:${col(d.g)}"></div></div><dl><dt>p95</dt><dd>${fmt(d.p95)} ms</dd><dt>Tokens</dt><dd>${fmt(d.tokens)}k</dd><dt>方向</dt><dd>${escapeHtml(groupName(d.g))}</dd></dl>`;host.append(c)})}
+function drawPareto(){const svg=$('#atlasPareto');clear(svg);const rows=visible().sort((a,b)=>b.calls-a.calls),n=rows.length,W=610,H=300,L=46,R=18,T=26,B=38,PW=W-L-R,PH=H-T-B,total=sum(rows,'calls');let cum=0;const points=[{x:L,y:T+PH,share:0}];rows.forEach((d,i)=>{cum+=d.calls;points.push({x:L+(i+1)/n*PW,y:T+PH-cum/total*PH,share:cum/total,d})});
+ [0,.25,.5,.75,1].forEach(v=>{const y=T+PH-v*PH;el('line',{x1:L,y1:y,x2:W-R,y2:y,stroke:rule(),'stroke-dasharray':v===0?'0':'2 5','stroke-width':.65},svg);t(svg,Math.round(v*100)+'%',L-7,y,11,dim(),{'text-anchor':'end'})});
+ const y80=T+PH-.8*PH;el('line',{x1:L,y1:y80,x2:W-R,y2:y80,stroke:css('--atlas-a'),'stroke-width':1,'stroke-dasharray':'5 6'},svg);
+ const line=points.map((p,i)=>`${i?'L':'M'}${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ');
+ el('path',{d:line+` L${W-R} ${T+PH} L${L} ${T+PH}Z`,fill:css('--atlas-a'),'fill-opacity':.08},svg);
+ const route=el('path',{d:line,fill:'none',stroke:css('--atlas-a'),'stroke-width':2.5,'stroke-linecap':'round'},svg);
+ if(!reduce()&&route.getTotalLength){const len=route.getTotalLength();route.animate([{strokeDasharray:`${len} ${len}`,strokeDashoffset:len},{strokeDasharray:`${len} ${len}`,strokeDashoffset:0}],{duration:550,easing:'cubic-bezier(.2,.8,.2,1)'})}
+ let cutoff=n;points.slice(1).forEach((p,i)=>{const circle=el('circle',{cx:p.x,cy:p.y,r:4,fill:css('--atlas-a'),stroke:css('--bg'),'stroke-width':1.5},svg);bind(circle,p.d);t(svg,String(i+1),p.x,H-15,10,dim(),{'text-anchor':'middle'});if(cutoff===n&&p.share>=.8)cutoff=i+1});
+ $('#atlasParetoNote').textContent='前 '+cutoff+' / '+n+' 类负载贡献 ≥80% 的演示请求 · 累计 '+num(points[cutoff]?.share*100||0)+'%';
+ updateFocus();
+}
+function drawScatter(){const svg=$('#atlasScatter');clear(svg);const rows=visible(),W=610,H=300,L=58,R=26,T=26,B=44,PW=W-L-R,PH=H-T-B,maxC=Math.max(...rows.map(d=>d.calls)),maxP=Math.max(...rows.map(d=>d.p95))*1.16,maxT=Math.max(...rows.map(d=>d.tokens));
+ const X=v=>L+Math.log10(v+1)/Math.log10(maxC+1)*PW,Y=v=>T+PH-v/maxP*PH;
+ [0,.25,.5,.75,1].forEach(a=>{const y=T+PH-a*PH;el('line',{x1:L,y1:y,x2:W-R,y2:y,stroke:rule(),'stroke-width':.65},svg);t(svg,String(Math.round(maxP*a))+'ms',L-9,y,10,dim(),{'text-anchor':'end'})});
+ [1,10,100,1000,10000].filter(v=>v<=maxC*1.1).forEach(v=>{const x=X(v);el('line',{x1:x,y1:T,x2:x,y2:T+PH,stroke:rule(),'stroke-width':.6,'stroke-dasharray':'2 5'},svg);t(svg,fmt(v),x,H-22,10,dim(),{'text-anchor':'middle'})});
+ t(svg,'调用请求 / 对数',W-R,H-10,11,dim(),{'text-anchor':'end'});
+ rows.slice().sort((a,b)=>a.tokens-b.tokens).forEach(d=>{const x=X(d.calls),y=Y(d.p95),r=5+8*d.tokens/maxT;const circle=el('circle',{cx:x,cy:y,r,fill:col(d.g),'fill-opacity':.78,stroke:css('--bg'),'stroke-width':2},svg);bind(circle,d)});
+ updateFocus();
+}
+const heatDays=['周一','周二','周三','周四','周五','周六','周日'];const HOUR_COUNT=24;
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+function syntheticHour(day,hour){const peak=Math.exp(-Math.pow((hour-14)/5.3,2)),morning=.55*Math.exp(-Math.pow((hour-9)/2.8,2)),night=.4*Math.exp(-Math.pow((hour-21)/3,2)),weekly=[.95,1.10,.94,1.22,1.16,.65,.5][day];return Math.round(6+weekly*(17+55*peak+22*morning+17*night)+5*Math.cos(day*2.2+hour*.8))}
+function syntheticLatency(day,hour){return Math.round(420+13*syntheticHour(day,hour)+170*Math.sin((day+1)*.9+hour*.26))}
+function hexMix(a,b,t){const rgb=x=>{const v=x.replace('#','').trim();return [0,2,4].map(i=>parseInt(v.slice(i,i+2),16)||0)};const A=rgb(a),B=rgb(b);const v=A.map((x,i)=>Math.round(x*(1-t)+B[i]*t));return '#'+v.map(x=>x.toString(16).padStart(2,'0')).join('')}
+function drawHeatmap(){const svg=$('#atlasHeatmap');clear(svg);const l=54,top=30,dx=32,dy=29,sz=24,MAXV=state.heat==='volume'?130:2500,bg=css('--atlas-wash'),color=css(state.heat==='volume'?'--atlas-b':'--atlas-a');
+ for(let h=0;h<24;h+=3)t(svg,String(h).padStart(2,'0')+':00',l+h*dx+12,18,10,dim(),{'text-anchor':'middle'});
+ heatDays.forEach((day,d)=>{t(svg,day,4,top+d*dy+12,11,dim());for(let h=0;h<24;h++){const value=state.heat==='volume'?syntheticHour(d,h):syntheticLatency(d,h),strength=clamp(value/MAXV,.07,.92),fill=hexMix(bg,color,.09+.83*strength);const selected=!!state.heatFocus&&state.heatFocus.day===d&&state.heatFocus.hour===h;
+ const r=el('rect',{x:l+h*dx,y:top+d*dy,width:sz,height:sz,rx:3,fill,stroke:selected?ink():rule(),'stroke-width':selected?2.5:.4,role:'gridcell',tabindex:d===0&&h===0?'0':'-1','data-heat-day':d,'data-heat-hour':h,'aria-label':`${day}${String(h).padStart(2,'0')}:00，模拟${state.heat==='volume'?'请求强度':'延迟压力'} ${value}${state.heat==='volume'?'次':'ms'}`},svg);
+ const interact=(focus=false)=>{state.heatFocus={day:d,hour:h};$('#atlasHeatReadout').textContent=`${day} · ${String(h).padStart(2,'0')}:00 — 合成${state.heat==='volume'?'请求量 '+fmt(value)+' 次':'延迟压力 '+fmt(value)+' ms'}，不是实时监控`;svg.querySelectorAll('[data-heat-day]').forEach(cell=>{const match=cell.dataset.heatDay==d&&cell.dataset.heatHour==h;cell.setAttribute('stroke',match?ink():rule());cell.setAttribute('stroke-width',match?2.5:.4)});if(focus)r.focus()};
+ r.addEventListener('mouseenter',e=>showTip(`<strong>${day} ${String(h).padStart(2,'0')}:00</strong><small>演示 · ${fmt(value)} ${state.heat==='volume'?'次':'ms'}</small>`,e));r.addEventListener('mousemove',e=>showTip(`<strong>${day} ${String(h).padStart(2,'0')}:00</strong><small>演示 · ${fmt(value)} ${state.heat==='volume'?'次':'ms'}</small>`,e));r.addEventListener('mouseleave',hideTip);
+ r.addEventListener('click',()=>interact(true));r.addEventListener('keydown',e=>{const del={ArrowRight:[0,1],ArrowLeft:[0,-1],ArrowUp:[-1,0],ArrowDown:[1,0]}[e.key];if(del){e.preventDefault();const nd=clamp(d+del[0],0,6),nh=clamp(h+del[1],0,23);const next=svg.querySelector(`[data-heat-day="${nd}"][data-heat-hour="${nh}"]`);if(next){svg.querySelectorAll('[tabindex="0"]').forEach(c=>c.setAttribute('tabindex','-1'));next.setAttribute('tabindex','0');next.focus();next.dispatchEvent(new MouseEvent('click',{bubbles:false}))}}else if(e.key==='Enter'||e.key===' '){e.preventDefault();interact(true)}});
+ }});
+ t(svg,'颜色越深代表模拟负载越高',l,255,11,dim());
+}
+function renderKpis(){const rows=visible(),total=sum(rows,'calls'),tokens=sum(rows,'tokens');$('#atlasCalls').textContent=fmt(total);$('#atlasActive').textContent=String(rows.length).padStart(2,'0');$('#atlasTokens').textContent=fmt(tokens)+'k';$('#atlasCallsNote').textContent=windowNames[state.range]+' · 合成窗口';$('#atlasP95').textContent='—';
+ $$('[data-atlas-range]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.atlasRange===state.range)));
+ $$('[data-atlas-group]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.atlasGroup===state.group)));
+ $$('[data-atlas-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.atlasView===state.view)));
+ $$('[data-atlas-heat]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.atlasHeat===state.heat)));
+}
+function renderAll(){renderKpis();renderBreadcrumb();renderStructure();renderDonut();renderDetail();renderRanking();drawPareto();drawScatter();drawHeatmap();renderCompare();updateFocus()}
+$$('[data-atlas-group]').forEach(b=>b.addEventListener('click',()=>setGroup(b.dataset.atlasGroup)));
+$$('[data-atlas-range]').forEach(b=>b.addEventListener('click',()=>{state.range=b.dataset.atlasRange;state.preview=null;renderAll()}));
+$$('[data-atlas-view]').forEach(b=>b.addEventListener('click',()=>{state.view=b.dataset.atlasView;state.preview=null;renderKpis();renderStructure();renderDetail()}));
+$$('[data-atlas-heat]').forEach(b=>b.addEventListener('click',()=>{state.heat=b.dataset.atlasHeat;state.heatFocus=null;$('#atlasHeatReadout').textContent='点击或使用方向键浏览一个格子。';renderKpis();drawHeatmap()}));
+$('#atlasSearch').addEventListener('input',e=>{state.search=e.target.value;renderRanking()});$('#atlasSort').addEventListener('change',e=>{state.sort=e.target.value;renderRanking()});
+$('#atlasCompareClear').addEventListener('click',()=>{state.compare=[];renderCompare();renderRanking()});
+function saveAtlasFile(name,text,type){const url=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500)}
+$('#atlasExport').addEventListener('click',()=>{const rows=visible(),header=['业务方向','工作负载','调用请求_DEMO','p95毫秒_DEMO','输出Tokens千_DEMO','统计窗口','来源'],lines=[header,...rows.map(d=>[groupName(d.g),d.name,d.calls,d.p95,d.tokens,state.range,'Synthetic UI fixture'])];const csv='\ufeff'+lines.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\r\n');saveAtlasFile('llmlab_traffic_atlas_DEMO.csv',csv,'text/csv;charset=utf-8')});
+$('#atlasExportJSON').addEventListener('click',()=>{const payload={meta:{title:'Dell LLM Lab · Traffic Atlas',source:'synthetic-ui-fixture',status:'DEMO_ONLY',unit:'calls',window:state.range,group:state.group,note:'p95 values are per workload; do not aggregate percentiles by averaging'},rows:visible()};saveAtlasFile('llmlab_traffic_atlas_DEMO.json',JSON.stringify(payload,null,2),'application/json;charset=utf-8')});
+svg.addEventListener('click',e=>{if(!e.target.closest('.atlas-hit')){state.selected=null;state.preview=null;renderDetail();updateFocus();renderBreadcrumb()}});
+const onTheme=()=>requestAnimationFrame(()=>{if($('#view-atlas').classList.contains('active'))renderAll()});$('#themeButton').addEventListener('click',onTheme);
+let resizeT;window.addEventListener('resize',()=>{clearTimeout(resizeT);resizeT=setTimeout(()=>{if(state.view==='dots')drawDots()},100)}, {passive:true});
+$$('[data-page="atlas"],[data-go="atlas"]').forEach(b=>b.addEventListener('click',()=>{requestAnimationFrame(()=>{if($('#view-atlas').classList.contains('active'))renderAll()})}));
+window.addEventListener('hashchange',()=>{if(location.hash==='#atlas')requestAnimationFrame(renderAll)});
+document.addEventListener('keydown',e=>{if(!$('#view-atlas').classList.contains('active')||e.altKey||e.ctrlKey||e.metaKey||e.target.closest('input,select,textarea,[contenteditable=true]'))return;const viewByKey={'1':'sunburst','2':'treemap','3':'dots'};if(viewByKey[e.key]){state.view=viewByKey[e.key];state.preview=null;renderKpis();renderStructure();renderDetail()}else if(e.key==='Escape'&&(state.selected||state.preview)){state.selected=null;state.preview=null;hideTip();renderDetail();updateFocus();renderBreadcrumb()}else if(e.key==='/'&&!e.shiftKey){e.preventDefault();$('#atlasSearch').focus()}});
+renderAll();
+window.__ATLAS__={get state(){return {...state,compare:[...state.compare]}},get totals(){return {calls:sum(visible(),'calls'),tokens:sum(visible(),'tokens'),rows:visible().length}},get rows(){return visible()},select,setGroup,reset,render:renderAll,version:'5.0.0'};
+})();
+</script>
+</body></html>

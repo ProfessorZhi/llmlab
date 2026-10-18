@@ -1,0 +1,54 @@
+PRINT-ONLY PLAN — Atelier V6 preview rollback (non-production)
+================================================================
+
+This file is data, not an executable. The drill script reads it and prints it.
+Nothing here is run automatically, and none of it may be run without the
+approval described in docs/atelier-v6-service-hosting-and-rollback-2026-10-16.md.
+
+Scope: the isolated preview instance on the Dell lab host. This plan does NOT
+touch the AI model runtimes, the inference gateway, the scheduler, the
+authentication stack, any other user's jobs, or any other user's data.
+
+Preconditions to confirm by hand before any step
+-------------------------------------------------
+1. Written approval recorded in the release issue (candidate SHA named in it).
+2. The previous good SHA is known and present in the git remote.
+3. A backup of the preview state directory has been taken and its size verified.
+4. The other users on the host have been told the window; no GPU job is queued
+   or running that depends on the preview.
+5. The rollback is being performed by the operator, not by a script.
+
+Ordered steps
+-------------
+1. Record the current state: the deployed commit SHA and the running process
+   identity, into the release record. Do not skip this — a rollback with no
+   "before" state cannot be audited.
+2. Stop the preview process through the operator's own supervisor, using the
+   same mechanism that started it. Do not reach for a broader service-manager
+   verb than needed.
+3. Check out the previous good commit in the preview worktree, detached, so the
+   worktree cannot be left pointing at a moving branch.
+4. Confirm the preview configuration still points at the isolated port and the
+   isolated state directory. A rollback must not widen the bind.
+5. Start the preview process again through the same supervisor.
+6. Smoke: request the health endpoint on loopback only, then the login page.
+   Confirm the expected authentication challenge is still required.
+7. Confirm the preview is reachable on its isolated port and that no production
+   port changed.
+8. Record the outcome in the release record, including what was NOT verified.
+9. If any step failed, stop and escalate; do not improvise a second rollback on
+   top of a half-applied first one.
+
+Explicit non-goals
+------------------
+* No version pin of any AI model or runtime.
+* No change to the reverse proxy configuration.
+* No change to authentication, accounts or limits.
+* No change to the scheduler or any queued/GPU work.
+
+Post-rollback checklist
+-----------------------
+* The preview serves the previous good commit.
+* The isolated state directory is the same one; no shared path was introduced.
+* A follow-up issue exists for the defect that forced the rollback.
+* The failed candidate branch is left intact for diagnosis, not deleted.

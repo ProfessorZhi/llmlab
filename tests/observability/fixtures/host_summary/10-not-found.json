@@ -1,0 +1,17 @@
+{
+  "note": "What the browser actually receives when the projection route is off (404 body). It is not a summary at all and must fail closed to UNKNOWN.",
+  "now": "2026-10-16T12:00:00Z",
+  "expect": {
+    "accepted": false,
+    "any_live": false,
+    "live_keys": [],
+    "envelope_reason": "bad-shape",
+    "metric_reasons": [
+      "bad-shape"
+    ],
+    "display_state": "unknown"
+  },
+  "payload": {
+    "error": "not found"
+  }
+}

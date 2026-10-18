@@ -1,0 +1,29 @@
+{
+  "schema": "atelier-v1-static-release-allowlist/1",
+  "source_root": "web",
+  "entry_points": [
+    "index.html",
+    "auth/index.html"
+  ],
+  "deny_paths": [
+    "qa.html",
+    "tools/",
+    "README.md"
+  ],
+  "deny_globs": [
+    "**/qa*.html",
+    "**/*.test.*",
+    "**/package.json",
+    "**/*.md",
+    "**/fixtures/**",
+    "**/*.log",
+    "**/*.map"
+  ],
+  "require_html_profile": "production",
+  "notes": [
+    "路径一律相对 source_root（web/）。发布包根目录与 web/ 一一对应，因此现有文档根无需改动。",
+    "entry_points 是唯一的入口授权：闭包不得引入任何未在此列出的 .html —— 新增 QA 类入口会直接让构建失败，而不是被静默发布。",
+    "deny_* 是硬拒绝：闭包若**需要**一个被拒文件（例如 index 链到 qa.html），构建失败而不是跳过，因为跳过会产出坏的运行时闭包。",
+    "演示夹具 web/js/data/demo-fixture.js 由 app.js 正常 import，必须保留；它在生产包中的安全性由 data-build-profile=\"production\" 门保证，见 docs/release/v1-static-bundle-gate-69.md。"
+  ]
+}

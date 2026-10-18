@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<meta name="description" content="LLM Lab — 本机大模型推理与评测控制台：节点状态、模型服务、Benchmark、GPU 遥测与报告。">
+<title>LLM Lab</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230b1020'/%3E%3Ctext x='8' y='12' font-size='9' font-family='sans-serif' fill='%237dd3fc' text-anchor='middle'%3ELL%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="./styles/tokens.css">
+<link rel="stylesheet" href="./styles/base.css">
+<link rel="stylesheet" href="./styles/layout.css">
+<link rel="stylesheet" href="./styles/components.css">
+<link rel="stylesheet" href="./styles/charts.css">
+</head>
+<body>
+<a class="skip-link" href="#view">跳到主要内容</a>
+
+<div class="app">
+  <aside class="sidebar" id="sidebar" aria-label="主导航">
+    <div class="sidebar-brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-text">
+        <b>LLM Lab</b>
+        <span id="brandSub">本机推理控制台</span>
+      </span>
+    </div>
+
+    <nav class="sidebar-nav" aria-label="页面">
+      <!-- renderNav() fills this.  The indicator lives inside #nav so its
+           offsetTop is measured against the same box the items are in. -->
+      <div class="nav" id="nav">
+        <span class="nav-indicator" id="navIndicator" aria-hidden="true"></span>
+      </div>
+      <div class="nav" id="navExternal"></div>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="foot-row">
+        <span class="dot" id="footDot" data-state="unknown" aria-hidden="true"></span>
+        <span class="foot-text" id="footStatus">正在连接…</span>
+      </div>
+      <div class="foot-meta" id="footMeta"></div>
+    </div>
+  </aside>
+
+  <div class="rail-scrim" id="railScrim" aria-hidden="true"></div>
+
+  <div class="content">
+    <header class="topbar">
+      <button class="btn btn-quiet btn-icon rail-toggle" id="railToggle" type="button"
+              aria-label="打开导航" aria-controls="sidebar" aria-expanded="false">
+        <svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+
+      <div class="topbar-titles">
+        <h1 id="viewTitle">总览</h1>
+        <p id="viewSub">正在载入…</p>
+      </div>
+
+      <div class="topbar-actions">
+        <div class="health-pill" id="healthPill" role="status" aria-live="polite"
+             title="各系统可达性汇总；每项来源见「集成」页">
+          <span class="dot" data-state="unknown" aria-hidden="true"></span>
+          <span id="healthText">检测中</span>
+        </div>
+
+        <button class="btn btn-quiet btn-icon" id="refreshAll" type="button" aria-label="刷新全部数据" title="刷新全部数据">
+          <svg class="ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20.4 12a8.4 8.4 0 1 1-2.46-5.94M20.4 4.2v5.4h-5.4"/></svg>
+        </button>
+
+        <button class="btn btn-quiet btn-icon" id="themeToggle" type="button" aria-label="切换深浅主题" title="切换深浅主题">
+          <span class="theme-ico" id="themeIco"></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- The only scroller in the app. The document itself never scrolls, which
+         is what keeps the rail and topbar in place without position:fixed. -->
+    <main class="view" id="view" tabindex="-1"></main>
+  </div>
+</div>
+
+<div class="toaster" id="toaster" role="region" aria-label="通知"></div>
+
+<noscript>
+  <div class="noscript">
+    <h1>需要启用 JavaScript</h1>
+    <p>本控制台是单页应用，所有数据都通过 <code>/api/*</code> 实时获取。
+       若不启用 JavaScript，可直接访问这些只读接口，例如
+       <a href="/api/lab">/api/lab</a>、<a href="/api/v2/live">/api/v2/live</a>、
+       <a href="/api/healthz">/api/healthz</a>。</p>
+  </div>
+</noscript>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

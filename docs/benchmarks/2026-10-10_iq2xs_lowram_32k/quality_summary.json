@@ -1,0 +1,259 @@
+{
+ "model": "qwen3.8-flash-next-iq2_xs",
+ "base": "http://localhost:8080",
+ "generated": "2026-10-10 02:13:40",
+ "grades": "mechanical (letter / numeric tolerance / executed tests / schema / tool_calls)",
+ "categories": {
+  "chinese": {
+   "n": 10,
+   "passed": 10,
+   "failed": 0,
+   "score": 1.0,
+   "failed_ids": []
+  },
+  "json": {
+   "n": 3,
+   "passed": 2,
+   "failed": 1,
+   "score": 0.6667,
+   "failed_ids": [
+    "js02"
+   ]
+  },
+  "math": {
+   "n": 10,
+   "passed": 10,
+   "failed": 0,
+   "score": 1.0,
+   "failed_ids": []
+  },
+  "needle": {
+   "n": 3,
+   "passed": 3,
+   "failed": 0,
+   "score": 1.0,
+   "failed_ids": []
+  },
+  "python": {
+   "n": 10,
+   "passed": 10,
+   "failed": 0,
+   "score": 1.0,
+   "failed_ids": []
+  },
+  "tools": {
+   "n": 4,
+   "passed": 4,
+   "failed": 0,
+   "score": 1.0,
+   "failed_ids": []
+  }
+ },
+ "by_id": {
+  "cn01": {
+   "cat": "chinese",
+   "score": 1,
+   "finish": "stop"
+  },
+  "cn02": {
+   "cat": "chinese",
+   "score": 1,
+   "finish": "stop"
+  },
+  "cn03": {
+   "cat": "chinese",
+   "score": 1,
+   "finish": "stop"
+  },
+  "cn04": {
+   "cat": "chinese",
+   "score": 1,
+   "finish": "stop"
+  },
+  "cn05": {
+   "cat": "chinese",
+   "score": 1,
+   "finish": "stop"
+  },
+  "cn06": {
+   "cat": "chinese",
+   "score": 1,
+   "finish": "stop"
+  },
+  "cn07": {
+   "cat": "chinese",
+   "score": 1,
+   "finish": "stop"
+  },
+  "cn08": {
+   "cat": "chinese",
+   "score": 1,
+   "finish": "stop"
+  },
+  "cn09": {
+   "cat": "chinese",
+   "score": 1,
+   "finish": "stop"
+  },
+  "cn10": {
+   "cat": "chinese",
+   "score": 1,
+   "finish": "stop"
+  },
+  "ma01": {
+   "cat": "math",
+   "score": 1,
+   "finish": "stop"
+  },
+  "ma02": {
+   "cat": "math",
+   "score": 1,
+   "finish": "stop"
+  },
+  "ma03": {
+   "cat": "math",
+   "score": 1,
+   "finish": "stop"
+  },
+  "ma04": {
+   "cat": "math",
+   "score": 1,
+   "finish": "stop"
+  },
+  "ma05": {
+   "cat": "math",
+   "score": 1,
+   "finish": "stop"
+  },
+  "ma06": {
+   "cat": "math",
+   "score": 1,
+   "finish": "stop"
+  },
+  "ma07": {
+   "cat": "math",
+   "score": 1,
+   "finish": "stop"
+  },
+  "ma08": {
+   "cat": "math",
+   "score": 1,
+   "finish": "stop"
+  },
+  "ma09": {
+   "cat": "math",
+   "score": 1,
+   "finish": "stop"
+  },
+  "ma10": {
+   "cat": "math",
+   "score": 1,
+   "finish": "stop"
+  },
+  "py01": {
+   "cat": "python",
+   "score": 1,
+   "finish": "stop"
+  },
+  "py02": {
+   "cat": "python",
+   "score": 1,
+   "finish": "stop"
+  },
+  "py03": {
+   "cat": "python",
+   "score": 1,
+   "finish": "stop"
+  },
+  "py04": {
+   "cat": "python",
+   "score": 1,
+   "finish": "stop"
+  },
+  "py05": {
+   "cat": "python",
+   "score": 1,
+   "finish": "stop"
+  },
+  "py06": {
+   "cat": "python",
+   "score": 1,
+   "finish": "stop"
+  },
+  "py07": {
+   "cat": "python",
+   "score": 1,
+   "finish": "stop"
+  },
+  "py08": {
+   "cat": "python",
+   "score": 1,
+   "finish": "stop"
+  },
+  "py09": {
+   "cat": "python",
+   "score": 1,
+   "finish": "stop"
+  },
+  "py10": {
+   "cat": "python",
+   "score": 1,
+   "finish": "stop"
+  },
+  "js01": {
+   "cat": "json",
+   "score": 1,
+   "finish": "stop"
+  },
+  "js02": {
+   "cat": "json",
+   "score": 0,
+   "finish": "stop"
+  },
+  "js03": {
+   "cat": "json",
+   "score": 1,
+   "finish": "stop"
+  },
+  "fc01": {
+   "cat": "tools",
+   "score": 1,
+   "finish": "tool_calls"
+  },
+  "fc02": {
+   "cat": "tools",
+   "score": 1,
+   "finish": "tool_calls"
+  },
+  "fc03": {
+   "cat": "tools",
+   "score": 1,
+   "finish": "tool_calls"
+  },
+  "fc04": {
+   "cat": "tools",
+   "score": 1,
+   "finish": "stop"
+  },
+  "nd05": {
+   "cat": "needle",
+   "score": 1,
+   "finish": "stop"
+  },
+  "nd50": {
+   "cat": "needle",
+   "score": 1,
+   "finish": "stop"
+  },
+  "nd95": {
+   "cat": "needle",
+   "score": 1,
+   "finish": "stop"
+  }
+ },
+ "overall": {
+  "n": 40,
+  "passed": 39,
+  "score": 0.975
+ }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "llm-lab-portal-auth-ui",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Dell LLM Lab 登录入口（成员飞书 / 本地管理员）。刻意不声明 type=module：auth-core.js 是 UMD，浏览器走 window.LLMAuthCore、Node 走 module.exports，两边共用同一份无构建的代码。",
+  "main": "auth-core.js"
+}

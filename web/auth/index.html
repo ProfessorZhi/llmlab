@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light" data-auth-state="boot">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="same-origin">
+<title>登录 · Dell LLM Lab</title>
+<meta name="description" content="Dell LLM Lab 统一入口：使用 Dell Linux 账号登录。飞书身份已退役。">
+<!-- 该页面不加载任何外部资源：字体、图标、脚本全部同源或内联。 -->
+<link rel="stylesheet" href="./auth.css">
+</head>
+<body>
+
+<a class="skip" href="#auth-main">跳到登录表单</a>
+
+<header class="topbar">
+  <div class="wrap top-inner">
+    <div class="brand" aria-label="Dell LLM Lab">
+      <span class="mark" aria-hidden="true"></span>
+      <span class="brandtext">
+        <span class="brandname">Dell LLM Lab</span>
+        <small>ATELIER OBSERVATORY</small>
+      </span>
+    </div>
+    <div class="topright">
+      <span class="topnote" aria-hidden="true">统一入口</span>
+      <button type="button" id="theme-toggle" class="themebtn"
+              aria-pressed="false" aria-label="切换到深色主题" title="切换主题">
+        <svg class="ico-sun" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">
+          <circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M12 2.4v2.6M12 19v2.6M2.4 12h2.6M19 12h2.6M5.2 5.2l1.9 1.9M16.9 16.9l1.9 1.9M18.8 5.2l-1.9 1.9M7.1 16.9l-1.9 1.9"
+                fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+        <svg class="ico-moon" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">
+          <path d="M20.5 14.3A8.6 8.6 0 1 1 9.7 3.5a6.9 6.9 0 0 0 10.8 10.8Z"
+                fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap content" id="auth-main">
+
+  <!-- 启动自检：检查是否已登录、后端是否可达。JS 未启用时保持可见，提示需要脚本。 -->
+  <section class="panel panel-boot" data-view="boot" aria-labelledby="boot-h">
+    <p class="eyebrow">正在检查登录状态</p>
+    <h1 id="boot-h" class="title">稍候…</h1>
+    <p class="lead">正在与认证服务确认当前会话。</p>
+    <noscript>
+      <p class="notice notice-warn" role="alert">
+        当前浏览器未启用 JavaScript。本登录页需要 JavaScript 才能完成身份校验，
+        请启用后重试。
+      </p>
+    </noscript>
+  </section>
+
+  <!-- 唯一入口：Dell Linux 账号 -->
+  <section class="panel panel-linux" data-view="linux" hidden aria-labelledby="linux-h">
+    <p class="eyebrow">Dell Linux 账号</p>
+    <h1 id="linux-h" class="title">登录 Dell LLM Lab</h1>
+    <p class="lead">
+      使用你在 Dell 主机上的 Linux 账号登录。本入口只用于确认「你是谁」，
+      不决定你能调用哪些端点；能看什么由服务端按账号授权决定。
+    </p>
+
+    <!-- 门槛说明：默认（未就绪）时的主文案，也是屏幕阅读器先读到的一段。 -->
+    <p class="notice notice-warn" id="linux-gate" data-gate="hold" role="status" aria-live="polite">
+      当前仅是 BasicAuth 保护的预览；Linux PAM 服务端登录未开通。
+      下表单项已停用，不会发送任何登录请求。
+    </p>
+
+    <form id="linux-form" class="form" method="post" action="/auth/linux/login"
+          novalidate autocomplete="on">
+      <!-- 默认整组停用：只有服务端明确声明 Linux PAM provider 已启用时才开闸。 -->
+      <fieldset id="linux-fields" disabled>
+        <div class="field">
+          <label for="username">Dell Linux 用户名</label>
+          <input id="username" name="username" type="text" inputmode="text"
+                 autocomplete="username" autocapitalize="none" autocorrect="off"
+                 spellcheck="false" required aria-describedby="username-hint"
+                 placeholder="请输入 Dell Linux 用户名" disabled>
+          <p class="fieldhint" id="username-hint">即你在 Dell 主机上的 Linux 登录名，不是邮箱、不是飞书账号。</p>
+        </div>
+
+        <div class="field">
+          <label for="password">Dell Linux 口令</label>
+          <div class="pwfield">
+            <input id="password" name="password" type="password"
+                   autocomplete="current-password" required
+                   aria-describedby="password-hint" placeholder="请输入 Dell Linux 口令" disabled>
+            <button type="button" id="pw-toggle" class="pwtoggle" disabled
+                    aria-pressed="false" aria-controls="password" aria-label="显示口令" title="显示口令">
+              <svg class="ico-eye" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" focusable="false">
+                <path d="M2.4 12S6.2 5.9 12 5.9 21.6 12 21.6 12 17.8 18.1 12 18.1 2.4 12 2.4 12Z"
+                      fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+                <circle cx="12" cy="12" r="2.9" fill="none" stroke="currentColor" stroke-width="1.6"/>
+              </svg>
+              <svg class="ico-eye-off" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" focusable="false">
+                <path d="M4 4.7 19.3 20M9.6 6.4A9.7 9.7 0 0 1 12 6.1c5.8 0 9.6 6 9.6 6a17 17 0 0 1-3.2 3.7M6.6 8.1A17.2 17.2 0 0 0 2.4 12s3.8 6 9.6 6c1.3 0 2.5-.3 3.5-.7"
+                      fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
+          <p class="fieldhint" id="password-hint">
+            口令只经同源 HTTPS 请求发送给 Dell 主机的 PAM 服务，不写入浏览器存储，也不会出现在地址栏。
+          </p>
+        </div>
+      </fieldset>
+
+      <div class="actions actions-form">
+        <button type="submit" class="btn btn-primary" id="linux-submit" disabled
+                aria-describedby="linux-gate">
+          <span class="btnlabel">登录</span>
+          <span class="spinner" aria-hidden="true"></span>
+        </button>
+        <button type="button" class="btn btn-quiet" id="gate-retry">重新检查登录服务</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- 已登录但未分配项目 -->
+  <section class="panel panel-noproject" data-view="no-project" hidden aria-labelledby="np-h">
+    <p class="eyebrow">已通过身份校验</p>
+    <h1 id="np-h" class="title">账号尚未分配项目</h1>
+    <p class="lead">
+      身份已确认，但该账号目前没有已授权的项目，因此暂时没有可展示的用量与端点。
+      请联系管理员完成项目授权；授权生效后重新登录即可。
+    </p>
+    <dl class="facts">
+      <div><dt>当前身份</dt><dd id="np-user" class="mono">—</dd></div>
+      <div><dt>授权项目</dt><dd><span class="pill pill-caution">待分配</span></dd></div>
+    </dl>
+    <div class="actions">
+      <button type="button" class="btn btn-primary" id="np-logout">退出登录</button>
+    </div>
+  </section>
+
+  <!-- 已退出 -->
+  <section class="panel panel-loggedout" data-view="logged-out" hidden aria-labelledby="lo-h">
+    <p class="eyebrow">会话已结束</p>
+    <h1 id="lo-h" class="title">已安全退出</h1>
+    <p class="lead">登录状态已在服务端清除。你可以随时重新登录。</p>
+    <div class="actions">
+      <button type="button" class="btn btn-primary" id="lo-again">返回登录</button>
+    </div>
+  </section>
+
+  <!-- 后端不可用 / file:// 静态预览 -->
+  <section class="panel panel-offline" data-view="offline" hidden aria-labelledby="off-h">
+    <p class="eyebrow">无法连接认证服务</p>
+    <h1 id="off-h" class="title">当前为离线状态</h1>
+    <p class="lead" id="offline-detail">
+      页面无法与本机认证服务通信，因此不会发送任何登录请求，也不会显示伪造的登录结果。
+      请确认认证服务已启动后重试。
+    </p>
+    <div class="actions">
+      <button type="button" class="btn btn-primary" id="offline-retry">重新检查</button>
+    </div>
+  </section>
+
+  <!-- 全局状态播报区：错误、锁定、限速等 -->
+  <div class="statusbar" id="statusbar" role="status" aria-live="polite" data-kind="info" hidden>
+    <span class="dot" aria-hidden="true"></span>
+    <span class="statustext" id="status-text"></span>
+  </div>
+
+  <p class="footnote">
+    本页面只与同源认证接口通信（<code>/auth/csrf</code>、<code>/auth/linux/login</code>、
+    <code>/auth/me</code>、<code>/auth/logout</code>），不访问任何飞书端点。
+    会话凭据由服务端以 <code>HttpOnly</code> Cookie 承载，页面不读取、不存储。
+  </p>
+</main>
+
+<form id="logout-form" method="post" action="/auth/logout" hidden aria-hidden="true" tabindex="-1"></form>
+
+<!-- 经典脚本（非 module）：file:// 静态预览下 module 脚本会被跨源拦截。
+     先加载纯逻辑层，再加载视图编排层。defer 保证按顺序、且在 DOM 解析后执行。 -->
+<script defer src="./auth-core.js"></script>
+<script defer src="./auth.js"></script>
+</body>
+</html>

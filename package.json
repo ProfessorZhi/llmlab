@@ -1,0 +1,18 @@
+{
+  "name": "llm-lab-portal-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Dell LLM Lab Portal web front-end (Traffic Atlas). No runtime dependencies: browser-native ESM + CSS only.",
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\" \"tests/web-features/*.test.js\" \"tests/infra/*.test.js\"",
+    "test:features": "node --test \"tests/web-features/*.test.js\"",
+    "test:browser": "node --test \"tests/browser/*.test.js\"",
+    "test:all": "npm test && npm run test:browser",
+    "verify:extract": "node web/tools/extract-from-prototype.mjs --check",
+    "serve": "node web/tools/serve.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

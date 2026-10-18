@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light" data-build-profile="production">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark"><title>Dell LLM Lab — Atelier Observatory · 06</title>
+<meta name="description" content="Dell LLM Lab 统一管理后台：Strata、Gateway、Grafana、Prometheus、EvalScope、API 与 Linux 账号身份（PAM 待接线）。界面原型，非生产数据。">
+<!-- Derived from prototypes/v6/index.html @ sha256:b05e754453ed… — see web/tools/extract-from-prototype.mjs -->
+<link rel="stylesheet" href="./css/tokens.css">
+<link rel="stylesheet" href="./css/base.css">
+<link rel="stylesheet" href="./css/atlas.css">
+<link rel="stylesheet" href="./css/portal.css">
+</head>
+<body>
+<a class="skip-link" href="#app-main">跳过导航，进入内容</a>
+<div class="institutional-strip"><div class="wrap strip-inner"><span class="strip-left">DELL LLM LAB <b> / </b> RESEARCH COMPUTE</span><span class="strip-center">PRIVATE INFRASTRUCTURE — DESIGNED FOR READABILITY</span><span class="strip-right">DESIGN STUDY <i>№ 06 / 2026</i></span></div></div>
+<header class="topbar"><div class="wrap top-inner">
+  <a href="#overview" class="brand" aria-label="LLM Lab 首页"><span class="mark" aria-hidden="true"></span><span><span class="brandname">Dell <em>LLM</em> Lab<span class="wordmark-period">.</span></span><small>RESEARCH SYSTEMS <span class="wordmark-rule">/</span> EST. 2026</small></span></a>
+  <nav class="topnav" aria-label="主导航"><button class="navitem active" data-page="overview">概览</button><button class="navitem" data-page="models">模型与对话</button><button class="navitem" data-page="api">API 管理</button><button class="navitem" data-page="calls">我的调用</button><button class="navitem" data-page="observability">监控与日志</button><button class="navitem" data-page="atlas">数据图谱</button><button class="navitem" data-page="evaluation">评测中心</button><button class="navitem" data-page="admin">管理</button></nav>
+  <div class="topright"><span class="badge topstatus"><span class="dot rust"></span>DESIGN PREVIEW</span><button class="themebtn" id="themeButton" aria-label="切换深浅主题" title="切换明暗主题">☾</button><button class="account" id="accountButton" aria-haspopup="dialog" data-account-state="preview"><span class="auth-demo" aria-hidden="true">L</span><span class="account-label" data-account-label>预览访问 · 未建立 Linux 会话</span><span class="account-arrow"> …</span></button></div>
+</div><div class="wrap mobile-nav" aria-label="手机导航"><button class="navitem active" data-page="overview">概览</button><button class="navitem" data-page="models">模型</button><button class="navitem" data-page="api">API</button><button class="navitem" data-page="calls">调用</button><button class="navitem" data-page="observability">监控</button><button class="navitem" data-page="atlas">图谱</button><button class="navitem" data-page="evaluation">评测</button><button class="navitem" data-page="admin">管理</button></div></header>
+<main class="wrap content" id="app-main">
+  <div class="demo-strip" role="note" data-demo-strip><span><strong data-strip-title>ATELIER 06 / 视觉与动效原型</strong> · <span data-demo-state>主机遥测正在连接；个人调用 / 评测数据需 Linux PAM 与 Gateway 授权后可见，未验证处显示 UNKNOWN。</span></span><span class="mono" data-strip-right>HOST TELEMETRY · USER DATA GATED</span></div>
+  <section class="view active" id="view-overview" aria-labelledby="overview-title">
+   <div class="editorial-index"><span><b>01</b> / OBSERVATORY</span><span class="index-rule" aria-hidden="true"></span><span>THE PRIVATE COMPUTE EDITION</span></div>
+   <div class="breadcrumb"><span>LLM LAB</span><span>/</span><b>OVERVIEW</b></div>
+   <div class="hero"><div><h1 id="overview-title">实验室概览 <em class="title-whisper">OBSERVATORY</em></h1><p>统一了解计算资源、模型状态、API 调用与评测。完整可观测性，始于清晰的数据血缘。</p></div><div class="hero-right"><div class="seg" role="group" aria-label="演示时间范围"><button class="active" data-range="24h">24 小时</button><button data-range="7d">7 天</button><button data-range="30d">30 天</button></div><span class="stamp">UI SPECIMEN · UPDATED OCT 2026</span></div></div>
+   <div class="lead-grid"><div><div class="lead-label"><span class="label-prefix">HARDWARE / 01</span> 本机 GPU 总显存</div><div class="hardware"><span class="big number">48</span><span class="unit">GB <small>GDDR6</small></span><span class="note">RTX A6000 · 标称规格，非可用 VRAM</span></div><div class="lead-meta"><span><strong>1</strong>计算节点</span><span><strong>3</strong>受管入口</span><span>单机资源调度 · 生产模型保护</span></div></div><div class="right-hardware"><div class="headrow"><h2>服务基础设施 <span class="serif-note">INFRASTRUCTURE</span></h2><span class="badge">演示状态</span></div><div class="value-row"><span class="tiny">模型引擎</span><span class="status"><span class="dot"></span><b>Strata · 文本服务</b></span></div><div class="value-row"><span class="tiny">API Gateway</span><span class="status"><span class="dot"></span><b>统一转发入口</b></span></div><div class="value-row"><span class="tiny">GPU 遥测</span><span class="mutedflag" style="font-size:12px">数据来源待验证 · UNKNOWN</span></div></div></div>
+   <div class="headrow" style="margin:31px 0 10px"><div><h2 class="section-h">调用与用量 <em class="heading-en">/ GATEWAY BFF</em></h2><div class="sect-sub">按 Linux 主体与项目授权从 Gateway 读取；未授权时不显示任何数字</div></div><span class="badge warn" data-source-badge="gated"><span class="dot rust"></span>待授权 · NOT CONNECTED</span></div>
+<div class="stats" data-demo-only><div class="stat"><span>请求总量</span><strong class="number" data-demo-value="1,248">—</strong><small data-stat-note>待 Gateway BFF</small></div><div class="stat"><span>成功率</span><strong class="number" data-demo-value="99.4%">—</strong><small data-stat-note>待 Gateway BFF</small></div><div class="stat"><span>响应 p95</span><strong class="number" data-demo-value="1.42 s">—</strong><small data-stat-note>待 Gateway BFF</small></div><div class="stat"><span>输出 Tokens</span><strong class="number" data-demo-value="482k">—</strong><small data-stat-note>待 Gateway BFF</small></div></div>
+<div class="gated-inline" data-live-only data-gated><div class="gated-row"><span class="gated-k">请求总量 · 成功率 · p95 · Tokens</span><span class="badge warn">待授权</span></div><p class="gated-why">需要 Linux PAM 会话 + Gateway usage BFF 的服务端授权；本预览不推任何按用户聚合的调用数。此前的演示数值不再默认展示。</p></div>
+   <div class="explorer"><div class="plot-side"><div class="headrow"><div><h2 class="section-h">调用量与性能 <em class="heading-en">/ TELEMETRY</em></h2><div class="sect-sub">统一窗口 · 浏览器仅接收授权范围内的聚合数据</div></div><div class="seg" id="chartToggles" role="group" aria-label="切换图表指标"><button class="active" data-chart="calls">请求量</button><button data-chart="latency">p95 延迟</button><button data-chart="tokens">Tokens</button></div></div><div class="plot"><svg id="timelineChart" viewBox="0 0 730 328" role="img" aria-label="演示用的近 24 小时调用与性能折线图"></svg></div><div class="legendline"><span><span class="dot rust"></span> Gateway 计量</span><span><span class="dot"></span> 成功请求</span><button type="button" class="atlas-inline-link" data-go="atlas">探索调用结构 ↗</button><span class="mono">DEMO · 24 POINTS</span></div></div><div class="side-side"><div class="headrow"><span class="caps">MODEL REGISTRY / ACTIVE ROUTE</span><span class="badge warn"><span class="dot rust"></span>示意 · 非真实加载</span></div><div class="model-name">Qwen3.8 Flash Next</div><div class="tiny mono">qwen3.8-flash-next-iq2_xs</div><div class="tags" style="margin-top:13px"><span class="tag">Strata engine</span><span class="tag">OpenAI chat</span><span class="tag">Image capability · 待验收</span></div><dl class="model-detail"><div><dt>上下文长度</dt><dd class="number">32,768 <span class="tiny">tokens</span></dd></div><div><dt>量化格式</dt><dd>IQ2_XS</dd></div><div><dt>推理队列</dt><dd>1 <span class="tiny">running</span></dd></div><div><dt>显存可用量</dt><dd>— <span class="tiny">unknown</span></dd></div></dl><button class="secondary" data-go="models">进入模型工作台 ↗</button><div class="source-foot">数据血缘：Gateway 负责实际请求统计，Strata 报告引擎健康，GPU/NVML 不可靠时不得推断真实可用显存。<b>当前为设计演示。</b></div></div></div>
+   <div class="group-title" style="margin-top:34px"><h2>平台与数据来源</h2><span class="smallmeta">PLATFORM SURFACES · 已运行 ≠ 已接线</span></div>
+<p class="module-empty" data-platform-note>本机平台进程是否运行，与 Portal 是否已接入其数据是两件事。下列按钮只做站内导航；未接线的一律显示 UNKNOWN，不渲染任何真实数字，也不提供引擎端口直连。</p>
+<div class="service-grid">
+  <article class="service" data-platform="strata"><div class="service-icon">S</div><h3>Strata</h3><p>模型执行引擎。对话与调用经受管 Gateway，不开放引擎端口直连。</p><div class="service-foot"><span class="badge warn">未接线</span><span>需同源 BFF 适配器</span></div><button type="button" class="secondary" data-go="models">进入模型工作台</button></article>
+  <article class="service" data-platform="gateway"><div class="service-icon">G<span class="monogram-tail">.</span></div><h3>Gateway</h3><p>统一模型路由、请求计量、Key 与限额的可信服务端来源。</p><div class="service-foot"><span class="badge warn">未接线</span><span>需同源 usage BFF</span></div><button type="button" class="secondary" data-go="api">进入 API 管理</button></article>
+  <article class="service" data-platform="metrics"><div class="service-icon">P<span class="monogram-tail">.</span></div><h3>Prometheus / Grafana</h3><p>指标采集与深度图表。Grafana 原生界面经可信反代与统一权限校验进入，不对外暴露 3000 端口。</p><div class="service-foot"><span class="badge warn">未接线</span><span>需反代与 ACL</span></div><button type="button" class="secondary" data-go="observability">进入监控与日志</button></article>
+  <article class="service" data-platform="evalscope"><div class="service-icon">E</div><h3>EvalScope</h3><p>评测数据、运行记录与报告汇总。原生工具端口不直接暴露浏览器。</p><div class="service-foot"><span class="badge warn">未接线</span><span>需报告适配器</span></div><button type="button" class="secondary" data-go="evaluation">进入评测中心</button></article>
+</div>
+<div class="group-title" style="margin-top:26px"><h2>控制面入口</h2><span class="smallmeta">CONTROL PLANE · 独立授权</span></div>
+<p class="module-empty">CloudCLI / Fleet 属独立控制面：须以固定的同 Tailnet HTTPS(443) 地址接入，并带明确的服务端授权范围。Portal 默认不代理、不模拟其登录，也不在此登记任何地址或凭据；接线前一律「待接线」。</p>
+<div class="service-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+  <article class="service" data-platform="cloudcli"><div class="service-icon">C</div><h3>CloudCLI</h3><p>独立控制面。不通过 Portal 模拟登录，也不暴露其特权后台权限。</p><div class="service-foot"><span class="badge">待接线</span><span>需固定 Tailnet HTTPS:443 + ACL</span></div><button type="button" class="secondary unavailable" disabled title="控制面未接线：需服务端 allowlist 与授权范围">待接线</button></article>
+  <article class="service" data-platform="fleet"><div class="service-icon">F</div><h3>Fleet</h3><p>独立控制面。跨设备管理权限不由此预览授予。</p><div class="service-foot"><span class="badge">待接线</span><span>需固定 Tailnet HTTPS:443 + ACL</span></div><button type="button" class="secondary unavailable" disabled title="控制面未接线：需服务端 allowlist 与授权范围">待接线</button></article>
+</div>
+   <div class="group-title" style="margin-top:34px"><h2>模型服务一览</h2><span class="smallmeta">REGISTERED IS NOT LOADED</span></div>
+   <div class="tablewrap"><table><thead><tr><th>模型 / 引擎</th><th>协议</th><th>登记</th><th>运行状态</th><th>授权范围</th><th>入口</th></tr></thead><tbody><tr><td><span class="rowtitle">Qwen3.8 Flash Next</span><span class="rowmuted mono">Strata · qwen3.8-flash-next-iq2_xs</span></td><td>OpenAI Chat</td><td><span class="badge">已登记</span></td><td><span class="badge good"><span class="dot"></span>示意可用</span></td><td>受管项目</td><td><button class="secondary" data-go="models">查看 ↗</button></td></tr><tr><td><span class="rowtitle">vLLM</span><span class="rowmuted">候选推理引擎</span></td><td>兼容层待验</td><td><span class="badge">计划中</span></td><td><span class="badge">未安装</span></td><td>未授权</td><td>—</td></tr><tr><td><span class="rowtitle">SGLang</span><span class="rowmuted">候选推理引擎</span></td><td>兼容层待验</td><td><span class="badge">计划中</span></td><td><span class="badge">未安装</span></td><td>未授权</td><td>—</td></tr></tbody></table></div>
+  </section>
+  <section class="view" id="view-models" aria-labelledby="models-title"><div class="breadcrumb">LLM LAB / <b>MODELS & CHAT</b></div><div class="hero"><div><h1 id="models-title">模型与对话 <em class="title-whisper">Models & Dialogue.</em></h1><p>一个聊天界面访问已授权模型；引擎部署状态、模态能力和调用协议保持清晰分离。</p></div><div class="hero-right"><span class="badge">受管模型选择 · DEMO</span></div></div><div class="columns"><div><div class="headrow" style="margin-bottom:15px"><h2 class="section-h">对话工作台</h2><div class="selector"><span class="tiny">模型</span><select aria-label="演示模型"><option>Qwen3.8 Flash Next / Strata</option><option disabled>vLLM · 未安装</option><option disabled>SGLang · 未安装</option></select></div></div><div class="chatbox"><div class="chatlog" id="chatLog"><div class="chatbubble bot">欢迎进入 LLM Lab。这是设计原型，未连接真实推理服务。正式系统将通过 Gateway 代理文本、图片和流式响应。</div><div class="chatbubble me">帮我梳理本周推理延迟和异常调用。</div><div class="chatbubble bot">在正式系统中，我将从您有权限访问的 Gateway 调用元数据中总结，不读取其他用户的数据，也不会默认保存请求原文。</div></div><form class="chatcomposer" id="chatForm"><input id="chatInput" aria-label="输入演示消息" placeholder="输入消息以预览界面状态（不会发送模型）"><button class="primary" type="submit">发送 ↗</button></form></div></div><div class="flatpanel"><h3>当前模型能力</h3><div class="statusrows"><div class="statusitem"><div class="tiny">文本</div><strong>支持</strong></div><div class="statusitem"><div class="tiny">图片理解</div><strong>待在线 E2E 验收</strong></div><div class="statusitem"><div class="tiny">OpenAI Chat</div><strong>通过 Gateway</strong></div><div class="statusitem"><div class="tiny">其他协议</div><strong>需 Adapter</strong></div></div><div class="guard warn">图片能力须以线上图片→文本推理通过为准，不能仅凭 encoder 离线测试或布尔健康值宣告完整可用。</div><button class="secondary" data-go="api">查看 API 接入方式 ↗</button></div></div><section class="page-block module-panel" data-module="engines" aria-labelledby="module-engines-title">
+  <div class="editorial-index"><b>06</b><span>ENGINES &amp; DEPLOYMENTS</span><span class="index-rule"></span><span class="mono" data-module-state="engines">等待会话</span></div>
+  <div class="group-title">
+    <h2 class="section-h" id="module-engines-title">引擎与部署</h2>
+    <span class="smallmeta">FAIL-CLOSED · 无来源即 UNKNOWN</span>
+  </div>
+  <div class="module-body" id="module-engines-body">
+    <p class="module-empty">需要已认证的会话与服务端模块授权。授权确认之前，这里不显示引擎版本、显存或部署状态——尤其不会显示一个看起来正常的 GPU 数字。</p>
+  </div>
+</section>
+</section>
+  <section class="view" id="view-api" aria-labelledby="api-title"><div class="breadcrumb">LLM LAB / <b>API CONTROL</b></div><div class="hero"><div><h1 id="api-title">API 管理 <em class="title-whisper">API Control.</em></h1><p>个人与团队的 Endpoint、凭据、用量和限额由同一服务端权限规则管理。</p></div><div class="hero-right"><span class="badge">只读演示 · 真实签发未启用</span></div></div><div class="stats"><div class="stat"><span>我的 Endpoints</span><strong class="number" data-demo-value="02">—</strong><small data-stat-note>待 Gateway BFF</small></div><div class="stat"><span>个人 Key</span><strong class="number" data-demo-value="02">—</strong><small data-stat-note>待授权签发</small></div><div class="stat"><span>本月调用</span><strong class="number" data-demo-value="8,412">—</strong><small data-stat-note>待 Gateway BFF</small></div><div class="stat"><span>剩余预算</span><strong class="number">—</strong><small>未配置</small></div></div><div class="group-title"><h2>Endpoints</h2><button class="secondary" id="newEndpoint">申请新 Endpoint ↗</button></div><div class="tablewrap"><table><thead><tr><th>名称</th><th>调用协议</th><th>发布范围</th><th>模型</th><th>状态</th></tr></thead><tbody><tr><td><span class="rowtitle">my-chat</span><span class="rowmuted mono">/v1/chat/completions</span></td><td>OpenAI Chat</td><td>Private</td><td>Qwen3.8</td><td><span class="badge good">演示就绪</span></td></tr><tr><td><span class="rowtitle">team-vision</span><span class="rowmuted mono">/v1/chat/completions</span></td><td>Images / Chat</td><td>Team · 需授权</td><td>Qwen3.8</td><td><span class="badge warn">E2E 待验</span></td></tr></tbody></table></div><div class="columns api-keys"><section><div class="group-title"><h2>个人 API Keys</h2><span class="smallmeta">SECRET IS NEVER LISTED</span></div><div class="tablewrap"><table style="min-width:450px"><thead><tr><th>名称</th><th>前缀</th><th>Scope</th><th>状态</th></tr></thead><tbody><tr><td><span class="rowtitle">workstation</span></td><td><span class="key">llk_••••8m</span></td><td>models.read</td><td><span class="badge good">演示有效</span></td></tr><tr><td><span class="rowtitle">team-ci</span></td><td><span class="key">llk_••••2a</span></td><td>usage.read</td><td><span class="badge">演示密钥</span></td></tr></tbody></table></div><div class="guard">正式系统仅在签发时展示一次明文；服务端保存摘要，按项目和 Endpoint 审核 scope、到期与撤销。</div></section><aside class="flatpanel"><h3>SDK 接入示意</h3><p>所有外部应用通过 Gateway 的受管 API，绝不直接拿到 Strata 上游主密钥。</p><div class="codearea" id="curlExample">curl https://lab.example/v1/chat/completions \
+  -H 'Authorization: Bearer &lt;YOUR_SCOPED_KEY&gt;' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"qwen3.8-flash-next-iq2_xs","messages":[]}'</div><div class="actions"><button class="secondary" id="copyCurl">复制示例</button><span class="tiny">示例地址与 Key 占位符，不可直接调用</span></div></aside></div><section class="page-block module-panel" data-module="playground" aria-labelledby="module-playground-title">
+  <div class="editorial-index"><b>07</b><span>PLAYGROUND &amp; ENDPOINT VISIBILITY</span><span class="index-rule"></span><span class="mono" data-module-state="playground">等待会话</span></div>
+  <div class="group-title">
+    <h2 class="section-h" id="module-playground-title">Playground 与 Endpoint 可见性</h2>
+    <span class="smallmeta">SYNTHETIC DISABLED UNTIL BACKED BY AUTH</span>
+  </div>
+  <div class="module-body" id="module-playground-body">
+    <p class="module-empty">需要已认证的会话与服务端模块授权。Endpoint 的可见性由服务端按 principal × 项目判定，默认 <b>Private</b>；本页面只呈现判定结果，不接受客户端把它改成 Shared。</p>
+  </div>
+</section>
+</section>
+  <section class="view" id="view-observability" aria-labelledby="obs-title"><div class="breadcrumb">LLM LAB / <b>OBSERVABILITY</b></div><div class="hero"><div><h1 id="obs-title">监控与日志 <em class="title-whisper">Observability.</em></h1><p>在 Portal 查看关键指标和调用溯源；完整 Grafana 原生大盘用于深度排障。</p></div><div class="hero-right"><span class="badge">来源与新鲜度优先</span></div></div><div class="service-grid" style="grid-template-columns:repeat(3,minmax(0,1fr))"><article class="service"><div class="service-icon">P<span class="monogram-tail">.</span></div><h3>Prometheus</h3><p>采集计算资源、服务健康、吞吐量与时间序列。</p><div class="service-foot">SERVER QUERIES <span>受控</span></div></article><article class="service"><div class="service-icon">G<span class="monogram-tail">.</span></div><h3>Grafana</h3><p>原生完整交互图表，经可信反代与统一权限校验进入。</p><div class="service-foot">DEEP VIEW <span>待接线</span></div></article><article class="service"><div class="service-icon">L<span class="monogram-tail">.</span></div><h3>Gateway 日志</h3><p>按 request metadata、key_id、项目查询，不默认记录消息正文。</p><div class="service-foot">ACCESS METADATA <span>按权限</span></div></article></div><div class="group-title" style="margin-top:36px"><h2>观测指标</h2><span class="smallmeta">FAIL-CLOSED · UNKNOWN ≠ ZERO</span></div><div class="tablewrap"><table><thead><tr><th>指标</th><th>当前显示</th><th>权威来源</th><th>数据口径</th></tr></thead><tbody><tr><td class="rowtitle">p95 响应延迟</td><td>—</td><td>Gateway usage</td><td>成功请求且具有效样本</td></tr><tr><td class="rowtitle">GPU 可用显存</td><td>UNKNOWN</td><td>NVML / Strata</td><td>仅可信观测数据，明确来源</td></tr><tr><td class="rowtitle">API 请求数 / 429</td><td>—</td><td>Gateway usage</td><td>key_id → principal/project</td></tr><tr><td class="rowtitle">TTFT</td><td>—</td><td>Gateway streaming</td><td>仅流式且有效样本</td></tr></tbody></table></div><section class="page-block module-panel" data-module="observability" aria-labelledby="module-obs-title">
+  <div class="editorial-index"><b>08</b><span>READ-ONLY DATA SOURCES</span><span class="index-rule"></span><span class="mono" data-module-state="observability">等待会话</span></div>
+  <div class="group-title">
+    <h2 class="section-h" id="module-obs-title">数据源与只读入口</h2>
+    <span class="smallmeta">UNKNOWN ≠ ZERO · 只读</span>
+  </div>
+  <div class="module-body" id="module-observability-body">
+    <p class="module-empty">需要已认证的会话与服务端模块授权。没有配置可信数据源的指标一律显示 UNKNOWN，而不是 0；Grafana / Prometheus 的入口只在服务端确认已接线时才出现。</p>
+  </div>
+</section>
+</section>
+  <section class="view atlas-view" id="view-atlas" aria-labelledby="atlas-title">
+  <div class="breadcrumb">LLM LAB / <b>TRAFFIC ATLAS</b></div>
+  <div class="hero">
+    <div>
+      <h1 id="atlas-title">调用结构图谱 <em class="title-whisper">Traffic Atlas.</em></h1>
+      <p class="atlas-hero-sub">从调用类型到性能离散度：用联动结构图、排序、分布与热力矩阵理解一次工作负载，而不是只看一个平均值。</p>
+    </div>
+    <div class="hero-right"><span class="badge warn">九类合成工作负载 · 仅用于交互展示</span></div>
+  </div>
+  <div class="atlas-meta">
+    <span class="atlas-overline">DATA STUDY / 09 WORKLOADS · ALL VALUES SYNTHETIC</span>
+    <div class="atlas-toggle" aria-label="演示统计窗口">
+      <button type="button" data-atlas-range="24h" aria-pressed="true">24 小时</button><button type="button" data-atlas-range="7d" aria-pressed="false">7 天</button><button type="button" data-atlas-range="30d" aria-pressed="false">30 天</button>
+    </div>
+  </div>
+  <div class="atlas-metrics" aria-label="演示数据概览">
+    <div class="atlas-metric"><div class="label">调用请求</div><strong id="atlasCalls" data-demo-value="1,248">—</strong><small id="atlasCallsNote">24h · 合成窗口</small></div>
+    <div class="atlas-metric"><div class="label">工作负载</div><strong id="atlasActive">09</strong><small>3 个业务方向</small></div>
+    <div class="atlas-metric"><div class="label">输出 Tokens</div><strong id="atlasTokens" data-demo-value="482k">—</strong><small>合成记录 · 仅示意</small></div>
+    <div class="atlas-metric"><div class="label">p95 延迟</div><strong id="atlasP95">—</strong><small>总体 p95 不由子群分位数求平均</small></div>
+  </div>
+  <div class="atlas-controlbar">
+    <div class="atlas-filters" role="group" aria-label="按工作负载类型筛选">
+      <button type="button" data-atlas-group="all" aria-pressed="true">全部负载</button>
+      <button type="button" data-atlas-group="conversation" aria-pressed="false"><i class="atlas-dot"></i>交互与内容</button>
+      <button type="button" data-atlas-group="developer" aria-pressed="false"><i class="atlas-dot b"></i>开发自动化</button>
+      <button type="button" data-atlas-group="evaluation" aria-pressed="false"><i class="atlas-dot c"></i>实验评测</button>
+    </div>
+    <span class="atlas-overline">HOVER / CLICK · 1–3 切换图 · ESC 取消 · / 搜索</span>
+  </div>
+  <div class="atlas-stage-grid">
+    <div class="atlas-primary">
+      <div class="atlas-sectionhead"><div><h2>调用结构探索</h2><p>业务方向 / 工作负载两级分组 · 三种对应同一批样本的数据视图</p></div>
+        <div class="atlas-toggle" role="group" aria-label="切换调用结构图">
+          <button type="button" data-atlas-view="sunburst" aria-pressed="true">旭日图</button>
+          <button type="button" data-atlas-view="treemap" aria-pressed="false">矩形图</button>
+          <button type="button" data-atlas-view="dots" aria-pressed="false">点阵图</button>
+        </div>
+      </div>
+      <div class="atlas-breadcrumb" id="atlasBreadcrumb"><button type="button" id="atlasReset">全部工作负载</button> / 09 类</div>
+      <div class="atlas-chart-frame" id="atlasChartFrame">
+        <svg id="atlasMainChart" viewBox="0 0 760 560" role="img" aria-label="合成调用量层级旭日图，可点击工作负载筛选并查看详情"></svg>
+        <canvas id="atlasDotCanvas" aria-label="调用点阵，演示数据每个点代表一次调用" role="img" hidden></canvas>
+      </div>
+      <div class="atlas-rail"><span id="atlasScope">待授权数据源</span><span id="atlasBasis">无授权分母</span></div>
+      <div class="atlas-mini-strip" id="atlasMiniStrip" aria-hidden="true"></div>
+    </div>
+    <aside class="atlas-secondary" aria-label="当前筛选及工作负载详情">
+      <div class="atlas-sectionhead"><div><h2>调用组成</h2><p>三个方向占比 · 与结构图联动</p></div></div>
+      <div class="atlas-donut-area"><svg viewBox="0 0 200 200" id="atlasDonut" role="img" aria-label="三大方向合成请求量占比环形图"></svg><div class="atlas-legend" id="atlasLegend"></div></div>
+      <div class="atlas-focus" aria-live="polite" id="atlasDetail"></div>
+    </aside>
+  </div>
+  <section class="atlas-subsection" aria-labelledby="atlas-rank-title">
+    <div class="atlas-subsection-title"><h2 id="atlas-rank-title">工作负载排名</h2><small>02 / DISCOVER · 搜索、排序、联动高亮</small></div>
+    <div class="atlas-table-controls"><label class="atlas-search">⌕ <input type="search" id="atlasSearch" placeholder="搜索负载或业务方向" aria-label="搜索工作负载"></label>
+      <div style="display:flex;gap:8px;align-items:center"><label for="atlasSort" class="tiny">排序依据</label><select id="atlasSort"><option value="calls">调用量</option><option value="p95">p95 延迟</option><option value="tokens">输出 Tokens</option></select>
+        <button type="button" class="secondary" id="atlasExport" style="font-size:12px">CSV ↗</button><button type="button" class="secondary" id="atlasExportJSON" style="font-size:12px">JSON ↗</button></div></div>
+    <div class="atlas-rank" id="atlasRanking" role="region" aria-label="可交互工作负载排序表">
+      <div class="atlas-rankhead"><span>#</span><span>工作负载</span><span>相对规模</span><span style="text-align:right">数值</span><span style="text-align:right">p95</span><span>对比</span></div>
+      <div id="atlasRankRows"></div>
+    </div>
+  </section>
+  <section class="atlas-subsection" aria-labelledby="atlas-analysis-title">
+    <div class="atlas-subsection-title"><h2 id="atlas-analysis-title">分布与关联分析</h2><small>03 / ANALYSIS · 跟随当前筛选自动重算</small></div>
+    <div class="atlas-analysis-grid">
+      <div class="atlas-analysis-panel"><h3>请求集中度 / Pareto</h3><p>累计占比以及达到 80% 调用量所需的工作负载数</p><svg id="atlasPareto" role="img" viewBox="0 0 610 300" aria-label="工作负载调用量帕累托曲线"></svg><div class="atlas-overline" id="atlasParetoNote">—</div></div>
+      <div class="atlas-analysis-panel"><h3>调用规模 × 延迟</h3><p>每个点为一类工作负载；横轴为调用量（对数），纵轴为 p95</p><svg id="atlasScatter" role="img" viewBox="0 0 610 300" aria-label="调用量与 p95 延迟散点图"></svg><div class="atlas-overline">分位数不能相加；点的大小只编码输出 Tokens</div></div>
+    </div>
+    <div class="atlas-heatmap">
+      <div class="atlas-heatmap-row"><div><h3>每小时活跃度 / Activity matrix</h3><p>7 天 × 24 小时 · 颜色深浅只表示模拟请求强度，并非 Dell 生产历史</p></div>
+        <div class="atlas-toggle"><button type="button" data-atlas-heat="volume" aria-pressed="true">请求强度</button><button type="button" data-atlas-heat="latency" aria-pressed="false">延迟压力</button></div></div>
+      <div class="atlas-h-scroll"><svg id="atlasHeatmap" class="atlas-heatmap-svg" viewBox="0 0 880 265" role="grid" aria-label="合成的七日二十四小时活跃度热力图，方向键可浏览格子"></svg></div>
+      <div class="atlas-heatmap-output" id="atlasHeatReadout" aria-live="polite">点击或使用方向键浏览一个格子。</div>
+    </div>
+  </section>
+  <section class="atlas-compare" id="atlasCompare" hidden aria-labelledby="atlas-compare-title">
+    <div class="atlas-compare-head"><h3 id="atlas-compare-title">选中工作负载对比 <span id="atlasCompareCount" class="tiny"></span></h3><button type="button" id="atlasCompareClear">清空选择</button></div>
+    <div id="atlasCompareGrid" class="atlas-compare-grid"></div>
+  </section>
+  <div class="atlas-note">设计验证模式：本页所有调用、延迟、Tokens、活跃度与分组数据均由页面内的静态演示样本生成。没有查询生产 Gateway usage.jsonl、Prometheus、Grafana、Strata 或 EvalScope。真实接入时必须由 Portal 后端先完成项目权限过滤，再传入聚合 DTO；缺失指标保持 UNKNOWN，不以 0 代替。</div>
+</section>
+<div class="atlas-tip" id="atlasTip" role="tooltip" data-open="false" hidden></div>
+
+<section class="view" id="view-evaluation" aria-labelledby="eval-title"><div class="breadcrumb">LLM LAB / <b>EVALUATION</b></div><div class="hero"><div><h1 id="eval-title">评测中心 <em class="title-whisper">Evaluation.</em></h1><p>EvalScope 负责评测任务与报告，Portal 负责展示授权的结果、运行状态和资源预算。</p></div><div class="hero-right"><span class="badge">当前未连接真实评测 Job</span></div></div><div class="columns"><div class="infobox"><div class="headrow"><h2 class="section-h">EvalScope 集成</h2><span class="badge warn">待接线</span></div><p class="muted" style="font-size:12px;max-width:520px;margin:10px 0 26px">已保存评测结果由服务端 Adapter 安全读取；原生 UI 仅在资源路径、子路径代理与身份边界完整验证之后开放。</p><ol class="steps"><li><span class="count">01</span><div><b>模型 / Endpoint 选择</b><p>从已授权的模型版本和 API 别名中选择评测目标。</p></div></li><li><span class="count">02</span><div><b>数据集、预算与排队</b><p>评测资源预检，不抢占现有 Strata GPU 服务。</p></div></li><li><span class="count">03</span><div><b>报告索引与对比</b><p>记录数据集版本、模型版本、指标及可复现实验信息。</p></div></li></ol></div><aside class="flatpanel"><h3>当前结果</h3><p>尚无经授权读取的真实评测记录。</p><div class="surface"><span class="caps">EMPTY STATE</span><div style="font-size:22px;letter-spacing:-.04em;margin:12px 0">等待数据接入</div><span class="tiny">这不是评测失败，也不代表已有模型得分为 0。</span></div><div class="guard">基准测试和实际部署是两条独立资源工作流；正式使用前需建立隔离队列与版本审计。</div></aside></div><section class="page-block module-panel" data-module="evaluation" aria-labelledby="module-eval-title">
+  <div class="editorial-index"><b>09</b><span>EVALSCOPE</span><span class="index-rule"></span><span class="mono" data-module-state="evaluation">等待会话</span></div>
+  <div class="group-title">
+    <h2 class="section-h" id="module-eval-title">EvalScope 入口授权</h2>
+    <span class="smallmeta">AUTHORIZED ENTRY ONLY</span>
+  </div>
+  <div class="module-body" id="module-evaluation-body">
+    <p class="module-empty">需要已认证的会话与服务端模块授权。EvalScope 的原生界面入口只在身份边界与子路径代理验证通过后开放；未开放时这里说明原因，而不是给一个点了没反应的按钮。</p>
+  </div>
+</section>
+</section>
+  <section class="view" id="view-admin" aria-labelledby="admin-title"><div class="breadcrumb">LLM LAB / <b>ADMINISTRATION</b></div><div class="hero"><div><h1 id="admin-title">团队与系统管理 <em class="title-whisper">Administration.</em></h1><p>Linux 账号（PAM）负责登录身份；Portal 控制用户、项目、模型与 API 权限。物理部署仍需独立审批。</p></div><div class="hero-right"><button class="secondary" id="previewAuth">查看 Linux 登录方案</button></div></div><div class="columns"><div><div class="group-title"><h2>身份与权限</h2><span class="smallmeta">AUTHN IS NOT AUTHZ</span></div><div class="statusrows"><div class="statusitem"><div class="tiny">统一入口</div><strong>Linux 账号 / PAM</strong><div class="badge warn" style="margin-top:10px">预览未接线 · 需服务端 PAM 会话</div></div><div class="statusitem"><div class="tiny">Portal 会话</div><strong>HttpOnly Cookie + CSRF</strong><div class="badge" style="margin-top:10px">服务端授权</div></div><div class="statusitem"><div class="tiny">角色</div><strong>Viewer / User / Operator / Admin</strong></div><div class="statusitem"><div class="tiny">项目资源</div><strong>Principal × Project × Scope</strong></div></div><div class="group-title" style="margin-top:31px"><h2>权限边界</h2><span class="smallmeta">TRUST BOUNDARIES</span></div><div class="tablewrap"><table><thead><tr><th>身份凭据</th><th>主要用途</th><th>绝不能替代</th></tr></thead><tbody><tr><td>Linux PAM 会话</td><td>浏览器登录 Portal</td><td>Gateway API Key</td></tr><tr><td>个人 Token</td><td>llmlab CLI / 管理 REST</td><td>管理员 / Fleet Master</td></tr><tr><td>Endpoint Key</td><td>应用调用模型</td><td>Linux / Portal 登录</td></tr><tr><td>Strata 上游密钥</td><td>Gateway 到推理引擎</td><td>公开到浏览器</td></tr></tbody></table></div></div><aside class="flatpanel"><h3>实体部署安全流程</h3><p>平台不从 Web 按钮直接执行系统命令，更不会在后台替换运行中的他人模型服务。</p><ol class="steps"><li><span class="count">01</span><div><b>Deployment Profile</b><p>模型版本、引擎、显存预算和协议能力。</p></div></li><li><span class="count">02</span><div><b>Preflight / Dry-run</b><p>检查 NVML、资源占用、维护窗口与备份。</p></div></li><li><span class="count">03</span><div><b>管理员审批</b><p>申请与实际执行分离；保留审计。</p></div></li><li><span class="count">04</span><div><b>执行 / Canary / 回滚</b><p>仅在专门授权维护任务中执行。</p></div></li></ol><button class="secondary unavailable" type="button" disabled title="正式部署功能尚未上线">执行部署 · 尚未开放</button></aside></div><section class="page-block module-panel" data-module="administration" aria-labelledby="module-admin-title">
+  <div class="editorial-index"><b>10</b><span>VIEW FILTERING &amp; RBAC</span><span class="index-rule"></span><span class="mono" data-module-state="administration">等待会话</span></div>
+  <div class="group-title">
+    <h2 class="section-h" id="module-admin-title">视图过滤与权限边界</h2>
+    <span class="smallmeta">AUTHN IS NOT AUTHZ · 服务端判定</span>
+  </div>
+  <div class="module-body" id="module-administration-body">
+    <p class="module-empty">需要已认证的会话。下面显示的是服务端按你的会话主体算出的可见范围（角色、scope、项目、可见模块），不是客户端选择的结果。</p>
+  </div>
+</section>
+</section>
+<section class="view" id="view-calls" aria-labelledby="calls-title">
+  <div class="breadcrumb">LLM LAB / <b>MY CALL LOG</b></div>
+  <div class="hero">
+    <div>
+      <h1 id="calls-title">我的调用日志 <em class="title-whisper">My Calls.</em></h1>
+      <p>只列出你名下 key 的逐条调用：时间、状态、Token、排队与 <span class="mono">request_id</span>。归属只看服务端 key 目录里的 principal 是否等于你的会话主体，请求里的任何自报字段都不参与。</p>
+    </div>
+    <div class="hero-right"><span class="badge" id="callsSourceBadge">来源未定 · 等待会话</span></div>
+  </div>
+
+  <div class="calls-filters" id="callsFilters" role="group" aria-label="调用日志筛选">
+    <div class="calls-filter-row">
+      <span class="caps">时间窗</span>
+      <div class="calls-presets" role="group" aria-label="快捷时间窗">
+        <button type="button" class="secondary" data-calls-preset="1h" aria-pressed="false">近 1 小时</button>
+        <button type="button" class="secondary" data-calls-preset="24h" aria-pressed="false">近 24 小时</button>
+        <button type="button" class="secondary" data-calls-preset="7d" aria-pressed="false">近 7 天</button>
+      </div>
+      <label class="field"><span class="tiny">起（本地时间）</span><input type="datetime-local" id="callsFrom" name="from"></label>
+      <label class="field"><span class="tiny">止（本地时间，不含）</span><input type="datetime-local" id="callsTo" name="to"></label>
+    </div>
+    <div class="calls-filter-row">
+      <span class="caps">筛选</span>
+      <label class="field"><span class="tiny">结果</span><select id="callsOutcome" aria-label="调用结果">
+        <option value="all">全部结果</option>
+        <option value="success">成功</option>
+        <option value="failed">失败</option>
+        <option value="cancelled">已取消</option>
+      </select></label>
+      <label class="field"><span class="tiny">Key</span><select id="callsKey" aria-label="key"><option value="">全部（我名下的 key）</option></select></label>
+      <label class="field"><span class="tiny">模型</span><input type="text" id="callsModel" name="model" placeholder="例如 llm-a"></label>
+      <label class="field calls-limit"><span class="tiny">每页条数</span><input type="number" id="callsLimit" name="limit" min="1" max="200" step="1" value="50"></label>
+      <div class="calls-filter-actions">
+        <button class="primary" type="button" id="callsApply">应用筛选</button>
+        <button class="secondary" type="button" id="callsReset">重置</button>
+      </div>
+    </div>
+    <div class="calls-filter-row calls-export-row">
+      <span class="tiny" id="callsWindow">尚未取到生效窗口</span>
+      <span class="calls-export">
+        <span class="tiny" id="callsExportNote">导出：没有已加载的行</span>
+        <button type="button" class="secondary" id="callsExportCsv" disabled title="没有已加载的调用可导出">CSV ↓</button>
+        <button type="button" class="secondary" id="callsExportJson" disabled title="没有已加载的调用可导出">JSON ↓</button>
+      </span>
+    </div>
+  </div>
+
+  <div id="callsHost" aria-live="polite">
+    <div class="surface">
+      <span class="caps">WAITING FOR SESSION</span>
+      <p class="module-empty" style="margin-top:11px">尚未向服务端确认你的会话与调用归属。确认之前这里不会出现任何数字——空态不是「零次调用」，而是「还没问过」。</p>
+    </div>
+  </div>
+</section>
+  <footer class="footbar"><span>DELL LLM LAB / ATELIER OBSERVATORY Nº 06</span><span>MOTION · CLARITY · RESTRAINT &nbsp; / &nbsp; 只读预览 · 无真实密钥 · 未接入用户数据</span></footer>
+</main>
+<dialog id="explainDialog" aria-labelledby="modalTitle"><div class="modal-head"><h2 id="modalTitle">功能说明</h2><button class="close" id="closeDialog" aria-label="关闭说明">×</button></div><div class="modal-body" id="modalBody"></div><div class="modal-actions"><button class="primary" id="confirmDialog">了解</button></div></dialog>
+<script type="module" src="./js/app.js"></script>
+</body></html>

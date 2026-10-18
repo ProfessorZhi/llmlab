@@ -1,0 +1,150 @@
+# ===========================================================================
+# LLM Lab -- local configuration
+#
+# This file holds NO secrets.  The Strata API key lives in config/secrets.env,
+# which is gitignored and read only by the portal's server side.  Nothing in
+# this file is ever sent to the browser, and nothing here needs to stay stable
+# across machines -- copy it, edit it, it is yours.
+# ===========================================================================
+
+[lab]
+name    = "LLM Lab"
+tagline = "Local AI Operations & Benchmark Workspace"
+# Windows runs the tooling; the inference node only serves tokens.
+role    = "windows-workstation"
+
+[portal]
+host = "localhost"          # never {{LAB_BIND_ADDR}} unless you have done the auth work
+port = 8765
+# How long start.ps1 waits for the portal to answer /api/healthz before it
+# calls the launch a failure.  This is a *slow-machine* knob, not a health
+# check: on a workstation whose D: volume is saturated, a cold interpreter can
+# need well over a minute just to import and bind.  120s is a starting budget
+# for that case; a process that has actually died is detected immediately and
+# does not wait this out.
+startup_timeout_s = 120
+
+# ---------------------------------------------------------------------------
+# The inference node.  Read-only in every direction: the lab never restarts a
+# service, never writes a file, never changes a kernel argument.
+# ---------------------------------------------------------------------------
+[node]
+label             = "{{LAB_NODE}}"
+host              = "{{LAB_HOST}}"
+hostname          = "{{LAB_HOSTNAME}}"
+ssh_user          = "{{LAB_USER}}"
+ssh_key           = "{{LAB_SSH_KEY_PATH}}"
+ssh_known_hosts   = "{{LAB_KNOWN_HOSTS_PATH}}"
+ssh_fingerprint   = "{{LAB_SSH_FINGERPRINT_PATH}}"
+ssh_timeout_s     = 20       # ConnectTimeout: the TCP/SSH handshake only
+# Budget for the whole read-only probe.  Kept apart from ConnectTimeout on
+# purpose: the measured variance is in the session, not the handshake.  On a
+# loaded workstation an identical `ssh ... hostname` was observed at 2s and at
+# 19s, and the real probe runs a dozen commands on top of that.  A tight value
+# here turns a healthy-but-slow node into a reported SSH failure.
+ssh_probe_timeout_s = 60
+probe_cache_ttl_s = 15       # how long a live SSH probe stays warm
+
+# ---------------------------------------------------------------------------
+# Model endpoints the portal can talk to.  Add one block per deployment.
+# `kind` selects the adapter in integrations/.
+# ---------------------------------------------------------------------------
+[endpoints.strata-local]
+label        = "Strata / Qwen3.8-Flash-Next IQ2_XS"
+kind         = "strata"                       # integrations/strata
+base_url     = "http://{{LAB_HOST}}:8080"
+secret_file  = "config/secrets.env"
+api_key_var  = "STRATA_API_KEY"
+deployment   = "{{LAB_NODE_ID}} / RTX A6000 / low-ram / ctx 32768 / parallel 1"
+enabled      = true
+
+# Declared but intentionally NOT enabled: phase C of the roadmap.  Leaving the
+# block in place documents the shape without pretending the work is done.
+[endpoints.deepseek-gateway]
+label       = "Company DeepSeek gateway"
+kind        = "openai-compatible"
+base_url    = ""
+secret_file = "config/secrets.env"
+api_key_var = "DEEPSEEK_GATEWAY_KEY"
+enabled     = false
+note        = "Phase C. Needs a credential decision before anything is called."
+
+# ---------------------------------------------------------------------------
+# Local web services.  The portal links to them and reports whether they are
+# up; it starts only the ones it owns (see legacy/windows-tools/start.ps1).
+# ---------------------------------------------------------------------------
+[services.evalscope]
+label            = "EvalScope Dashboard"
+url              = "http://localhost:9000"
+port             = 9000
+managed          = true                      # the lab may launch this
+enabled          = true
+# The complete argv, in one place.  The portal substitutes {port} and launches
+# exactly this; legacy/windows-tools/start.ps1 does not carry a second copy, it POSTs to the
+# portal.  `cwd` is relative to the project root.
+launch           = ["legacy/evaluation/.venv/Scripts/evalscope.exe", "service",
+                    "--host", "localhost", "--port", "{port}"]
+cwd              = "legacy/evaluation"
+# "background" = launch it, do NOT wait for it.
+#
+# EvalScope imports far more than the portal and then starts a uvicorn app, so
+# its cold start is minutes, not seconds.  Three real measurements on this
+# workstation, same machine / same venv / same command, only the disk differed:
+#   2026-10-10 13:36   launch -> first 200 on /health = 242s
+#   2026-10-10 13:50   launch -> first 200 on /health = 459s   ((0 d:) %Idle = 0)
+#   2026-10-10 14:13   launch -> first 200 on /health =  31s   (OS cache warm)
+# A 15x spread -- so there is no honest timeout constant to put here, which is
+# exactly why the flow does not wait.  The homepage opens as soon as the portal
+# answers; the console reports this service as "starting" while its pid is alive
+# and its port is not yet bound, and "on demand" launch is the same code path.
+start_policy     = "background"
+
+[services.grafana]
+label   = "Grafana"
+url     = "http://localhost:3000"
+port    = 3000
+managed = false
+enabled = false
+note    = "Roadmap. Not installed; a Docker-free path is preferred."
+
+# ---------------------------------------------------------------------------
+# Local forwarding tunnels to the inference node.
+#
+# Why a tunnel at all, when the node's :8080 is reachable directly from this
+# workstation: a forwarded loopback port is a *stable* entry that does not
+# change when the workstation moves between networks, and it puts the node's
+# native console on an origin that never leaves this machine.  The direct URL
+# is kept as a labelled fallback rather than removed, because pretending the
+# tunnel is the only route would be false -- both work today.
+#
+# PORT CHOICE IS NOT FREE.  18080 is already taken on this workstation by an
+# unrelated service that answers HTTP 200 on *every* path, so a "is it up?"
+# probe against it reports healthy while serving something else entirely.
+# 18081 was measured free; change it here if that ever stops being true.
+# ---------------------------------------------------------------------------
+[tunnels.strata-native]
+enabled      = true
+label        = "Strata native UI"
+local_port   = 18081
+remote_host  = "localhost"      # resolved on the *node*, i.e. the node's own 8080
+remote_port  = 8080
+# Shown in the UI next to the tunnel entry, so a dead tunnel does not read as
+# "there is no other way in".
+fallback_url = ""               # empty -> reuse [endpoints.strata-local].base_url
+
+# ---------------------------------------------------------------------------
+# Ports the lab is allowed to consider.  start.ps1 refuses to launch anything
+# on an occupied port rather than stealing it.
+# ---------------------------------------------------------------------------
+[ports]
+must_be_free = [8765, 9000]
+# Ports the lab itself forwards to.  Kept apart from must_be_free because these
+# are held by *our* ssh, so "occupied" here means "already wired up", not
+# "conflict".
+forwarded = [18081]
+
+[paths]
+reports     = "reports"
+benchmarks  = "data/benchmarks"
+logs        = "logs"
+metrics     = "data/metrics"

@@ -1,0 +1,112 @@
+# ---- 凭据与密钥：一律不入库 ----
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+id_rsa*
+id_ed25519*
+*credentials*
+*token*
+*secret*
+.secrets/
+keys/
+certs/
+*.crt
+*.cer
+
+# ---- 真实数据：用量 / 提示 / 内容 ----
+usage.jsonl
+usage*.jsonl
+*.jsonl
+!package-lock.json
+prompts/
+completions/
+conversations/
+sessions/
+*.sqlite
+*.sqlite3
+*.db
+data/
+logs/
+*.log
+
+# ---- 用户内容：图片 / 附件 ----
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.svg
+*.pdf
+uploads/
+attachments/
+media/
+*.zip
+*.tar
+*.tar.gz
+
+# ---- 运行时 / 构建产物 ----
+node_modules/
+dist/
+build/
+out/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage/
+.coverage
+htmlcov/
+*.egg-info/
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+
+# ---- 显式例外：原型 HTML 允许入库 ----
+!prototypes/**/*.html
+
+# ---- 显式例外：离线合成测试 fixture 允许入库 ----
+# 这些文件是团队自写的脱敏合成样本（每行都带 SYNTHETIC 标注），常量级、无真实
+# 用量与正文。真实 usage.jsonl 的兜底规则 `*.jsonl` 仍然生效，此处只放开这两处。
+!tests/backend/fixtures/**/*.jsonl
+# 回环预览端点唯一的数据来源：同样每行带 SYNTHETIC 标注的虚构样本，
+# 由 dev/atlas_preview.py 读取；它不是任何真实 Gateway 的日志副本。
+!dev/fixtures/**/*.jsonl
+
+# ---- 显式例外：前端源码允许入库 ----
+# 上面的 `data/` 与 `*token*` 是为了拦住真实用量数据与密钥，不能撤。
+# 但 web/ 的 Atlas 源码恰好落在两条规则里，故逐条放行到**精确文件路径**：
+#   * `!web/js/data/` 先把被排除的目录重新纳入（父目录被排除时，git 不会
+#     往下看，任何针对目录内文件的规则都失效）；
+#   * `web/js/data/*` 立刻把目录内容全部重新排除——所以放进来的
+#     usage.jsonl / credentials.js / *.key 一律仍然被忽略；
+#   * 只对三个确实被 import 的模块按全路径放行，不做 *.js 通配。
+# 新增模块时必须在这里补一行，否则 tests/tracked-assets.test.js 会失败。
+!web/js/data/
+web/js/data/*
+!web/js/data/contract.js
+!web/js/data/demo-fixture.js
+!web/js/data/remote-client.js
+!web/css/tokens.css
+
+# ---- 显式例外：scoped token 服务源码与测试允许入库（Issue #45） ----
+# 上面的 `*token*` 拦的是**真实凭据文件**（导出的 token、密钥转储），这条规则
+# 不撤。但 `backend/auth/tokens.py` 是签发/校验 token 的源码，其测试本身打印的
+# 也全是合成 token，故按**精确文件路径**逐条放行——不做 `*token*` 通配，任何
+# 其它含 "token" 的路径（例如 `tokens.json`、运维导出的凭据）仍然被忽略。
+!backend/auth/tokens.py
+!tests/auth/test_tokens.py
+!tests/auth/test_token_routes.py

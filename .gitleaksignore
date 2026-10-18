@@ -1,0 +1,6 @@
+# Historical finding only. The value was a synthetic test password
+# ("synthetic-correct-horse-battery-0001") in a test double, never a real
+# credential. The working tree no longer contains it; this fingerprint keeps
+# the pre-existing base commit from being reported again. Do not add new
+# entries here without the same level of justification.
+aae4e8a150e52608ca31fb0df83a26629f2d54f5:tests/auth_linux/support.py:generic-api-key:42

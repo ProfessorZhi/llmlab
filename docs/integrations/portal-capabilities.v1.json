@@ -1,0 +1,741 @@
+{
+  "schema_version": "atelier-provider-catalogue/1",
+  "baseline": {
+    "repository": "ProfessorZhi/llm-lab-portal",
+    "commit": "d63b0fb4a92fc6d777b64fbe340c8e1eb837b57f",
+    "as_of_date": "2026-10-17",
+    "inspection": "repository source only",
+    "runtime_assessment": "not_attested"
+  },
+  "status_vocabulary": {
+    "repo": "declared in source only",
+    "auth_module": "implemented in backend.auth, production session/provider unverified",
+    "bff_declared": "declared in BFF route_map, may be unconfigured",
+    "preview_only": "served by preview sidecar/adapter only; not production mounted",
+    "module_only": "implemented as backend Python/Wsgi source; BFF production routing unverified",
+    "legacy_adapter_defined": "mapped by legacy Strata adapter; current live metric unverified",
+    "planned": "required API without approved live implementation"
+  },
+  "no_fabrication_policy": {
+    "user_or_model_records_in_file": 0,
+    "measurement_values_in_file": 0,
+    "public_credentials_in_file": 0,
+    "acceptable_unavailable_states": [
+      "unconfigured",
+      "unreachable",
+      "stale",
+      "unknown",
+      "denied"
+    ],
+    "empty_requires_queried_authorized_source": true,
+    "measured_zero_requires_valid_source": true
+  },
+  "providers": [
+    {
+      "id": "strata",
+      "kind": "inference-engine",
+      "evidence": {
+        "repository": "ProfessorZhi/llm-lab",
+        "path": "integrations/strata.py"
+      },
+      "interface": "/health /v1/models /v1/status /metrics /v1/chat/completions",
+      "authority": "served model metadata, engine readiness and Strata reports",
+      "implementation_status": "repo",
+      "host_runtime_verification": "not_run",
+      "notes": ""
+    },
+    {
+      "id": "strata_metrics_adapter",
+      "kind": "prometheus-exporter",
+      "evidence": {
+        "repository": "ProfessorZhi/llm-lab",
+        "path": "deploy/dell/adapter/adapter.py"
+      },
+      "interface": "/metrics /healthz",
+      "authority": "Strata metrics mapped to allowlisted llmlab_strata_* gauges",
+      "implementation_status": "repo",
+      "host_runtime_verification": "not_run",
+      "notes": ""
+    },
+    {
+      "id": "prometheus",
+      "kind": "timeseries",
+      "evidence": {
+        "repository": "ProfessorZhi/llm-lab-portal",
+        "path": "web/tools/verified-infra.mjs"
+      },
+      "interface": "/api/v1/query, /-/healthy",
+      "authority": "source-stamped fixed allowlisted metrics and history",
+      "implementation_status": "repo",
+      "host_runtime_verification": "not_run",
+      "notes": ""
+    },
+    {
+      "id": "grafana",
+      "kind": "visualization",
+      "evidence": {
+        "repository": "ProfessorZhi/llm-lab",
+        "path": "deploy/dell/grafana/dashboards/llm-lab-overview.json"
+      },
+      "interface": "/api/health; configured dashboards",
+      "authority": "present trusted metrics; never authenticate Portal users",
+      "implementation_status": "repo",
+      "host_runtime_verification": "not_run",
+      "notes": ""
+    },
+    {
+      "id": "gateway",
+      "kind": "routing-and-metering",
+      "evidence": {
+        "repository": "ProfessorZhi/llm-lab-portal",
+        "path": "backend/atlas/ingest.py"
+      },
+      "interface": "/healthz; trusted request metadata",
+      "authority": "actual inference routing, key-to-principal mapping and calls",
+      "implementation_status": "module_only",
+      "host_runtime_verification": "not_run",
+      "notes": ""
+    },
+    {
+      "id": "registry",
+      "kind": "model-resource-registry",
+      "evidence": {
+        "repository": "ProfessorZhi/llm-lab-portal",
+        "path": "backend/registry/api.py"
+      },
+      "interface": "/api/v2/registry/*",
+      "authority": "Engine/Model/Deployment/Endpoint owner, ACL and Router revision",
+      "implementation_status": "module_only",
+      "host_runtime_verification": "not_run",
+      "notes": ""
+    },
+    {
+      "id": "observability",
+      "kind": "backend-metrics",
+      "evidence": {
+        "repository": "ProfessorZhi/llm-lab-portal",
+        "path": "backend/observability/sources.py"
+      },
+      "interface": "fixed PrometheusExpression catalogue",
+      "authority": "host / device / engine / principal separated metrics",
+      "implementation_status": "module_only",
+      "host_runtime_verification": "not_run",
+      "notes": ""
+    },
+    {
+      "id": "evalscope",
+      "kind": "evaluation-reports",
+      "evidence": {
+        "repository": "ProfessorZhi/llm-lab-portal",
+        "path": "backend/evaluation/report_readers.py"
+      },
+      "interface": "/api/v1/reports via fixed reader",
+      "authority": "EvalScope source-owned report catalogue with per-report ACL",
+      "implementation_status": "module_only",
+      "host_runtime_verification": "not_run",
+      "notes": ""
+    },
+    {
+      "id": "legacy_benchmark",
+      "kind": "historical-artifacts",
+      "evidence": {
+        "repository": "ProfessorZhi/llm-lab-portal",
+        "path": "backend/evaluation/report_readers.py"
+      },
+      "interface": "audited legacy benchmark adapter",
+      "authority": "separate historical reports; no anonymous file proxy",
+      "implementation_status": "module_only",
+      "host_runtime_verification": "not_run",
+      "notes": ""
+    },
+    {
+      "id": "linux_auth",
+      "kind": "identity",
+      "evidence": {
+        "repository": "ProfessorZhi/llm-lab-portal",
+        "path": "backend/auth_linux/pam_backend.py"
+      },
+      "interface": "restricted PAM Broker unix socket",
+      "authority": "real host_id + uid identity; broker not installed",
+      "implementation_status": "module_only",
+      "host_runtime_verification": "not_run",
+      "notes": "UnavailablePamBackend rejects all until a separately approved installation"
+    },
+    {
+      "id": "portal_bff",
+      "kind": "same-origin-gateway",
+      "evidence": {
+        "repository": "ProfessorZhi/llm-lab-portal",
+        "path": "backend/bff/route_map.py"
+      },
+      "interface": "/auth/*; /api/v2/ops*",
+      "authority": "session, scope, origin, CSRF and owner-aware assembly",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "notes": ""
+    },
+    {
+      "id": "host_summary_preview",
+      "kind": "fixed-metric-projection",
+      "evidence": {
+        "repository": "ProfessorZhi/llm-lab-portal",
+        "path": "web/tools/serve.mjs"
+      },
+      "interface": "GET /api/infra/summary",
+      "authority": "read-only host gauge and health summary in preview when enabled",
+      "implementation_status": "preview_only",
+      "host_runtime_verification": "not_run",
+      "notes": ""
+    },
+    {
+      "id": "os_structured_events",
+      "kind": "logs-and-audit",
+      "evidence": {
+        "repository": "ProfessorZhi/llm-lab-portal",
+        "path": "docs/integrations/PRODUCT_DATA_REQUIREMENTS.md"
+      },
+      "interface": "proposed /api/portal/events",
+      "authority": "redacted bounded service, security and endpoint audit events",
+      "implementation_status": "planned",
+      "host_runtime_verification": "not_run",
+      "notes": ""
+    }
+  ],
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/infra/summary",
+      "provider": "host_summary_preview",
+      "implementation_status": "preview_only",
+      "host_runtime_verification": "not_run",
+      "required_auth": "sidecar-protected",
+      "required_scope": null,
+      "priority": 0,
+      "notes": "Node preview only when ATELIER_INFRA_READONLY=1; Python BFF not yet wired"
+    },
+    {
+      "method": "GET",
+      "path": "/auth/csrf",
+      "provider": "portal_bff",
+      "implementation_status": "auth_module",
+      "host_runtime_verification": "not_run",
+      "required_auth": "anonymous",
+      "required_scope": null,
+      "priority": 1,
+      "notes": ""
+    },
+    {
+      "method": "GET",
+      "path": "/auth/me",
+      "provider": "portal_bff",
+      "implementation_status": "auth_module",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session",
+      "required_scope": null,
+      "priority": 1,
+      "notes": ""
+    },
+    {
+      "method": "GET",
+      "path": "/auth/linux/status",
+      "provider": "linux_auth",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "required_auth": "anonymous",
+      "required_scope": null,
+      "priority": 1,
+      "notes": ""
+    },
+    {
+      "method": "POST",
+      "path": "/auth/linux/login",
+      "provider": "linux_auth",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "required_auth": "anonymous-csrf",
+      "required_scope": null,
+      "priority": 1,
+      "notes": "returns pam_unavailable until real PAM installed"
+    },
+    {
+      "method": "POST",
+      "path": "/auth/logout",
+      "provider": "portal_bff",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session-csrf",
+      "required_scope": null,
+      "priority": 1,
+      "notes": ""
+    },
+    {
+      "method": "GET",
+      "path": "/auth/admin/status",
+      "provider": "portal_bff",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "required_auth": "anonymous",
+      "required_scope": null,
+      "priority": 1,
+      "notes": "nonproduction admin model; production ADR open"
+    },
+    {
+      "method": "POST",
+      "path": "/auth/admin/enter",
+      "provider": "portal_bff",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session-csrf-stepup",
+      "required_scope": null,
+      "priority": 1,
+      "notes": "nonproduction shared-password implementation only"
+    },
+    {
+      "method": "POST",
+      "path": "/auth/admin/exit",
+      "provider": "portal_bff",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session-csrf",
+      "required_scope": null,
+      "priority": 1,
+      "notes": ""
+    },
+    {
+      "method": "GET",
+      "path": "/auth/tokens",
+      "provider": "portal_bff",
+      "implementation_status": "auth_module",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session",
+      "required_scope": null,
+      "priority": 1,
+      "notes": "own masked tokens"
+    },
+    {
+      "method": "POST",
+      "path": "/auth/tokens",
+      "provider": "portal_bff",
+      "implementation_status": "auth_module",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session-csrf",
+      "required_scope": null,
+      "priority": 1,
+      "notes": "production issuer availability unverified"
+    },
+    {
+      "method": "POST",
+      "path": "/auth/tokens/revoke",
+      "provider": "portal_bff",
+      "implementation_status": "auth_module",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session-csrf",
+      "required_scope": null,
+      "priority": 1,
+      "notes": ""
+    },
+    {
+      "method": "POST",
+      "path": "/auth/tokens/rotate",
+      "provider": "portal_bff",
+      "implementation_status": "auth_module",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session-csrf",
+      "required_scope": null,
+      "priority": 1,
+      "notes": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ops",
+      "provider": "registry",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session",
+      "required_scope": null,
+      "priority": 1,
+      "notes": "Registry ACL plus Gateway availability; adapter may be detached"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ops/usage",
+      "provider": "observability",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session",
+      "required_scope": "observability:self:read",
+      "priority": 1,
+      "notes": "backend adapter may return 503 not attached"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ops/engines",
+      "provider": "observability",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session",
+      "required_scope": "observability:self:read",
+      "priority": 1,
+      "notes": ""
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v2/ops/deployments/{deployment_id}/share",
+      "provider": "registry",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session-csrf-owner",
+      "required_scope": "portal:endpoints:share",
+      "priority": 1,
+      "notes": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ops/endpoints/{endpoint_id}/invoke",
+      "provider": "registry",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session-csrf",
+      "required_scope": "registry:endpoint:invoke",
+      "priority": 1,
+      "notes": "declared in backend/bff/route_map.py on PR #115 (SEAM-1 of issue #68); a thin same-origin bridge to RegistryService.invoke, which owns scope, endpoint visibility (invisible and missing are the same 404), readiness, ownership/protocol gates, the bounded JSON payload, audit-before-forward and the Gateway adapter ACL. Returns invocation metadata only (request_id, adapter, metering, router-sync state); the model body and prompt echo are withheld. Router ACK is REPORTED, not enforced: RegistryService.invoke requires status=ready only and the applied-router gate is an owner decision for Registry #76. This row is a declaration only: it makes no availability claim and is not host verified"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/registry/engines",
+      "provider": "registry",
+      "implementation_status": "module_only",
+      "host_runtime_verification": "not_run",
+      "required_auth": "scoped-principal",
+      "required_scope": null,
+      "priority": 1,
+      "notes": "Registry WSGI route; V6 BFF mount not established"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/registry/models",
+      "provider": "registry",
+      "implementation_status": "module_only",
+      "host_runtime_verification": "not_run",
+      "required_auth": "scoped-principal",
+      "required_scope": null,
+      "priority": 1,
+      "notes": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/registry/deployments",
+      "provider": "registry",
+      "implementation_status": "module_only",
+      "host_runtime_verification": "not_run",
+      "required_auth": "scoped-principal",
+      "required_scope": null,
+      "priority": 1,
+      "notes": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/registry/endpoints",
+      "provider": "registry",
+      "implementation_status": "module_only",
+      "host_runtime_verification": "not_run",
+      "required_auth": "scoped-principal",
+      "required_scope": null,
+      "priority": 1,
+      "notes": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/atlas/calls",
+      "provider": "gateway",
+      "implementation_status": "preview_only",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session-self",
+      "required_scope": "atlas:calls:self:read",
+      "priority": 1,
+      "notes": "contract+preview implementation; production BFF not mounted"
+    },
+    {
+      "method": "GET",
+      "path": "/api/atlas/usage",
+      "provider": "gateway",
+      "implementation_status": "preview_only",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session-project-acl",
+      "required_scope": "atlas:usage:read",
+      "priority": 1,
+      "notes": "contract+preview implementation; production BFF not mounted"
+    },
+    {
+      "method": "GET",
+      "path": "/api/atlas/modules",
+      "provider": "portal_bff",
+      "implementation_status": "preview_only",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session",
+      "required_scope": "portal:modules:read",
+      "priority": 1,
+      "notes": "preview route; production BFF absent"
+    },
+    {
+      "method": "GET",
+      "path": "/api/evaluation/report-sources",
+      "provider": "evalscope",
+      "implementation_status": "module_only",
+      "host_runtime_verification": "not_run",
+      "required_auth": "evaluation-scope",
+      "required_scope": null,
+      "priority": 1,
+      "notes": "evaluation WSGI only, BFF mount must be verified"
+    },
+    {
+      "method": "GET",
+      "path": "/api/evaluation/reports",
+      "provider": "evalscope",
+      "implementation_status": "module_only",
+      "host_runtime_verification": "not_run",
+      "required_auth": "evaluation-scope-owner",
+      "required_scope": null,
+      "priority": 1,
+      "notes": "per-report owner verified"
+    },
+    {
+      "method": "GET",
+      "path": "/api/evaluation/reports/{report_ref}",
+      "provider": "evalscope",
+      "implementation_status": "module_only",
+      "host_runtime_verification": "not_run",
+      "required_auth": "evaluation-scope-owner",
+      "required_scope": null,
+      "priority": 1,
+      "notes": "not found and unauthorized indistinguishable"
+    },
+    {
+      "method": "GET",
+      "path": "/api/evaluation/jobs",
+      "provider": "evalscope",
+      "implementation_status": "module_only",
+      "host_runtime_verification": "not_run",
+      "required_auth": "evaluation-scope-owner",
+      "required_scope": null,
+      "priority": 1,
+      "notes": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/evaluation/jobs",
+      "provider": "evalscope",
+      "implementation_status": "module_only",
+      "host_runtime_verification": "not_run",
+      "required_auth": "evaluation-scope-real-runner",
+      "required_scope": null,
+      "priority": 2,
+      "notes": "real GPU evaluation disabled until separate admission"
+    },
+    {
+      "method": "GET",
+      "path": "/api/portal/capabilities",
+      "provider": "portal_bff",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session",
+      "required_scope": null,
+      "priority": 0,
+      "notes": "declared in backend/bff/route_map.py on PR #85; per-source readiness for the current session; an unattached source reports not_configured. The route answers 200 because readiness is the answer; it never returns invented data and never claims LIVE"
+    },
+    {
+      "method": "GET",
+      "path": "/api/portal/events",
+      "provider": "os_structured_events",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session",
+      "required_scope": "portal:admin:read",
+      "priority": 2,
+      "notes": "declared in backend/bff/route_map.py on PR #109; operator-scoped, bounded and redacted over two real structured ledgers (BFF elevation audit + Registry audit_log). Never a raw journald/logfile proxy; unattached sources report unconfigured and the route answers 503 when none is wired"
+    },
+    {
+      "method": "GET",
+      "path": "/api/portal/services",
+      "provider": "portal_bff",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session-host-scope",
+      "required_scope": "observability:host:read",
+      "priority": 0,
+      "notes": "declared in backend/bff/route_map.py on PR #85; fixed service list from the server-validated host projection, not a TCP port proxy. Answers 503 when the host summary adapter is unattached; never a fabricated service state"
+    },
+    {
+      "method": "GET",
+      "path": "/api/portal/metrics/history",
+      "provider": "prometheus",
+      "implementation_status": "planned",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session-host-scope",
+      "required_scope": null,
+      "priority": 1,
+      "notes": "time series with fixed metric ids and bounded window; no arbitrary PromQL"
+    }
+  ],
+  "metrics": [
+    {
+      "id": "device.gpu.utilization",
+      "source_metric": "llmlab_strata_gpu_utilization_ratio",
+      "provider": "prometheus",
+      "unit": "ratio",
+      "implementation_status": "repo",
+      "freshness_threshold_seconds": 90,
+      "notes": ""
+    },
+    {
+      "id": "device.gpu.memory_used",
+      "source_metric": "llmlab_strata_gpu_memory_used_bytes",
+      "provider": "prometheus",
+      "unit": "bytes",
+      "implementation_status": "repo",
+      "freshness_threshold_seconds": 90,
+      "notes": ""
+    },
+    {
+      "id": "device.gpu.memory_total",
+      "source_metric": "llmlab_strata_gpu_memory_total_bytes",
+      "provider": "prometheus",
+      "unit": "bytes",
+      "implementation_status": "repo",
+      "freshness_threshold_seconds": 90,
+      "notes": ""
+    },
+    {
+      "id": "device.gpu.temperature",
+      "source_metric": "llmlab_strata_gpu_temperature_celsius",
+      "provider": "prometheus",
+      "unit": "celsius",
+      "implementation_status": "repo",
+      "freshness_threshold_seconds": 90,
+      "notes": ""
+    },
+    {
+      "id": "device.gpu.power",
+      "source_metric": "llmlab_strata_gpu_power_watts",
+      "provider": "prometheus",
+      "unit": "watts",
+      "implementation_status": "repo",
+      "freshness_threshold_seconds": 90,
+      "notes": ""
+    },
+    {
+      "id": "service.strata.up",
+      "source_metric": "llmlab_strata_up",
+      "provider": "prometheus",
+      "unit": "bool",
+      "implementation_status": "repo",
+      "freshness_threshold_seconds": 90,
+      "notes": ""
+    },
+    {
+      "id": "node.cpu.utilization",
+      "source_metric": "llmlab_strata_cpu_utilization_ratio",
+      "provider": "strata_metrics_adapter",
+      "unit": "ratio",
+      "implementation_status": "legacy_adapter_defined",
+      "freshness_threshold_seconds": null,
+      "notes": "live availability in V6 not yet confirmed"
+    },
+    {
+      "id": "node.memory.used",
+      "source_metric": "llmlab_strata_ram_used_bytes",
+      "provider": "strata_metrics_adapter",
+      "unit": "bytes",
+      "implementation_status": "legacy_adapter_defined",
+      "freshness_threshold_seconds": null,
+      "notes": ""
+    },
+    {
+      "id": "node.memory.total",
+      "source_metric": "llmlab_strata_ram_total_bytes",
+      "provider": "strata_metrics_adapter",
+      "unit": "bytes",
+      "implementation_status": "legacy_adapter_defined",
+      "freshness_threshold_seconds": null,
+      "notes": ""
+    },
+    {
+      "id": "device.gpu.pcie_rx",
+      "source_metric": "llmlab_strata_gpu_pcie_rx_bytes",
+      "provider": "strata_metrics_adapter",
+      "unit": "bytes",
+      "implementation_status": "legacy_adapter_defined",
+      "freshness_threshold_seconds": null,
+      "notes": "verify rate-vs-counter semantics before displaying"
+    },
+    {
+      "id": "principal.calls",
+      "source_metric": "gateway usage metadata after approved Key Directory",
+      "provider": "gateway",
+      "unit": "count",
+      "implementation_status": "module_only",
+      "freshness_threshold_seconds": null,
+      "notes": "must be attributed, not derived from host"
+    },
+    {
+      "id": "principal.input_tokens",
+      "source_metric": "Gateway usage.input_tokens",
+      "provider": "gateway",
+      "unit": "tokens",
+      "implementation_status": "module_only",
+      "freshness_threshold_seconds": null,
+      "notes": ""
+    },
+    {
+      "id": "principal.output_tokens",
+      "source_metric": "Gateway usage.output_tokens",
+      "provider": "gateway",
+      "unit": "tokens",
+      "implementation_status": "module_only",
+      "freshness_threshold_seconds": null,
+      "notes": ""
+    },
+    {
+      "id": "principal.latency_p95",
+      "source_metric": "Gateway total_ms per eligible request",
+      "provider": "gateway",
+      "unit": "milliseconds",
+      "implementation_status": "module_only",
+      "freshness_threshold_seconds": null,
+      "notes": "computed from raw authorized samples"
+    },
+    {
+      "id": "evaluation.report_count",
+      "source_metric": "EvalScope / audited legacy report metadata",
+      "provider": "evalscope",
+      "unit": "count",
+      "implementation_status": "module_only",
+      "freshness_threshold_seconds": null,
+      "notes": "per-UID visible only"
+    },
+    {
+      "id": "system.audit.events",
+      "source_metric": "allowlisted structured audit producer",
+      "provider": "os_structured_events",
+      "unit": "events",
+      "implementation_status": "planned",
+      "freshness_threshold_seconds": null,
+      "notes": "bounded redacted"
+    }
+  ],
+  "admin_decision": "proposed: per-Linux-user Session; platform_admin eligibility explicit by uid; per-session step-up <= 900s; shared-password current mode nonproduction only",
+  "source_contracts": [
+    "docs/integrations/SOURCE_CAPABILITY_INVENTORY.md",
+    "docs/integrations/PORTAL_BFF_API_CONTRACT.md",
+    "docs/integrations/ADR_LINUX_IDENTITY_AND_ADMIN.md",
+    "docs/integrations/CLAUDE_OFFLINE_IMPLEMENTATION_HANDOFF.md"
+  ],
+  "rules": [
+    "module_only is not browser-ready",
+    "repo does not assert live host data",
+    "no arbitrary upstream URL/PromQL/file paths",
+    "always distinguish unknown from measured zero",
+    "admin read not root",
+    "real A/B ACL requires actual PAM/Gateway E2E"
+  ]
+}

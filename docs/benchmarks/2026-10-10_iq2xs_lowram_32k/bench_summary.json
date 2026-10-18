@@ -1,0 +1,42 @@
+{
+ "phase": "6-benchmark",
+ "max_tokens": 256,
+ "repeats": 3,
+ "sizes": [
+  1024,
+  4096,
+  16384
+ ],
+ "per_size": {
+  "1024": {
+   "prompt_tokens": 1069,
+   "cached_tokens": 0,
+   "completion_tokens": 256,
+   "ttft_s": 0.8955748081207275,
+   "e2e_s": 2.407460927963257,
+   "engine_prompt_ms": 880.5,
+   "engine_prefill_tok_s": 1214.1,
+   "engine_decode_tok_s": 172.6
+  },
+  "4096": {
+   "prompt_tokens": 4147,
+   "cached_tokens": 0,
+   "completion_tokens": 256,
+   "ttft_s": 1.9883763790130615,
+   "e2e_s": 3.5408453941345215,
+   "engine_prompt_ms": 1969.8,
+   "engine_prefill_tok_s": 2105.3,
+   "engine_decode_tok_s": 164.2
+  },
+  "16384": {
+   "prompt_tokens": 16403,
+   "cached_tokens": 0,
+   "completion_tokens": 256,
+   "ttft_s": 6.385000228881836,
+   "e2e_s": 8.051058053970337,
+   "engine_prompt_ms": 6364.8,
+   "engine_prefill_tok_s": 2577.1,
+   "engine_decode_tok_s": 155.9
+  }
+ }
+}

@@ -1,0 +1,169 @@
+<!-- Atelier Observatory 06 — authored additions to the Atelier 05 shell.
+     Each fragment between <!--#name--> and <!--/#name--> is spliced into one
+     exact anchor of prototypes/v5/index.html by derive-from-v5.mjs. Nothing
+     else about 05 changes: the existing seven views, their copy and their
+     markup are carried over byte-for-byte, which is what keeps visual parity.
+
+     The copy here follows the same rules as 05: state what is known, name the
+     source, and never print a number that has no measured origin. Every panel
+     below ships a fail-closed default — "no authorized session, so no numbers" —
+     so an unauthenticated reader sees an honest empty frame rather than a
+     zero, and only an authenticated, authorized response fills it in. -->
+
+<!--#nav-top-->
+<button class="navitem" data-page="calls">我的调用</button>
+<!--/#nav-top-->
+
+<!--#nav-mobile-->
+<button class="navitem" data-page="calls">调用</button>
+<!--/#nav-mobile-->
+
+<!--#view-calls-->
+<section class="view" id="view-calls" aria-labelledby="calls-title">
+  <div class="breadcrumb">LLM LAB / <b>MY CALL LOG</b></div>
+  <div class="hero">
+    <div>
+      <h1 id="calls-title">我的调用日志 <em class="title-whisper">My Calls.</em></h1>
+      <p>只列出你名下 key 的逐条调用：时间、状态、Token、排队与 <span class="mono">request_id</span>。归属只看服务端 key 目录里的 principal 是否等于你的会话主体，请求里的任何自报字段都不参与。</p>
+    </div>
+    <div class="hero-right"><span class="badge" id="callsSourceBadge">来源未定 · 等待会话</span></div>
+  </div>
+
+  <div class="calls-filters" id="callsFilters" role="group" aria-label="调用日志筛选">
+    <div class="calls-filter-row">
+      <span class="caps">时间窗</span>
+      <div class="calls-presets" role="group" aria-label="快捷时间窗">
+        <button type="button" class="secondary" data-calls-preset="1h" aria-pressed="false">近 1 小时</button>
+        <button type="button" class="secondary" data-calls-preset="24h" aria-pressed="false">近 24 小时</button>
+        <button type="button" class="secondary" data-calls-preset="7d" aria-pressed="false">近 7 天</button>
+      </div>
+      <label class="field"><span class="tiny">起（本地时间）</span><input type="datetime-local" id="callsFrom" name="from"></label>
+      <label class="field"><span class="tiny">止（本地时间，不含）</span><input type="datetime-local" id="callsTo" name="to"></label>
+    </div>
+    <div class="calls-filter-row">
+      <span class="caps">筛选</span>
+      <label class="field"><span class="tiny">结果</span><select id="callsOutcome" aria-label="调用结果">
+        <option value="all">全部结果</option>
+        <option value="success">成功</option>
+        <option value="failed">失败</option>
+        <option value="cancelled">已取消</option>
+      </select></label>
+      <label class="field"><span class="tiny">Key</span><select id="callsKey" aria-label="key"><option value="">全部（我名下的 key）</option></select></label>
+      <label class="field"><span class="tiny">模型</span><input type="text" id="callsModel" name="model" placeholder="例如 llm-a"></label>
+      <label class="field calls-limit"><span class="tiny">每页条数</span><input type="number" id="callsLimit" name="limit" min="1" max="200" step="1" value="50"></label>
+      <div class="calls-filter-actions">
+        <button class="primary" type="button" id="callsApply">应用筛选</button>
+        <button class="secondary" type="button" id="callsReset">重置</button>
+      </div>
+    </div>
+    <div class="calls-filter-row calls-export-row">
+      <span class="tiny" id="callsWindow">尚未取到生效窗口</span>
+      <span class="calls-export">
+        <span class="tiny" id="callsExportNote">导出：没有已加载的行</span>
+        <button type="button" class="secondary" id="callsExportCsv" disabled title="没有已加载的调用可导出">CSV ↓</button>
+        <button type="button" class="secondary" id="callsExportJson" disabled title="没有已加载的调用可导出">JSON ↓</button>
+      </span>
+    </div>
+  </div>
+
+  <div id="callsHost" aria-live="polite">
+    <div class="surface">
+      <span class="caps">WAITING FOR SESSION</span>
+      <p class="module-empty" style="margin-top:11px">尚未向服务端确认你的会话与调用归属。确认之前这里不会出现任何数字——空态不是「零次调用」，而是「还没问过」。</p>
+    </div>
+  </div>
+</section>
+<!--/#view-calls-->
+
+<!--#panel-models-->
+<section class="page-block module-panel" data-module="engines" aria-labelledby="module-engines-title">
+  <div class="editorial-index"><b>06</b><span>ENGINES &amp; DEPLOYMENTS</span><span class="index-rule"></span><span class="mono" data-module-state="engines">等待会话</span></div>
+  <div class="group-title">
+    <h2 class="section-h" id="module-engines-title">引擎与部署</h2>
+    <span class="smallmeta">FAIL-CLOSED · 无来源即 UNKNOWN</span>
+  </div>
+  <div class="module-body" id="module-engines-body">
+    <p class="module-empty">需要已认证的会话与服务端模块授权。授权确认之前，这里不显示引擎版本、显存或部署状态——尤其不会显示一个看起来正常的 GPU 数字。</p>
+  </div>
+</section>
+<!--/#panel-models-->
+
+<!--#panel-api-->
+<section class="page-block module-panel" data-module="playground" aria-labelledby="module-playground-title">
+  <div class="editorial-index"><b>07</b><span>PLAYGROUND &amp; ENDPOINT VISIBILITY</span><span class="index-rule"></span><span class="mono" data-module-state="playground">等待会话</span></div>
+  <div class="group-title">
+    <h2 class="section-h" id="module-playground-title">Playground 与 Endpoint 可见性</h2>
+    <span class="smallmeta">SYNTHETIC DISABLED UNTIL BACKED BY AUTH</span>
+  </div>
+  <div class="module-body" id="module-playground-body">
+    <p class="module-empty">需要已认证的会话与服务端模块授权。Endpoint 的可见性由服务端按 principal × 项目判定，默认 <b>Private</b>；本页面只呈现判定结果，不接受客户端把它改成 Shared。</p>
+  </div>
+</section>
+<!--/#panel-api-->
+
+<!--#panel-observability-->
+<section class="page-block module-panel" data-module="observability" aria-labelledby="module-obs-title">
+  <div class="editorial-index"><b>08</b><span>READ-ONLY DATA SOURCES</span><span class="index-rule"></span><span class="mono" data-module-state="observability">等待会话</span></div>
+  <div class="group-title">
+    <h2 class="section-h" id="module-obs-title">数据源与只读入口</h2>
+    <span class="smallmeta">UNKNOWN ≠ ZERO · 只读</span>
+  </div>
+  <div class="module-body" id="module-observability-body">
+    <p class="module-empty">需要已认证的会话与服务端模块授权。没有配置可信数据源的指标一律显示 UNKNOWN，而不是 0；Grafana / Prometheus 的入口只在服务端确认已接线时才出现。</p>
+  </div>
+</section>
+<!--/#panel-observability-->
+
+<!--#panel-evaluation-->
+<section class="page-block module-panel" data-module="evaluation" aria-labelledby="module-eval-title">
+  <div class="editorial-index"><b>09</b><span>EVALSCOPE</span><span class="index-rule"></span><span class="mono" data-module-state="evaluation">等待会话</span></div>
+  <div class="group-title">
+    <h2 class="section-h" id="module-eval-title">EvalScope 入口授权</h2>
+    <span class="smallmeta">AUTHORIZED ENTRY ONLY</span>
+  </div>
+  <div class="module-body" id="module-evaluation-body">
+    <p class="module-empty">需要已认证的会话与服务端模块授权。EvalScope 的原生界面入口只在身份边界与子路径代理验证通过后开放；未开放时这里说明原因，而不是给一个点了没反应的按钮。</p>
+  </div>
+</section>
+<!--/#panel-evaluation-->
+
+<!--#panel-admin-->
+<section class="page-block module-panel" data-module="administration" aria-labelledby="module-admin-title">
+  <div class="editorial-index"><b>10</b><span>VIEW FILTERING &amp; RBAC</span><span class="index-rule"></span><span class="mono" data-module-state="administration">等待会话</span></div>
+  <div class="group-title">
+    <h2 class="section-h" id="module-admin-title">视图过滤与权限边界</h2>
+    <span class="smallmeta">AUTHN IS NOT AUTHZ · 服务端判定</span>
+  </div>
+  <div class="module-body" id="module-administration-body">
+    <p class="module-empty">需要已认证的会话。下面显示的是服务端按你的会话主体算出的可见范围（角色、scope、项目、可见模块），不是客户端选择的结果。</p>
+  </div>
+</section>
+<!--/#panel-admin-->
+
+<!--#platform-hub-->
+<div class="group-title" style="margin-top:34px"><h2>平台与数据来源</h2><span class="smallmeta">PLATFORM SURFACES · 已运行 ≠ 已接线</span></div>
+<p class="module-empty" data-platform-note>本机平台进程是否运行，与 Portal 是否已接入其数据是两件事。下列按钮只做站内导航；未接线的一律显示 UNKNOWN，不渲染任何真实数字，也不提供引擎端口直连。</p>
+<div class="service-grid">
+  <article class="service" data-platform="strata"><div class="service-icon">S</div><h3>Strata</h3><p>模型执行引擎。对话与调用经受管 Gateway，不开放引擎端口直连。</p><div class="service-foot"><span class="badge warn">未接线</span><span>需同源 BFF 适配器</span></div><button type="button" class="secondary" data-go="models">进入模型工作台</button></article>
+  <article class="service" data-platform="gateway"><div class="service-icon">G<span class="monogram-tail">.</span></div><h3>Gateway</h3><p>统一模型路由、请求计量、Key 与限额的可信服务端来源。</p><div class="service-foot"><span class="badge warn">未接线</span><span>需同源 usage BFF</span></div><button type="button" class="secondary" data-go="api">进入 API 管理</button></article>
+  <article class="service" data-platform="metrics"><div class="service-icon">P<span class="monogram-tail">.</span></div><h3>Prometheus / Grafana</h3><p>指标采集与深度图表。Grafana 原生界面经可信反代与统一权限校验进入，不对外暴露 3000 端口。</p><div class="service-foot"><span class="badge warn">未接线</span><span>需反代与 ACL</span></div><button type="button" class="secondary" data-go="observability">进入监控与日志</button></article>
+  <article class="service" data-platform="evalscope"><div class="service-icon">E</div><h3>EvalScope</h3><p>评测数据、运行记录与报告汇总。原生工具端口不直接暴露浏览器。</p><div class="service-foot"><span class="badge warn">未接线</span><span>需报告适配器</span></div><button type="button" class="secondary" data-go="evaluation">进入评测中心</button></article>
+</div>
+<div class="group-title" style="margin-top:26px"><h2>控制面入口</h2><span class="smallmeta">CONTROL PLANE · 独立授权</span></div>
+<p class="module-empty">CloudCLI / Fleet 属独立控制面：须以固定的同 Tailnet HTTPS(443) 地址接入，并带明确的服务端授权范围。Portal 默认不代理、不模拟其登录，也不在此登记任何地址或凭据；接线前一律「待接线」。</p>
+<div class="service-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+  <article class="service" data-platform="cloudcli"><div class="service-icon">C</div><h3>CloudCLI</h3><p>独立控制面。不通过 Portal 模拟登录，也不暴露其特权后台权限。</p><div class="service-foot"><span class="badge">待接线</span><span>需固定 Tailnet HTTPS:443 + ACL</span></div><button type="button" class="secondary unavailable" disabled title="控制面未接线：需服务端 allowlist 与授权范围">待接线</button></article>
+  <article class="service" data-platform="fleet"><div class="service-icon">F</div><h3>Fleet</h3><p>独立控制面。跨设备管理权限不由此预览授予。</p><div class="service-foot"><span class="badge">待接线</span><span>需固定 Tailnet HTTPS:443 + ACL</span></div><button type="button" class="secondary unavailable" disabled title="控制面未接线：需服务端 allowlist 与授权范围">待接线</button></article>
+</div>
+<!--/#platform-hub-->
+
+<!--#home-stats-->
+<div class="headrow" style="margin:31px 0 10px"><div><h2 class="section-h">调用与用量 <em class="heading-en">/ GATEWAY BFF</em></h2><div class="sect-sub">按 Linux 主体与项目授权从 Gateway 读取；未授权时不显示任何数字</div></div><span class="badge warn" data-source-badge="gated"><span class="dot rust"></span>待授权 · NOT CONNECTED</span></div>
+<div class="stats" data-demo-only><div class="stat"><span>请求总量</span><strong class="number" data-demo-value="1,248">—</strong><small data-stat-note>待 Gateway BFF</small></div><div class="stat"><span>成功率</span><strong class="number" data-demo-value="99.4%">—</strong><small data-stat-note>待 Gateway BFF</small></div><div class="stat"><span>响应 p95</span><strong class="number" data-demo-value="1.42 s">—</strong><small data-stat-note>待 Gateway BFF</small></div><div class="stat"><span>输出 Tokens</span><strong class="number" data-demo-value="482k">—</strong><small data-stat-note>待 Gateway BFF</small></div></div>
+<div class="gated-inline" data-live-only data-gated><div class="gated-row"><span class="gated-k">请求总量 · 成功率 · p95 · Tokens</span><span class="badge warn">待授权</span></div><p class="gated-why">需要 Linux PAM 会话 + Gateway usage BFF 的服务端授权；本预览不推任何按用户聚合的调用数。此前的演示数值不再默认展示。</p></div>
+<!--/#home-stats-->
+
+<!--#account-explain-->
+$('#accountButton').onclick=()=>explain('Linux 账号登录（待接线）','<p>正式登录将使用 <strong>Dell Linux 账号（PAM）</strong> 建立服务端 Session，再由 Portal RBAC 授予用户、项目与 API 权限。</p><p><strong>当前仅为受 Basic Auth 保护的合成预览（Synthetic Preview）</strong>，尚未接入 PAM：本页不索取 Linux 密码，不向 /auth/linux/login 提交任何凭据，也不伪造登录状态。</p><p>正式接线需服务端 PAM 会话、Cookie / CSRF 与信任边界，另行立项。</p>');
+<!--/#account-explain-->
+

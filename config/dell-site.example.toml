@@ -1,0 +1,262 @@
+# ===========================================================================
+# LLM Lab -- site configuration for the {{LAB_NODE}} ({{LAB_HOSTNAME}})
+#
+# This file states ONLY what differs from config/llm-lab.example.toml, which it extends.
+# One shared base plus a thin site overlay, rather than two full copies that
+# drift: the endpoints, page structure and cache policy are the same program on
+# both machines, and restating them here would create a second place to forget.
+#
+# Selected with:  LAB_CONFIG={{LAB_CHECKOUT}}/config/dell-site.example.toml
+#
+# No secrets.  The Strata key is a file this overlay only *points at*.
+# ===========================================================================
+
+[site]
+# Relative entries resolve against this file's directory.
+extend = "llm-lab.example.toml"
+name   = "{{LAB_NODE_ID}}"
+
+[lab]
+role    = "lab-node"
+tagline = "{{LAB_NODE}} 上独立运行的 AI 运维工作面"
+
+# ---------------------------------------------------------------------------
+# The portal stays on loopback.  That is not a leftover from the Windows setup;
+# it is the boundary that makes the rest of this safe.  Public access goes
+# through the reverse proxy in front of it, which owns TLS, authentication and
+# the decision about who may reach what.  Changing this to {{LAB_BIND_ADDR}} would put an
+# unauthenticated API on the LAN.
+# ---------------------------------------------------------------------------
+[portal]
+host = "localhost"
+port = 8765
+# Something serves a browser in front of this portal.  Binding loopback is
+# evidence about sockets, not about readers: the browser loading the page is on
+# another machine, and this is the fact that lets the console hand it a
+# reachable address instead of one that resolves to the reader's own machine.
+# Nothing on this host can observe a reverse proxy -- it is an outside process,
+# and from in here its absence and its presence are identical -- so it is
+# stated rather than inferred.
+behind_proxy = true
+
+# ---------------------------------------------------------------------------
+# The node IS this host.  Local mode replaces the SSH probe with Linux-local
+# CPU / RAM / disk / listener reads, and removes the portal's need for a private
+# key that has no business existing on a server.  The ssh_* keys inherited from
+# the base are inert in this mode and are deliberately left unset rather than
+# pointing at a key that must not be copied here.
+# ---------------------------------------------------------------------------
+[node]
+mode             = "local"
+label            = "{{LAB_NODE}}"
+host             = "localhost"
+hostname         = "{{LAB_HOSTNAME}}"
+probe_cache_ttl_s = 15
+
+# ---------------------------------------------------------------------------
+# Strata is reached over loopback from here, and its key lives in the service
+# secrets directory rather than in the checkout -- 600, owned by {{LAB_USER}}, group
+# cannot read.  The checkout is a git tree somebody may reset; a credential is
+# not.
+# ---------------------------------------------------------------------------
+[endpoints.strata-local]
+base_url    = "http://localhost:8080"
+secret_file = "{{LAB_ROOT}}/services/secrets/strata-key.env"
+api_key_var = "STRATA_API_KEY"
+
+# ---------------------------------------------------------------------------
+# Local services.  Every one of these binds localhost; the proxy is the only
+# thing that listens on a routable address.  `managed` marks the ones the
+# portal may start and stop itself -- and toggling a *monitoring* service is a
+# different privilege from toggling the eval platform, which is why the
+# distinction is carried in config rather than assumed by the UI.
+# ---------------------------------------------------------------------------
+[services.portal]
+label   = "LLM Lab Portal"
+url     = "http://localhost:8765"
+port    = 8765
+managed = true
+enabled = true
+# The system interpreter is fine: the portal is stdlib-only by design, so it
+# needs no venv and cannot break when one is rebuilt.  The eval stack does need
+# an isolated one, which is why evalscope below names its own.
+launch  = ["/usr/bin/python3", "-u", "legacy/console/server.py"]
+cwd     = "{{LAB_CHECKOUT}}"
+note    = "绑 localhost；局域网访问一律经反向代理。"
+
+[services.evalscope]
+label   = "EvalScope Dashboard"
+url     = "http://localhost:9000"
+port    = 9000
+managed = true
+enabled = true
+launch  = ["{{LAB_ROOT}}/services/evalscope/.venv/bin/evalscope", "service",
+           "--host", "localhost", "--port", "{port}"]
+cwd     = "{{LAB_ROOT}}/services/evalscope"
+note    = "独立 venv（CPython 3.12）；不触碰 Strata 的 Python 环境。只起 Dashboard，不自动跑评测。"
+
+[services.prometheus]
+label   = "Prometheus"
+url     = "http://localhost:9090"
+port    = 9090
+managed = true
+enabled = true
+launch  = ["{{LAB_ROOT}}/services/prometheus/prometheus",
+           "--config.file={{LAB_ROOT}}/services/prometheus/prometheus.yml",
+           "--storage.tsdb.path={{LAB_ROOT}}/services/prometheus/data",
+           "--storage.tsdb.retention.time=30d",
+           "--storage.tsdb.retention.size=5GB",
+           "--web.listen-address=localhost:9090"]
+cwd     = "{{LAB_ROOT}}/services/prometheus"
+note    = "采样与留存都有上限：30 天 / 5 GB，先到先失效。"
+
+[services.metrics-adapter]
+label   = "Strata Metrics Adapter"
+url     = "http://localhost:9101"
+port    = 9101
+managed = true
+enabled = true
+# The system interpreter, not a venv.  The adapter is stdlib-only, so a venv
+# would be a second thing to rebuild with nothing to gain from it -- and a
+# monitoring component that stops working because somebody reinstalled a
+# virtualenv is a monitoring component you find out about during an incident.
+launch  = ["/usr/bin/python3", "-u", "deploy/templates/adapter/adapter.py",
+           "--listen", "localhost:9101",
+           "--strata", "http://localhost:8080",
+           "--key-file", "{{LAB_ROOT}}/services/secrets/strata-key.env"]
+cwd     = "{{LAB_CHECKOUT}}"
+note    = "把 Strata 的 JSON /metrics 译成 Prometheus 文本格式；只读，不写 Strata。"
+
+[services.grafana]
+label   = "Grafana"
+url     = "http://localhost:3000"
+port    = 3000
+managed = true
+enabled = true
+# `grafana server`, not the standalone `grafana-server`: 12.3.1 prints a
+# deprecation notice for the standalone binary on every start and says it will
+# be removed.  Same program, same flags, one that still exists next year.
+launch  = ["{{LAB_ROOT}}/services/grafana/bin/grafana", "server",
+           "--homepath={{LAB_ROOT}}/services/grafana",
+           "--config={{LAB_ROOT}}/services/grafana/conf/custom.ini"]
+cwd     = "{{LAB_ROOT}}/services/grafana"
+# Grafana answers on :3000 whether or not anything is feeding it, so "the page
+# loads" says nothing about the chain.  Declaring the chain here lets the row
+# name the missing link instead of showing a green dot over empty charts.
+depends_on = ["metrics-adapter", "prometheus"]
+# NOTE: every plain key for this service must come BEFORE [services.grafana.env].
+# In TOML a sub-table header claims every key after it, so a `note = ...` placed
+# below that header becomes an environment variable named `note` instead of a
+# field of the service -- silently, and only visible by printing the parsed
+# config.  It happened once while writing this file.
+note    = "独立于 Strata 的进程；停掉它不影响推理。"
+
+# root_url names the address the *browser* uses, which is a property of the
+# site, not of the program -- so it lives here, next to the public_urls it has
+# to agree with, and not in a generated custom.ini on the server that the next
+# person has to find.  serve_from_sub_path makes Grafana emit /grafana/... asset
+# URLs, which is what lets one proxy route own several services by prefix.
+#
+# Now that the proxy is up, this names the address the browser uses -- and the
+# path component is unchanged from the loopback value, which is why the flip was
+# one line rather than a reconfiguration.  Measured before the flip: with the
+# loopback value in place, Grafana answered /grafana/ with a redirect to
+# http://localhost:3000/grafana/, i.e. it was already telling the browser to go
+# and find Grafana on its own machine.  That is precisely the defect Section 2
+# names, and it is invisible from the server because the server resolves it.
+[services.grafana.env]
+GF_SERVER_ROOT_URL            = "https://{{LAB_HOST}}:8443/grafana/"
+GF_SERVER_SERVE_FROM_SUB_PATH = "true"
+
+# ---------------------------------------------------------------------------
+# The reverse proxy: the only process here that listens on a routable address.
+# Everything else binds localhost and is reached through this.
+#
+# `portal_managed = false` is the one place that flag is needed, and this is the
+# service it was written for.  It is still `managed`: the cron hook must be able
+# to revive it, because it is the front door.  But the console must not offer a
+# switch that stops it -- the reply to that click travels through the very thing
+# being stopped, so the operator would watch the page die and lose the button
+# that turns it back on.  Read-only in the UI, restartable from labctl.
+# ---------------------------------------------------------------------------
+[services.caddy]
+label          = "反向代理 (Caddy)"
+url            = "https://{{LAB_HOST}}:8443"
+port           = 8443
+# The only service here that does not bind loopback, so the liveness probe has
+# to be told where to look.  Left at the default it would dial localhost:8443,
+# find nothing, and report `down` for a proxy that is serving traffic.
+probe_host     = "{{LAB_HOST}}"
+managed        = true
+portal_managed = false
+enabled        = true
+launch         = ["{{LAB_ROOT}}/services/caddy/caddy", "run",
+                  "--config", "{{LAB_ROOT}}/services/caddy/Caddyfile",
+                  "--adapter", "caddyfile"]
+cwd            = "{{LAB_ROOT}}/services/caddy"
+depends_on     = ["portal"]
+note           = "局域网唯一入口：TLS + 认证 + 按路由分权；控制台不能启停它。"
+
+# ---------------------------------------------------------------------------
+# No tunnels.  The tunnel existed so a workstation could reach a remote console
+# at a stable address; here the console is on this host and the browser reaches
+# everything through the proxy.  Disabled explicitly rather than deleted, so
+# the intent is readable.
+# ---------------------------------------------------------------------------
+[tunnels.strata-native]
+enabled = false
+
+# ---------------------------------------------------------------------------
+# Browser-facing addresses.  An empty entry makes entry_url() answer "not
+# exposed" and the UI renders that state, rather than publishing a loopback link
+# -- a link that would resolve on the *reader's* machine and fail in a way
+# indistinguishable from an outage.
+#
+# THE INTERNAL URL IS UNCHANGED AND UNTOUCHED.  The services still bind
+# localhost and the portal still reaches them there; these entries are only what
+# the portal hands to a browser.  Section 2 of the brief requires the two be
+# decoupled, and the failure it is guarding against is concrete: a browser given
+# http://localhost:8080 would look for Strata on the *workstation*.
+#
+# TWO OF THREE ARE PUBLISHABLE, and the third is not -- measured, not assumed:
+#
+#   strata / grafana  work under a path prefix.  Strata's console resolves every
+#                     asset and every request relatively; Grafana is configured
+#                     for a sub-path.  Both were confirmed by requesting the real
+#                     pages and reading what they emit.
+#
+#   evalscope        does NOT.  Its index.html asks for /assets/index-*.js and
+#                     /favicon.svg with a leading slash, baked in at build time
+#                     (Vite's default base), and there is no configuration hook
+#                     for it here.  Publishing it under a prefix would need
+#                     either a response-body rewrite in the proxy -- fragile, and
+#                     the kind of thing that breaks the first time an endpoint
+#                     returns an absolute URL in JSON -- or a second listening
+#                     port, which is outside the authorisation for this work.
+#                     So the dashboard stays reachable only on the node, and the
+#                     console renders it as "not exposed" rather than as a link
+#                     that 404s.  Raised as a finding needing a decision.
+# ---------------------------------------------------------------------------
+[public_urls]
+strata  = "https://{{LAB_HOST}}:8443/strata/"
+grafana = "https://{{LAB_HOST}}:8443/grafana/"
+
+[ports]
+must_be_free = [8765, 9000, 9090, 9101, 3000, 8443]
+forwarded    = []
+
+# ---------------------------------------------------------------------------
+# Where each tree lives.  The checkout is code; state, logs, run data and
+# archives are separate, because a git reset must not take a credential, a log
+# or six months of benchmark results with it.
+#
+# `reports` and `benchmarks` are LISTS: the durable data root first, the
+# checkout second for anything committed there.  That is what keeps the
+# historical archive readable from the new deployment without a copy step.
+# ---------------------------------------------------------------------------
+[paths]
+state_root = "{{LAB_ROOT}}/services"
+reports    = ["{{LAB_ROOT}}/llm-lab-data/reports", "reports"]
+benchmarks = ["{{LAB_ROOT}}/llm-lab-data/benchmarks", "data/benchmarks"]
+metrics    = "data/metrics"
+logs       = "logs"

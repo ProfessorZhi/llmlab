@@ -1,0 +1,42 @@
+{
+  "approval_gates": [
+    "pam-root-uid",
+    "gateway-strata",
+    "caddy-systemd-8443",
+    "owner-go"
+  ],
+  "candidate": {
+    "allowlist_sha256": "74f9a1d47b66f7c3ae37d62ff052fa2c9384535e6f4345acceb63bb8652c7264",
+    "bundle_file_count": 65,
+    "bundle_sha256": "04d2c286948679ca00ca4e3124ddcaf2c9f968cb81ee64769496927e979b089d",
+    "bundle_total_bytes": 690931,
+    "source_commit": "5141b1b4ae3b966bf8df7cf1dba623a90421d68b"
+  },
+  "execution_authorized": false,
+  "kind": "canary",
+  "known_good_bundles": [
+    "04d2c286948679ca00ca4e3124ddcaf2c9f968cb81ee64769496927e979b089d",
+    "a2dc0ee92b74fa9d480313b93f51acf7e273016ff5a017b8293f472973cf384f"
+  ],
+  "rollback": {
+    "method": "symlink-swap",
+    "to_bundle_sha256": null,
+    "validated": false
+  },
+  "schema": "atelier-v1-deploy-manifest/1",
+  "service": {
+    "bind": "127.0.0.1",
+    "port": 18766,
+    "state_dir": "/var/lib/atelier-v1-portal",
+    "unit": "atelier-v1-portal-canary.service",
+    "user": "atelier-v1-portal",
+    "working_directory": "/srv/atelier-v1-portal/current"
+  },
+  "target": {
+    "build_profile": "production",
+    "current_link": "/srv/atelier-v1-portal/current",
+    "non_production": true,
+    "release_dir": "/srv/atelier-v1-portal/releases/04d2c286948679ca00ca4e3124ddcaf2c9f968cb81ee64769496927e979b089d",
+    "root": "/srv/atelier-v1-portal"
+  }
+}

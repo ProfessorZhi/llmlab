@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark"><title>Dell LLM Lab — Atelier Observatory · 03</title>
+<meta name="description" content="Dell LLM Lab 统一管理后台：Strata、Gateway、Grafana、Prometheus、EvalScope、API 与飞书身份。界面原型，非生产数据。">
+<style>
+:root{color-scheme:light;--bg:#f5f4ed;--panel:#eeeee4;--card:#f9f9f3;--elev:#e4e7da;--ink:#202c23;--muted:#606f5f;--dim:#788473;--line:#d4d9ca;--faint:#e7eade;--dark:#213b2c;--sage:#5f9074;--rust:#da7353;--blue:#7b87b1;--good:#3d8662;--caution:#a87331;--shadow:0 16px 60px #253e230f;--font:'Geist','Aptos','Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;--mono:'SFMono-Regular',Consolas,'Liberation Mono',monospace}
+:root[data-theme=dark]{color-scheme:dark;--bg:#121812;--panel:#182019;--card:#1c261e;--elev:#222c22;--ink:#eff0e5;--muted:#abb6a6;--dim:#84917e;--line:#344032;--faint:#263125;--dark:#e8ecdf;--sage:#a4c9ad;--rust:#f18e6b;--blue:#abb8d5;--good:#8ac9a5;--caution:#dfbb82;--shadow:0 18px 60px #0004}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--font);-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;transition:background .22s,color .22s}button,input,select,textarea{font:inherit}button{cursor:pointer;color:inherit;border:0;background:none}a{text-decoration:none;color:inherit}button:focus-visible,a:focus-visible,input:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--rust);outline-offset:3px}svg{display:block}.wrap{max-width:1510px;margin:0 auto;padding:0 clamp(20px,4vw,66px)}.muted{color:var(--muted)}.dim{color:var(--dim)}.mono{font-family:var(--mono)}.caps{font-size:10px;letter-spacing:.11em;font-weight:600;color:var(--muted)}.tiny{font-size:11px;color:var(--muted)}.number{letter-spacing:-.062em;font-weight:470;line-height:1.04}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--sage);flex:none}.dot.rust{background:var(--rust)}.dot.blue{background:var(--blue)}.dot.dim{background:var(--dim)}.badge{font-size:10.5px;display:inline-flex;align-items:center;gap:7px;color:var(--muted);background:var(--panel);padding:6px 10px;border-radius:5px;white-space:nowrap}.badge.good{color:var(--good)}.badge.warn{color:var(--caution)}.badge.bad{color:var(--rust)}.key{font:11px var(--mono);border:1px solid var(--line);padding:4px 7px;border-radius:4px;background:var(--panel)}.primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 15px;border-radius:7px;background:var(--dark);color:var(--bg);font-size:12px;white-space:nowrap}.primary:hover{opacity:.87}.secondary{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:9px 13px;border:1px solid var(--line);border-radius:7px;font-size:12px;white-space:nowrap}.secondary:hover{background:var(--elev)}button:active{transform:translateY(1px)}.unavailable{opacity:.65;cursor:not-allowed}.topbar{border-bottom:1px solid var(--line);background:var(--bg);position:sticky;top:0;z-index:50}.top-inner{height:74px;display:flex;justify-content:space-between;align-items:center;gap:16px}.brand{display:flex;align-items:center;gap:11px;min-width:max-content}.mark{width:27px;height:27px;border-radius:9px;border:7px solid var(--dark);border-right-color:var(--rust);border-bottom-color:var(--sage);transform:rotate(-35deg)}.brandname{font-weight:720;font-size:16px;letter-spacing:-.04em}.brand small{display:block;color:var(--dim);font-size:10px;letter-spacing:.12em;font-weight:500;margin-top:-1px}.topnav{display:flex;gap:24px;align-items:center;justify-content:center;overflow:auto;scrollbar-width:none;white-space:nowrap}.topnav::-webkit-scrollbar{display:none}.navitem{font-size:12px;color:var(--muted);padding:25px 0 23px;border-bottom:2px solid transparent;flex:none}.navitem:hover{color:var(--ink)}.navitem.active{color:var(--ink);border-bottom-color:var(--dark);font-weight:620}.topright{display:flex;align-items:center;gap:10px;flex:none}.topright .mode{display:inline-flex;gap:7px;align-items:center;font-size:11px;color:var(--muted)}.themebtn{border:1px solid var(--line);border-radius:7px;width:34px;height:34px;display:grid;place-items:center;font-size:15px}.themebtn:hover{background:var(--panel)}.account{font-size:11px;border:1px solid var(--line);padding:8px 11px;border-radius:7px;white-space:nowrap}.account:hover{background:var(--panel)}.auth-demo{background:var(--rust);color:#fff;border-radius:50%;font-weight:750;width:21px;height:21px;display:inline-grid;place-items:center;font-size:10px;margin-right:5px}.mobile-nav{display:none}
+.content{padding-top:35px}.view{display:none;animation:appear .25s ease both}.view.active{display:block}@keyframes appear{from{opacity:.4;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}.breadcrumb{display:flex;gap:10px;align-items:center;color:var(--dim);font:10px var(--mono);letter-spacing:.08em;text-transform:uppercase;margin:1px 0 20px}.breadcrumb b{color:var(--sage);font-weight:500}.hero{display:flex;justify-content:space-between;gap:28px;align-items:flex-end;padding-bottom:31px}.hero h1{font-weight:640;letter-spacing:-.05em;font-size:clamp(28px,3.5vw,38px);line-height:1.14;margin:0 0 12px}.hero p{font-size:12px;color:var(--muted);max-width:650px;margin:0}.hero-right{text-align:right;min-width:225px;display:flex;flex-direction:column;align-items:end;gap:12px}.seg{display:inline-flex;gap:2px;padding:4px;border-radius:8px;background:var(--panel)}.seg button{font-size:11px;color:var(--muted);padding:8px 12px;border-radius:5px;white-space:nowrap}.seg button.active{background:var(--dark);color:var(--bg)}.stamp{font:10px var(--mono);color:var(--dim)}.demo-strip{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:10px 13px;margin-bottom:27px;background:var(--panel);border-left:2px solid var(--rust);color:var(--muted);font-size:11px}.demo-strip strong{color:var(--ink);font-weight:600}.demo-strip span:last-child{white-space:nowrap}.lead-grid{display:grid;grid-template-columns:1.15fr 1fr;align-items:end;gap:25px;padding:2px 0 30px}.lead-label{font-size:12px;font-weight:580}.hardware{display:flex;align-items:baseline;gap:14px;margin:6px 0}.hardware .big{font-size:clamp(90px,11vw,144px);font-weight:440;letter-spacing:-.09em;line-height:.99}.hardware .unit{font-size:21px;letter-spacing:-.04em;margin-left:5px}.hardware .note{color:var(--muted);font-size:11px}.lead-meta{display:flex;align-items:center;gap:24px;flex-wrap:wrap;font-size:11px;color:var(--muted)}.lead-meta strong{font-size:15px;color:var(--ink);font-weight:560;margin-right:5px}.right-hardware{padding:0 0 6px 25px;border-left:1px solid var(--line);display:flex;flex-direction:column;gap:13px}.right-hardware h2{font-size:20px;font-weight:600;letter-spacing:-.03em;margin:0}.right-hardware .value-row{display:flex;gap:14px;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:12px}.right-hardware .value-row:last-child{border:0;padding-bottom:0}.right-hardware .value-row b{font-size:12px;font-weight:570}.status{display:flex;align-items:center;gap:6px;color:var(--good)}.mutedflag{color:var(--muted)}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:0 0 30px}.stat{display:flex;gap:13px;align-items:center;padding:19px 17px;border-right:1px solid var(--line);min-width:0}.stat:first-child{padding-left:0}.stat:last-child{border:0}.stat span{font-size:11px;color:var(--muted);white-space:nowrap}.stat strong{font-size:28px;font-weight:510;letter-spacing:-.055em;white-space:nowrap}.stat small{font-size:10px;color:var(--dim);margin-left:auto;text-align:right}.explorer{display:grid;grid-template-columns:minmax(0,1.72fr) minmax(330px,1fr);border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-bottom:38px}.plot-side{padding:24px 32px 20px 0;min-width:0}.side-side{border-left:1px solid var(--line);padding:25px 0 24px 29px;min-width:0}.headrow{display:flex;justify-content:space-between;align-items:center;gap:12px}.section-h{font-size:20px;font-weight:610;letter-spacing:-.045em;margin:0}.sect-sub{font-size:10.5px;color:var(--dim)}.plot{height:334px;width:100%;position:relative;margin-top:11px}.plot svg{width:100%;height:100%}.legendline{display:flex;gap:18px;align-items:center;color:var(--muted);font-size:11px;padding-top:11px}.legendline .mono{margin-left:auto;color:var(--dim);font-size:10px}.side-kicker{font-size:10px;color:var(--dim)}.model-name{font-size:23px;letter-spacing:-.05em;font-weight:600;margin:6px 0 9px;word-break:break-word;line-height:1.26}.model-detail{display:grid;grid-template-columns:1fr 1fr;gap:17px;margin:23px 0;padding:22px 0;border-block:1px solid var(--line)}.model-detail dt{font-size:10px;color:var(--dim);margin-bottom:5px}.model-detail dd{margin:0;font-size:14px;font-weight:520}.model-detail .mono{font-size:11px}.source-foot{margin-top:16px;font-size:10px;color:var(--dim);line-height:1.6}.source-foot b{font-weight:500;color:var(--muted)}.tags{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.tag{background:var(--panel);color:var(--muted);padding:5px 8px;font-size:10px;border-radius:4px}.group-title{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:15px 0 20px}.group-title h2{font-size:21px;letter-spacing:-.045em;font-weight:625;margin:0}.group-title .smallmeta{font:10px var(--mono);color:var(--dim)}.service-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.service{padding:23px 20px 22px 0;border-right:1px solid var(--line);min-width:0}.service:not(:first-child){padding-left:20px}.service:last-child{border:0}.service-icon{width:30px;height:30px;border-radius:8px;background:var(--elev);color:var(--dark);display:grid;place-items:center;margin-bottom:17px;font-size:14px;font-weight:750}.service h3{font-size:15px;margin:0 0 6px;letter-spacing:-.03em;font-weight:620}.service p{color:var(--muted);font-size:11px;line-height:1.7;min-height:51px;margin:0 0 18px}.service-foot{display:flex;justify-content:space-between;gap:9px;align-items:center;color:var(--dim);font:10px var(--mono)}.tablewrap{overflow-x:auto;border-top:1px solid var(--line)}table{width:100%;border-collapse:collapse;min-width:650px;text-align:left;font-size:12px}th{color:var(--dim);font-weight:500;font-size:10.5px}td,th{padding:15px 12px;border-bottom:1px solid var(--line)}tr:last-child td{border-bottom:0}td:first-child,th:first-child{padding-left:0}.rowtitle{font-weight:590;color:var(--ink)}.rowmuted{display:block;color:var(--muted);font-size:10px;margin-top:3px}.flow-row{display:flex;gap:13px;align-items:center;padding:15px 0;border-bottom:1px solid var(--line)}.flow-row:last-child{border:0}.flow-row b{font-size:13px;font-weight:610}.flow-row p{font-size:11px;color:var(--muted);margin:2px 0 0}.flow-row .badge{margin-left:auto}.footnote{font-size:11px;color:var(--muted);margin:16px 0 0}.footnote b{color:var(--ink);font-weight:500}
+.columns{display:grid;grid-template-columns:minmax(0,1.24fr) minmax(0,.76fr);gap:36px;margin-bottom:35px}.columns>*,.view,.statusrows,.flatpanel{min-width:0}.flatpanel{padding:25px;background:var(--panel);border:1px solid var(--line);border-radius:10px}.flatpanel h3{font-weight:620;font-size:16px;margin:0 0 12px;letter-spacing:-.025em}.flatpanel p{font-size:12px;color:var(--muted);margin:0 0 16px}.steps{list-style:none;margin:0;padding:0;counter-reset:seq}.steps li{display:flex;align-items:start;gap:15px;border-top:1px solid var(--line);padding:15px 0}.steps li:first-child{border:0}.steps .count{font:12px var(--mono);color:var(--dim);padding-top:2px}.steps b{font-size:12px;font-weight:610}.steps p{font-size:11px;color:var(--muted);margin:3px 0 0}.surface{border:1px solid var(--line);border-radius:8px;padding:19px;background:var(--card)}.fieldgrid{display:grid;grid-template-columns:1fr 1fr;gap:15px}.field{display:flex;flex-direction:column;gap:7px}.field label{font-size:10px;color:var(--muted)}.field input,.field select{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:6px;padding:10px;min-width:0;font-size:12px}.field input:disabled{opacity:.7}.actions{display:flex;gap:8px;margin-top:18px;align-items:center;flex-wrap:wrap}.codearea{background:var(--elev);padding:15px 17px;font:11.5px/1.8 var(--mono);overflow:auto;border-radius:6px;color:var(--ink);white-space:pre-wrap;word-break:break-word}.guard{font-size:11px;color:var(--muted);border-left:2px solid var(--sage);padding:5px 0 5px 12px;margin:18px 0}.guard.warn{border-left-color:var(--rust)}.api-keys{margin-top:30px}.page-block{padding-bottom:35px}.page-block .overview-intro{font-size:12px;max-width:640px;color:var(--muted)}.subnav{display:flex;gap:7px;align-items:center;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:13px 0;margin-bottom:25px;overflow:auto}.subnav button{padding:7px 10px;border-radius:5px;color:var(--muted);font-size:11px;white-space:nowrap}.subnav button.active{background:var(--dark);color:var(--bg)}.selector{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.selector select{border:1px solid var(--line);border-radius:6px;background:var(--panel);padding:8px 12px;color:var(--ink);font-size:11px}.infobox{border:1px solid var(--line);padding:25px 28px;border-radius:8px;background:var(--panel)}.statusrows{display:grid;grid-template-columns:1fr 1fr;gap:14px}.statusitem{border-bottom:1px solid var(--line);padding:0 0 15px}.statusitem .tiny{margin-bottom:8px}.statusitem strong{font-size:17px;font-weight:570}.chatbox{display:flex;flex-direction:column;min-height:380px;border:1px solid var(--line);border-radius:8px;background:var(--card)}.chatlog{padding:24px;flex:1;display:flex;flex-direction:column;gap:14px}.chatbubble{max-width:85%;padding:12px 15px;border:1px solid var(--line);border-radius:8px;font-size:12px;line-height:1.7}.chatbubble.me{align-self:end;background:var(--elev)}.chatbubble.bot{background:var(--panel)}.chatcomposer{padding:14px;border-top:1px solid var(--line);display:flex;gap:9px}.chatcomposer input{flex:1;min-width:0;border:1px solid var(--line);background:var(--bg);padding:11px;border-radius:6px;color:var(--ink)}.footbar{margin-top:60px;border-top:1px solid var(--line);padding:20px 0 30px;color:var(--dim);font:10px var(--mono);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+dialog{border:1px solid var(--line);border-radius:12px;max-width:min(560px,calc(100vw - 36px));padding:0;background:var(--bg);color:var(--ink);box-shadow:var(--shadow)}dialog::backdrop{background:#15201975;backdrop-filter:blur(5px)}.modal-head{display:flex;justify-content:space-between;align-items:center;padding:21px 24px;border-bottom:1px solid var(--line)}.modal-head h2{font-size:17px;margin:0;letter-spacing:-.03em}.modal-body{padding:23px 24px;font-size:12px;color:var(--muted);line-height:1.7}.modal-body strong{color:var(--ink)}.close{font-size:20px;color:var(--muted)}.modal-actions{padding:0 24px 24px;display:flex;justify-content:flex-end}.only-mobile{display:none}
+@media(max-width:1100px){.topnav{gap:14px}.topright .mode{display:none}.lead-grid{grid-template-columns:1fr 1fr}.explorer{grid-template-columns:minmax(0,1.45fr) minmax(285px,1fr)}.plot-side{padding-right:19px}.side-side{padding-left:20px}.stat{display:block}.stat strong{display:block;margin:8px 0 1px}.stat small{display:block;text-align:left}.service-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.service:nth-child(2){border:0}.service:nth-child(n+3){border-top:1px solid var(--line)}}
+@media(max-width:1050px){.topnav{display:none}.mobile-nav{display:flex;gap:18px;overflow:auto;padding:9px 0 0;scrollbar-width:none}}
+@media(max-width:760px){.wrap{padding:0 20px}.top-inner{height:68px}.topnav{display:none}.topright .account{font-size:0;padding:6px}.topright .account .auth-demo{font-size:10px;margin:0}.mobile-nav{display:flex;gap:18px;overflow:auto;padding:9px 0 0;scrollbar-width:none}.mobile-nav .navitem{padding:10px 0 12px;font-size:11px}.content{padding-top:24px}.hero{align-items:start}.hero h1{font-size:30px}.hero-right{min-width:0}.demo-strip span:last-child{display:none}.lead-grid{grid-template-columns:1fr;gap:20px}.right-hardware{padding-left:0;border-left:0;border-top:1px solid var(--line);padding-top:18px}.hardware .big{font-size:112px}.stats{grid-template-columns:repeat(2,1fr)}.stat:nth-child(2){border-right:0}.stat:nth-child(-n+2){border-bottom:1px solid var(--line)}.stat:nth-child(3){padding-left:0}.explorer{grid-template-columns:1fr}.plot-side{padding-right:0;padding-bottom:20px}.side-side{border-left:0;border-top:1px solid var(--line);padding:22px 0}.columns{grid-template-columns:minmax(0,1fr);gap:22px}.plot{height:300px}}
+@media(max-width:520px){.brandname{font-size:15px}.mark{width:24px;height:24px;border-width:6px}.topright{gap:6px}.topright .badge{display:none}.topright .account{border:0}.content{padding-top:18px}.hero{display:block;padding-bottom:24px}.hero p{max-width:300px}.hero-right{margin-top:18px;align-items:start;text-align:left}.hardware .big{font-size:94px}.lead-meta{gap:10px 20px}.stat{padding:15px 9px}.stat:first-child{padding-left:0}.stat strong{font-size:24px}.stat small{font-size:9px}.plot{height:260px}.service-grid{grid-template-columns:1fr}.service,.service:not(:first-child){padding:18px 0;border-right:0;border-top:1px solid var(--line)}.service:first-child{border-top:0}.service:nth-child(2){border-top:1px solid var(--line)}.fieldgrid{grid-template-columns:1fr}.statusrows{grid-template-columns:1fr}.subnav{padding:9px 0}.model-name{font-size:20px}.flatpanel{padding:18px}.model-detail{grid-template-columns:1fr 1fr}.stamp{font-size:9px}.demo-strip{font-size:10px}.hero h1{font-size:27px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
+
+/* ==============================================================
+   ATELIER OBSERVATORY Nº 03 — editorial-system design refinements
+   Inspired by visual principles, not visual assets or trademarks,
+   from Aesop, Loro Piana, Porsche, Rolls-Royce and Harvard.
+   Functional scope: self-contained offline concept; no API requests.
+   ============================================================== */
+:root{
+  color-scheme: light;
+  --bg:#F7F7F2;--panel:#EEEFE8;--card:#FBFCF9;--elev:#E5EBE5;
+  --ink:#20352D;--muted:#4D6155;--dim:#5F7464;--line:#CDD8CE;
+  --faint:#E8EEE7;--dark:#213C30;--sage:#43745D;--rust:#A95C46;
+  --blue:#70839A;--good:#3C765B;--caution:#9D672D;
+  --shadow:0 20px 48px #233C2B11;
+  --font-ui:'Avenir Next','Geist','Noto Sans CJK SC','PingFang SC','Microsoft YaHei',sans-serif;
+  --font-display:'GFS Baskerville','Baskerville','Noto Serif CJK SC','Songti SC',serif;
+  --font-data:'DIN 2014','Bahnschrift','Clear Sans','Noto Sans CJK SC',sans-serif;
+  --font-mono:'IBM Plex Mono','SFMono-Regular','Consolas',monospace;
+}
+:root[data-theme=dark]{color-scheme:dark;--bg:#151F1C;--panel:#1F2D27;--card:#1C2924;--elev:#283A30;--ink:#F0F0E8;--muted:#BBC9BD;--dim:#9AAE9C;--line:#405449;--faint:#26372D;--dark:#E7ECE3;--sage:#B8D3BD;--rust:#F0A28A;--blue:#B6C6DC;--good:#A4D4B5;--caution:#E6BB86;--shadow:0 18px 52px #0003}
+html{scroll-padding-top:90px} body{font-family:var(--font-ui);font-size:14px;line-height:1.65;letter-spacing:-.012em;color:var(--ink);text-rendering:optimizeLegibility}
+::selection{background:var(--sage);color:var(--bg)}
+.skip-link{position:absolute;left:24px;top:-100px;padding:11px 15px;background:var(--dark);color:var(--bg);z-index:300}
+.skip-link:focus{top:10px}
+.institutional-strip{background:var(--dark);color:var(--bg);height:30px}
+.strip-inner{height:30px;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:9px;font-weight:540;letter-spacing:.15em}
+.strip-inner b{font-weight:300;opacity:.6;padding:0 5px}
+.strip-center{opacity:.65;letter-spacing:.19em}.strip-right{opacity:.85}.strip-right i{font-style:normal;opacity:.62;margin-left:8px}
+.topbar{background:var(--bg);border-bottom:1px solid var(--line);backdrop-filter:none}
+.top-inner{height:82px}.wrap{max-width:1620px;padding-left:clamp(22px,4.6vw,76px);padding-right:clamp(22px,4.6vw,76px)}
+.brand{gap:14px}.mark{width:30px;height:30px;border-radius:50%;border-width:1.5px;border-style:solid;border-color:var(--dark);border-right-color:var(--rust);border-bottom-color:var(--sage);transform:rotate(-25deg);position:relative}
+.mark::before{content:'';position:absolute;inset:7px;border:1px solid var(--sage);border-radius:50%}.mark::after{content:'';position:absolute;width:5px;height:5px;right:-3px;top:3px;background:var(--rust);border-radius:50%}
+.brandname{font-family:var(--font-display);font-size:24px;letter-spacing:-.06em;font-weight:500;line-height:1}
+.brandname em{font-style:italic;font-weight:400;color:var(--sage)}.wordmark-period{color:var(--rust)}
+.brand small{letter-spacing:.14em;font-size:9px;font-weight:620;margin-top:7px;color:var(--dim)}.wordmark-rule{color:var(--rust);padding:0 2px}
+.topnav{gap:26px}.navitem{font-size:12px;letter-spacing:.012em;font-weight:490;padding:28px 0 26px}
+.navitem.active{font-weight:660;border-bottom-color:var(--rust)}.topright{gap:13px}.topstatus{font-size:9px;font-weight:600;letter-spacing:.08em;background:transparent;border:1px solid var(--line);padding:8px 10px}
+.themebtn{width:36px;height:36px;border-radius:3px;font-size:17px;border-color:var(--line)}.account{border-radius:3px;font-size:11px;font-weight:570;padding:9px 11px}.account-arrow{color:var(--rust)}.auth-demo{background:var(--dark);color:var(--bg);font-size:10px;width:21px;height:21px;font-family:var(--font-display);font-style:italic}
+.content{padding-top:24px}.demo-strip{margin-bottom:18px;background:var(--panel);border-left:2px solid var(--rust);padding:10px 15px;line-height:1.65;font-size:11px}.demo-strip strong{letter-spacing:.01em}
+.editorial-index{display:flex;align-items:center;gap:12px;color:var(--dim);font:10px var(--font-mono);letter-spacing:.09em;padding:5px 0 4px}
+.editorial-index b{font-family:var(--font-display);font-size:14px;font-weight:400;color:var(--rust)}
+.index-rule{height:1px;flex:1;background:var(--line)}
+.breadcrumb{letter-spacing:.14em;color:var(--dim);font-size:9px;margin:10px 0 14px}.breadcrumb b{color:var(--rust)}
+.hero{padding:0 0 30px;gap:30px;align-items:end;border-bottom:1px solid var(--line);margin-bottom:20px}
+.hero h1{font-family:'Noto Serif CJK SC','Songti SC',serif;letter-spacing:-.065em;line-height:1.22;font-weight:540;font-size:clamp(31px,3.2vw,43px);margin:0 0 9px}
+.title-whisper{font-family:var(--font-display);font-weight:400;font-style:italic;color:var(--sage);font-size:clamp(24px,2.9vw,40px);margin-left:12px;letter-spacing:-.048em;white-space:nowrap}
+.hero p{font-size:12px;line-height:1.8;max-width:780px;letter-spacing:.005em;color:var(--muted)}.hero-right{gap:12px}
+.seg{background:var(--panel);padding:3px;border-radius:4px}.seg button{border-radius:2px;font-weight:540;font-size:11px}
+.seg button.active{background:var(--dark);color:var(--bg)}.stamp{color:var(--dim);letter-spacing:.08em}
+.lead-grid{gap:35px;padding:5px 0 32px;grid-template-columns:1.18fr 1fr}
+.lead-label{font-size:11.5px;font-weight:610;letter-spacing:.022em}.label-prefix{font:9px var(--font-mono);letter-spacing:.08em;color:var(--rust);margin-right:16px}
+.hardware{margin:10px 0;align-items:baseline;gap:17px}.hardware .big{font-family:var(--font-data);font-weight:390;letter-spacing:-.11em;font-size:clamp(110px,10.8vw,152px);line-height:.99}
+.hardware .unit{font:600 19px var(--font-ui);letter-spacing:-.055em;margin:0 0 0 -4px}.hardware .unit small{display:block;font:9px var(--font-mono);letter-spacing:.05em;color:var(--dim);margin-top:1px}
+.hardware .note{font:10px var(--font-mono);letter-spacing:.08em;color:var(--dim)}
+.lead-meta{gap:25px;color:var(--muted)}.lead-meta strong{font:550 17px var(--font-data)}
+.right-hardware{border-left-color:var(--line);padding-left:34px;gap:12px}
+.right-hardware h2{font-family:'Noto Serif CJK SC',serif;font-size:19px;font-weight:550;letter-spacing:-.045em}
+.serif-note{font:italic 17px var(--font-display);color:var(--sage);margin-left:7px;letter-spacing:-.035em}
+.right-hardware .value-row{padding-bottom:15px;gap:12px}.right-hardware .value-row b{font-size:12px;font-weight:580}
+.dot{border-radius:50%;width:6px;height:6px}.status{color:var(--good)}
+.stats{margin-bottom:29px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);counter-reset:metric}
+.stat{position:relative;counter-increment:metric;display:grid;grid-template-columns:1fr auto;grid-template-rows:auto auto;column-gap:8px;row-gap:9px;align-content:center;padding:18px 23px}
+.stat::before{content:'0' counter(metric);position:absolute;top:8px;right:12px;font:9px var(--font-mono);color:var(--dim);letter-spacing:.04em}
+.stat span{grid-column:1;grid-row:1;color:var(--muted);font-size:10px;font-weight:560;letter-spacing:.025em}
+.stat strong{grid-column:1;grid-row:2;display:block;font:440 34px/1.1 var(--font-data);letter-spacing:-.07em;color:var(--ink)}
+.stat small{grid-column:2;grid-row:2;font-size:9px;color:var(--dim);align-self:end;max-width:90px;white-space:normal}
+.explorer{grid-template-columns:minmax(0,1.73fr) minmax(300px,1fr);margin-bottom:36px}
+.plot-side{padding:26px 34px 19px 0}.side-side{padding:26px 0 22px 34px}
+.section-h{font-family:'Noto Serif CJK SC',serif;font-size:20px;font-weight:560;letter-spacing:-.06em}
+.heading-en{font:italic 18px var(--font-display);color:var(--sage);margin-left:5px}
+.sect-sub{font-size:10px;color:var(--dim);margin-top:5px}
+.plot{height:320px;margin-top:16px}.plot svg text{font-family:var(--font-mono)}
+.legendline{font-size:10px;gap:18px}.legendline .mono{font-size:9px}
+.model-name{font-family:var(--font-data);font-size:27px;letter-spacing:-.06em;font-weight:540;line-height:1.24;margin:9px 0 8px}
+.model-detail{padding:20px 0;margin:22px 0;gap:18px}
+.model-detail dt{letter-spacing:.05em;color:var(--dim)}.model-detail dd{font-size:14px;font-weight:590}.model-detail .mono{font-size:11px}
+.badge{border-radius:2px;font-size:10px;padding:5px 9px}.badge.good{color:var(--good)}
+.tag{border-radius:2px;font-size:9px;letter-spacing:.02em}
+.primary,.secondary{border-radius:3px;font-weight:580;letter-spacing:.015em;transition:transform .25s cubic-bezier(.2,.7,.2,1),background .22s cubic-bezier(.2,.7,.2,1),opacity .22s}
+.primary{padding:11px 17px}.secondary{padding:10px 14px}.secondary:hover{border-color:var(--sage)}.primary:active,.secondary:active{transform:translateY(1px) scale(.99)}
+.service-grid{gap:0}.service{position:relative;min-height:155px;padding-top:22px}
+.service-icon{background:transparent;color:var(--sage);font-family:var(--font-display);font-size:30px;font-weight:400;line-height:1.0;display:block;width:auto;height:auto;border-radius:0;margin-bottom:16px}
+.monogram-tail{color:var(--rust)}.service h3{font-family:var(--font-data);font-size:16px;font-weight:580;letter-spacing:-.035em}
+.service p{color:var(--muted);font-size:11px;line-height:1.85}.service-foot{font-family:var(--font-mono);letter-spacing:.04em;font-size:9px}
+.group-title{margin-top:20px;margin-bottom:19px}.group-title h2{font-family:'Noto Serif CJK SC',serif;font-size:21px;font-weight:550;letter-spacing:-.055em}
+.group-title .smallmeta{font-size:9px;letter-spacing:.08em}
+.tablewrap{border-top-color:var(--line)}table{font-size:11px}th{font-size:9.5px;letter-spacing:.06em;color:var(--dim);font-weight:580;text-transform:uppercase}td{font-size:11px}td,.rowmuted{line-height:1.6}
+tr:hover td{background:var(--panel)}
+.flatpanel{background:var(--panel);border-color:var(--line);box-shadow:none}
+.flatpanel h3{font-family:'Noto Serif CJK SC',serif;letter-spacing:-.04em;font-weight:560}
+.chatbox,.infobox{border-color:var(--line)}.chatbubble{font-size:12px;line-height:1.8}.chatcomposer input{background:var(--card)}
+.statusitem{background:transparent}
+.guard{border-left-color:var(--rust)}
+.codearea{background:var(--dark);color:var(--bg);font:11px/1.8 var(--font-mono)}
+.footbar{border-top:1px solid var(--line);font:9px var(--font-mono);letter-spacing:.065em;margin-top:54px}
+/* Calm institutional motion: one entrance instead of perpetual animation */
+.view.active{animation:atelier-in .38s cubic-bezier(.22,.76,.2,1) both}
+@keyframes atelier-in{from{opacity:.55;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media(max-width:1180px){.topnav{gap:16px}.brandname{font-size:21px}.right-hardware{padding-left:23px}}
+@media(max-width:1050px){.top-inner{height:70px}.institutional-strip{height:27px}.strip-inner{height:27px}.mobile-nav{border-top:1px solid var(--line)}.strip-center{display:none}}
+@media(max-width:760px){.wrap{padding:0 22px}.content{padding-top:15px}.top-inner{height:68px}.brandname{font-size:21px}.title-whisper{display:block;margin:7px 0 0;font-size:clamp(26px,5.4vw,34px)}.hero{padding-bottom:21px}.hero h1{font-size:31px}.hero p{font-size:11.5px}.lead-grid{grid-template-columns:1fr;gap:23px;padding-bottom:24px}.right-hardware{border-left:0;padding:20px 0 0;border-top:1px solid var(--line)}.hardware .big{font-size:116px}.stat{padding:18px 16px}.stat strong{font-size:28px}.explorer{grid-template-columns:1fr}.plot-side{padding-right:0}.side-side{border-left:0;border-top:1px solid var(--line);padding:25px 0}.strip-right{font-size:9px}.account-label{display:none}.account-arrow{font-size:10px}.topstatus{display:none}.editorial-index{padding:9px 0 0}.editorial-index>span:last-child{font-size:8px}}
+@media(max-width:520px){.institutional-strip{height:24px}.strip-inner{height:24px;font-size:8px}.strip-right i{display:none}.brandname{font-size:20px}.brand small{font-size:8px}.mark{width:25px;height:25px}.topright{gap:7px}.topright .account{font-size:0}.account-arrow{font-size:10px}.hero h1{font-size:28px}.hero .title-whisper{font-size:30px}.lead-label{font-size:11px}.label-prefix{display:block;margin:0 0 6px}.hardware .big{font-size:105px}.hardware .unit{font-size:16px}.hardware .note{font-size:10px}.lead-meta{gap:9px 17px}.stat{padding:16px 10px 17px}.stat strong{font-size:26px}.stat small{font-size:9px}.stats{margin-bottom:19px}.headrow{align-items:start}.section-h{font-size:18px}.heading-en{font-size:16px}.group-title h2{font-size:20px}.plot{height:260px}.service-grid{grid-template-columns:1fr}.service{min-height:0}.editorial-index .index-rule{min-width:24px}}
+@media(max-width:360px){.top-inner{gap:6px}.brand{gap:8px}.brandname{font-size:18px}.topright{gap:5px}.topright .account{padding:6px 3px}.brand small{font-size:7px}}
+@media(prefers-reduced-motion:reduce){.view.active{animation:none!important}*{transition:none!important}}
+
+/* ========================================================================
+   ATELIER 03 · Typography-first redesign
+   Goal: one coherent type voice, legibility at operational density.
+   No downloaded font binaries. Does not change service functionality.
+   ======================================================================== */
+:root{
+  --font-ui:'Inter','Noto Sans CJK SC','PingFang SC','Microsoft YaHei UI','Microsoft YaHei',sans-serif;
+  --font-display:var(--font-ui);
+  --font-data:var(--font-ui);
+  --font-mono:'IBM Plex Mono','Cascadia Code','SFMono-Regular',Consolas,'Liberation Mono',monospace;
+  --font:var(--font-ui);
+  --bg:#F7F8F5;--panel:#EFF2EC;--card:#FDFEFB;--elev:#E7EDE7;
+  --ink:#1E3429;--muted:#4C5F54;--dim:#586A5F;--line:#D4DED3;
+  --faint:#E8EFE8;--dark:#1F382C;--sage:#356D54;--rust:#AC5C49;
+}
+:root[data-theme=dark]{
+  --bg:#141C19;--panel:#1E2A23;--card:#1A2520;--elev:#293B31;
+  --ink:#F1F5EE;--muted:#C0D0C3;--dim:#A8BBAE;--line:#3F5246;
+  --faint:#283B30;--dark:#E6F1E8;--sage:#A3D0B5;--rust:#EDAD95;
+}
+html{font-size:16px}
+body{
+  font-family:var(--font-ui);font-size:15px;line-height:1.62;
+  letter-spacing:0;font-weight:400;text-rendering:optimizeLegibility;
+  -webkit-font-smoothing:auto;
+}
+button,input,select,textarea{letter-spacing:0}
+button{min-height:32px}
+/* Two-column reading rhythm: content lives in a tighter, calmer field. */
+.wrap{max-width:1432px;padding-left:clamp(18px,3.5vw,54px);padding-right:clamp(18px,3.5vw,54px)}
+.content{padding-top:24px}
+.institutional-strip,.strip-inner{height:28px}
+.strip-inner{font:500 10.5px/1.2 var(--font-ui);letter-spacing:.025em}
+.strip-center{letter-spacing:.045em}
+.brand{gap:12px}
+.top-inner{height:74px}
+.brandname{font:650 21px/1.06 var(--font-ui);letter-spacing:-.025em;color:var(--ink)}
+.brandname em{font-style:normal;font-weight:650;color:inherit}
+.brand small{font:500 10.5px/1.4 var(--font-ui);letter-spacing:.045em;margin-top:4px;color:var(--dim)}
+.topnav{gap:24px}
+.navitem{font:500 13px/1.3 var(--font-ui);letter-spacing:0;padding:25px 0 23px}
+.navitem.active{font-weight:650}
+.topstatus{font:600 10.5px/1.2 var(--font-ui);letter-spacing:.01em;padding:7px 9px}
+.account{font:550 12.5px/1.2 var(--font-ui);padding:8px 10px}
+.auth-demo{font:600 10px var(--font-ui);font-style:normal}
+.themebtn{width:36px;height:36px}
+.demo-strip{font-size:12.5px;line-height:1.65;padding:11px 15px;margin-bottom:22px}
+.demo-strip .mono{font-family:var(--font-ui);font-size:10.5px;letter-spacing:.03em}
+/* Remove repeated decorative index and oversized Latin italic subtitles. */
+.editorial-index{display:none}
+.breadcrumb{font:500 11px/1.4 var(--font-ui);letter-spacing:.025em;text-transform:none;margin:0 0 15px}
+.hero{margin-bottom:20px;padding-bottom:24px;gap:22px;align-items:center}
+.hero h1{
+  font-family:var(--font-ui);font-weight:650;font-style:normal;
+  font-size:clamp(29px,2.8vw,37px);line-height:1.28;
+  letter-spacing:-.025em;margin:0 0 11px;
+}
+.title-whisper{display:block;margin:4px 0 0;font:500 12px/1.45 var(--font-ui);font-style:normal;letter-spacing:.06em;color:var(--sage);text-transform:uppercase;white-space:normal}
+.hero p{font-size:14.5px;line-height:1.78;letter-spacing:0;max-width:650px;color:var(--muted)}
+.hero-right{min-width:200px;gap:9px}
+.seg button{font:500 12.5px/1.3 var(--font-ui);padding:8px 12px}
+.stamp{font:500 10.5px/1.4 var(--font-ui);letter-spacing:.025em;color:var(--dim)}
+.caps{font:600 11.5px/1.3 var(--font-ui);letter-spacing:.045em}
+.tiny{font-size:12px;line-height:1.55}
+.label-prefix{font:500 10.5px/1.4 var(--font-ui);letter-spacing:.06em;margin-right:12px}
+.lead-grid{gap:30px;padding:3px 0 24px}
+.lead-label{font-size:13px;font-weight:600;letter-spacing:0}
+.hardware{gap:10px;margin:6px 0 12px}
+.hardware .big{font:500 clamp(95px,9vw,126px)/1.02 var(--font-data);letter-spacing:-.055em}
+.hardware .unit{font:650 20px/1.1 var(--font-ui);letter-spacing:-.015em;margin:0}
+.hardware .unit small{font:500 11px/1.4 var(--font-ui);letter-spacing:.025em;margin-top:3px}
+.hardware .note{font:500 12px/1.4 var(--font-ui);letter-spacing:0}
+.lead-meta{font-size:12.5px;gap:18px;line-height:1.6}
+.lead-meta strong{font:650 16px var(--font-ui)}
+.right-hardware{gap:9px;padding-left:28px}
+.right-hardware h2{font:650 18px/1.4 var(--font-ui);letter-spacing:-.015em}
+.serif-note{font:500 11px/1.4 var(--font-ui);font-style:normal;letter-spacing:.025em;color:var(--sage);margin-left:7px}
+.right-hardware .value-row{padding-bottom:13px;gap:10px}
+.right-hardware .value-row b{font-size:13px;font-weight:600}
+.stats{margin-bottom:22px}
+.stat{padding:17px 19px 18px;row-gap:9px}
+.stat::before{display:none}
+.stat span{font-size:12px;font-weight:550;letter-spacing:0}
+.stat strong{font:600 31px/1.2 var(--font-data);letter-spacing:-.025em}
+.stat small{font-size:11px;line-height:1.45;max-width:100px}
+.explorer{margin-bottom:26px}
+.plot-side{padding:23px 28px 18px 0}.side-side{padding:23px 0 21px 28px}
+.section-h{font:650 19px/1.4 var(--font-ui);letter-spacing:-.015em}
+.heading-en{font:500 12px/1.4 var(--font-ui);font-style:normal;letter-spacing:.02em;color:var(--sage);margin-left:5px}
+.sect-sub{font-size:12px;line-height:1.55;color:var(--muted);margin-top:7px}
+.plot{height:300px;margin-top:12px}
+.plot svg text{font-family:var(--font-ui);font-size:12px}
+.legendline{font-size:12px;line-height:1.5;gap:20px;padding-top:6px}
+.legendline .mono{font-size:11px}
+.side-kicker{font-size:11.5px}
+.model-name{font:600 23px/1.3 var(--font-ui);letter-spacing:-.018em;margin:11px 0 8px}
+.model-detail{margin:18px 0;padding:18px 0;gap:16px}
+.model-detail dt{font-size:12px;line-height:1.5;letter-spacing:0;color:var(--muted)}
+.model-detail dd{font-size:15px;font-weight:600;line-height:1.4}
+.model-detail .mono{font-size:12px}
+.source-foot{font-size:12px;line-height:1.7;margin-top:16px;color:var(--muted)}
+.tag{font-size:11.5px;letter-spacing:0;padding:6px 9px}
+.badge{font-size:11.5px;line-height:1.4;padding:6px 9px;letter-spacing:0}
+.primary,.secondary{font-size:13px;line-height:1.3;font-weight:600;padding:11px 14px;border-radius:6px}
+.group-title{margin-top:21px;margin-bottom:16px}
+.group-title h2{font:650 19px/1.4 var(--font-ui);letter-spacing:-.015em}
+.group-title .smallmeta{font:500 11px/1.5 var(--font-ui);letter-spacing:.025em}
+.service{min-height:0;padding-top:20px;padding-bottom:20px}
+.service-icon{font:650 23px/1.2 var(--font-ui);color:var(--sage);margin-bottom:11px}
+.service h3{font:650 15.5px/1.4 var(--font-ui);letter-spacing:0}
+.service p{font-size:13px;line-height:1.7;min-height:0;margin-bottom:14px}
+.service-foot{font:500 11px/1.4 var(--font-ui);letter-spacing:0}
+.tablewrap{border-top:1px solid var(--line)}
+table{font-size:13px}
+th{font:600 12px/1.45 var(--font-ui);letter-spacing:0;text-transform:none;color:var(--muted)}
+td{font-size:13px;line-height:1.65}
+td,th{padding:14px 13px}
+.rowtitle{font-weight:600}
+.rowmuted{font-size:11.5px;line-height:1.6;margin-top:4px}
+.footnote{font-size:13px;line-height:1.75}
+.flatpanel{padding:25px}
+.flatpanel h3{font:650 18px/1.5 var(--font-ui);letter-spacing:0}
+.flatpanel p{font-size:13.5px;line-height:1.75}
+.steps li{padding:15px 0;gap:13px}
+.steps .count{font:500 12px var(--font-ui)}
+.steps b{font-size:13.5px}
+.steps p{font-size:12.5px;line-height:1.7}
+.infobox{padding:26px}
+.surface{padding:21px}
+.field label{font-size:12px;font-weight:550}
+.field input,.field select{font-size:13.5px;padding:11px 12px;min-height:43px}
+.codearea{font:12px/1.75 var(--font-mono);letter-spacing:0;padding:18px}
+.guard{font-size:12.5px;line-height:1.75}
+.statusitem strong{font-size:16px;font-weight:650}
+.chatbubble{font-size:14px;line-height:1.75}
+.chatcomposer input{font-size:14px;min-height:43px}
+.subnav button,.selector select{font-size:12.5px}
+.footbar{font:500 10.5px/1.6 var(--font-ui);letter-spacing:.025em;margin-top:36px;padding:21px 0}
+/* Relaxed reading in long descriptions; no globally tracked Chinese text. */
+.view p:not(.source-foot):not(.demo-strip){overflow-wrap:break-word}
+/* Important data tokens remain monospaced; not entire paragraphs or subtitles. */
+.mono{font-family:var(--font-mono);letter-spacing:0}
+:focus-visible{outline-offset:3px}
+@media(max-width:1180px){
+  .topnav{gap:16px}.top-inner{gap:12px}.brandname{font-size:20px}
+  .stat{padding-inline:14px}
+}
+@media(max-width:1050px){
+  .top-inner{height:69px}.mobile-nav{padding-bottom:3px}
+}
+@media(max-width:760px){
+  .wrap{padding-inline:20px}.content{padding-top:18px}
+  .hero{align-items:flex-start;gap:12px;padding-bottom:20px}
+  .hero h1{font-size:31px}.title-whisper{font-size:11.5px;margin-top:5px}
+  .hero p{font-size:14px;line-height:1.72}
+  .hero-right{min-width:0}
+  .lead-grid{gap:18px;padding-bottom:22px}
+  .hardware .big{font-size:108px}
+  .right-hardware{padding:20px 0 0}
+  .stat{padding:17px 14px}
+  .stat strong{font-size:27px}
+  .stat span{font-size:11.5px}
+  .plot{height:285px}
+  .plot-side{padding:21px 0}
+  .side-side{padding:21px 0}
+}
+@media(max-width:520px){
+  .wrap{padding-inline:17px}.strip-inner{font-size:9.5px;letter-spacing:0}
+  .brandname{font-size:19px}.brand small{font-size:9.5px}
+  .demo-strip{font-size:12px;line-height:1.6}
+  .demo-strip .mono{display:none}
+  .hero h1{font-size:28px}
+  .hero p{font-size:13.5px}
+  .seg button{font-size:12px;padding:7px 9px}
+  .hardware .big{font-size:99px}
+  .hardware .note{font-size:11.5px}
+  .lead-meta{gap:9px 16px}
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:19px}
+  .stat{min-height:93px;padding:16px 12px;gap:4px}
+  .stat:nth-child(2){border-right:0}
+  .stat:nth-child(-n+2){border-bottom:1px solid var(--line)}
+  .stat strong{font-size:27px;white-space:nowrap}
+  .stat small{font-size:11px}
+  .section-h,.group-title h2{font-size:18px}
+  .heading-en{font-size:11px}
+  .sect-sub{font-size:11.5px}
+  .plot{height:265px}
+  .service p{font-size:13px}
+  td,th{padding:12px 10px}
+}
+@media(max-width:360px){
+  .top-inner{gap:5px}
+  .brandname{font-size:17px}.topright{gap:5px}.account{padding:7px 4px}
+  .hardware .big{font-size:90px}
+  .hero h1{font-size:27px}
+  .stat strong{font-size:25px}
+  .stamp{font-size:9px}
+}
+
+</style>
+</head>
+<body>
+<a class="skip-link" href="#app-main">跳过导航，进入内容</a>
+<div class="institutional-strip"><div class="wrap strip-inner"><span class="strip-left">DELL LLM LAB <b> / </b> RESEARCH COMPUTE</span><span class="strip-center">PRIVATE INFRASTRUCTURE — DESIGNED FOR READABILITY</span><span class="strip-right">DESIGN STUDY <i>№ 02 / 2026</i></span></div></div>
+<header class="topbar"><div class="wrap top-inner">
+  <a href="#overview" class="brand" aria-label="LLM Lab 首页"><span class="mark" aria-hidden="true"></span><span><span class="brandname">Dell <em>LLM</em> Lab<span class="wordmark-period">.</span></span><small>RESEARCH SYSTEMS <span class="wordmark-rule">/</span> EST. 2026</small></span></a>
+  <nav class="topnav" aria-label="主导航"><button class="navitem active" data-page="overview">概览</button><button class="navitem" data-page="models">模型与对话</button><button class="navitem" data-page="api">API 管理</button><button class="navitem" data-page="observability">监控与日志</button><button class="navitem" data-page="evaluation">评测中心</button><button class="navitem" data-page="admin">管理</button></nav>
+  <div class="topright"><span class="badge topstatus"><span class="dot rust"></span>DESIGN PREVIEW</span><button class="themebtn" id="themeButton" aria-label="切换深浅主题" title="切换明暗主题">☾</button><button class="account" id="accountButton"><span class="auth-demo">F</span><span class="account-label">飞书登录</span><span class="account-arrow"> ↗</span></button></div>
+</div><div class="wrap mobile-nav" aria-label="手机导航"><button class="navitem active" data-page="overview">概览</button><button class="navitem" data-page="models">模型</button><button class="navitem" data-page="api">API</button><button class="navitem" data-page="observability">监控</button><button class="navitem" data-page="evaluation">评测</button><button class="navitem" data-page="admin">管理</button></div></header>
+<main class="wrap content" id="app-main">
+  <div class="demo-strip" role="note"><span><strong>ATELIER 03 · 界面设计原型</strong> · 所有运行数据均为示意，尚未连接 Dell 生产服务。</span><span class="mono">VISUAL LANGUAGE 03 / READABILITY FIRST</span></div>
+  <section class="view active" id="view-overview" aria-labelledby="overview-title">
+   <div class="editorial-index"><span><b>01</b> / OBSERVATORY</span><span class="index-rule" aria-hidden="true"></span><span>THE PRIVATE COMPUTE EDITION</span></div>
+   <div class="breadcrumb"><span>LLM LAB</span><span>/</span><b>OVERVIEW</b></div>
+   <div class="hero"><div><h1 id="overview-title">实验室概览 <em class="title-whisper">OBSERVATORY</em></h1><p>统一了解计算资源、模型状态、API 调用与评测。完整可观测性，始于清晰的数据血缘。</p></div><div class="hero-right"><div class="seg" role="group" aria-label="演示时间范围"><button class="active" data-range="24h">24 小时</button><button data-range="7d">7 天</button><button data-range="30d">30 天</button></div><span class="stamp">UI SPECIMEN · UPDATED OCT 2026</span></div></div>
+   <div class="lead-grid"><div><div class="lead-label"><span class="label-prefix">HARDWARE / 01</span> 本机 GPU 总显存</div><div class="hardware"><span class="big number">48</span><span class="unit">GB <small>GDDR6</small></span><span class="note">RTX A6000</span></div><div class="lead-meta"><span><strong>1</strong>计算节点</span><span><strong>3</strong>受管入口</span><span>单机资源调度 · 生产模型保护</span></div></div><div class="right-hardware"><div class="headrow"><h2>服务基础设施 <span class="serif-note">INFRASTRUCTURE</span></h2><span class="badge">演示状态</span></div><div class="value-row"><span class="tiny">模型引擎</span><span class="status"><span class="dot"></span><b>Strata · 文本服务</b></span></div><div class="value-row"><span class="tiny">API Gateway</span><span class="status"><span class="dot"></span><b>统一转发入口</b></span></div><div class="value-row"><span class="tiny">GPU 遥测</span><span class="mutedflag" style="font-size:12px">数据来源待验证 · UNKNOWN</span></div></div></div>
+   <div class="stats"><div class="stat"><span>请求总量</span><strong class="number">1,248</strong><small>示例计数</small></div><div class="stat"><span>成功率</span><strong class="number">99.4%</strong><small>示例比例</small></div><div class="stat"><span>响应 p95</span><strong class="number">1.42 s</strong><small>示例延迟</small></div><div class="stat"><span>输出 Tokens</span><strong class="number">482k</strong><small>示例用量</small></div></div>
+   <div class="explorer"><div class="plot-side"><div class="headrow"><div><h2 class="section-h">调用量与性能 <em class="heading-en">/ TELEMETRY</em></h2><div class="sect-sub">统一窗口 · 浏览器仅接收授权范围内的聚合数据</div></div><div class="seg" id="chartToggles" role="group" aria-label="切换图表指标"><button class="active" data-chart="calls">请求量</button><button data-chart="latency">p95 延迟</button><button data-chart="tokens">Tokens</button></div></div><div class="plot"><svg id="timelineChart" viewBox="0 0 730 328" role="img" aria-label="演示用的近 24 小时调用与性能折线图"></svg></div><div class="legendline"><span><span class="dot rust"></span> Gateway 计量</span><span><span class="dot"></span> 成功请求</span><span class="mono">DEMO · 24 POINTS</span></div></div><div class="side-side"><div class="headrow"><span class="caps">MODEL REGISTRY / ACTIVE ROUTE</span><span class="badge"><span class="dot"></span>示意已加载</span></div><div class="model-name">Qwen3.8 Flash Next</div><div class="tiny mono">qwen3.8-flash-next-iq2_xs</div><div class="tags" style="margin-top:13px"><span class="tag">Strata engine</span><span class="tag">OpenAI chat</span><span class="tag">Image capability · 待验收</span></div><dl class="model-detail"><div><dt>上下文长度</dt><dd class="number">32,768 <span class="tiny">tokens</span></dd></div><div><dt>量化格式</dt><dd>IQ2_XS</dd></div><div><dt>推理队列</dt><dd>1 <span class="tiny">running</span></dd></div><div><dt>显存可用量</dt><dd>— <span class="tiny">unknown</span></dd></div></dl><button class="secondary" data-go="models">进入模型工作台 ↗</button><div class="source-foot">数据血缘：Gateway 负责实际请求统计，Strata 报告引擎健康，GPU/NVML 不可靠时不得推断真实可用显存。<b>当前为设计演示。</b></div></div></div>
+   <div class="group-title"><h2>已连接的平台组件</h2><span class="smallmeta">PLATFORM SURFACES / 04</span></div>
+   <div class="service-grid"><article class="service"><div class="service-icon">S</div><h3>Strata</h3><p>模型执行引擎。对话与调用使用 Portal 自有界面，通过 Gateway 访问后端。</p><div class="service-foot"><span>API ADAPTER</span><span>01 ↗</span></div></article><article class="service"><div class="service-icon">G<span class="monogram-tail">.</span></div><h3>Gateway</h3><p>统一模型路由、请求计量、Key 与限额的可信服务端来源。</p><div class="service-foot"><span>REST · USAGE</span><span>02 ↗</span></div></article><article class="service"><div class="service-icon">P<span class="monogram-tail">.</span></div><h3>Prometheus / Grafana</h3><p>首页指标原生绘制，完整图表经同源代理进入 Grafana 深度视图。</p><div class="service-foot"><span>METRICS · DEEP LINK</span><span>03 ↗</span></div></article><article class="service"><div class="service-icon">E</div><h3>EvalScope</h3><p>评测数据、运行记录和报告汇总。完整原生工具按兼容性开放。</p><div class="service-foot"><span>REPORT ADAPTER</span><span>04 ↗</span></div></article></div>
+   <div class="group-title" style="margin-top:34px"><h2>模型服务一览</h2><span class="smallmeta">REGISTERED IS NOT LOADED</span></div>
+   <div class="tablewrap"><table><thead><tr><th>模型 / 引擎</th><th>协议</th><th>登记</th><th>运行状态</th><th>授权范围</th><th>入口</th></tr></thead><tbody><tr><td><span class="rowtitle">Qwen3.8 Flash Next</span><span class="rowmuted mono">Strata · qwen3.8-flash-next-iq2_xs</span></td><td>OpenAI Chat</td><td><span class="badge">已登记</span></td><td><span class="badge good"><span class="dot"></span>示意可用</span></td><td>受管项目</td><td><button class="secondary" data-go="models">查看 ↗</button></td></tr><tr><td><span class="rowtitle">vLLM</span><span class="rowmuted">候选推理引擎</span></td><td>兼容层待验</td><td><span class="badge">计划中</span></td><td><span class="badge">未安装</span></td><td>未授权</td><td>—</td></tr><tr><td><span class="rowtitle">SGLang</span><span class="rowmuted">候选推理引擎</span></td><td>兼容层待验</td><td><span class="badge">计划中</span></td><td><span class="badge">未安装</span></td><td>未授权</td><td>—</td></tr></tbody></table></div>
+  </section>
+  <section class="view" id="view-models" aria-labelledby="models-title"><div class="breadcrumb">LLM LAB / <b>MODELS & CHAT</b></div><div class="hero"><div><h1 id="models-title">模型与对话 <em class="title-whisper">Models & Dialogue.</em></h1><p>一个聊天界面访问已授权模型；引擎部署状态、模态能力和调用协议保持清晰分离。</p></div><div class="hero-right"><span class="badge">受管模型选择 · DEMO</span></div></div><div class="columns"><div><div class="headrow" style="margin-bottom:15px"><h2 class="section-h">对话工作台</h2><div class="selector"><span class="tiny">模型</span><select aria-label="演示模型"><option>Qwen3.8 Flash Next / Strata</option><option disabled>vLLM · 未安装</option><option disabled>SGLang · 未安装</option></select></div></div><div class="chatbox"><div class="chatlog" id="chatLog"><div class="chatbubble bot">欢迎进入 LLM Lab。这是设计原型，未连接真实推理服务。正式系统将通过 Gateway 代理文本、图片和流式响应。</div><div class="chatbubble me">帮我梳理本周推理延迟和异常调用。</div><div class="chatbubble bot">在正式系统中，我将从您有权限访问的 Gateway 调用元数据中总结，不读取其他用户的数据，也不会默认保存请求原文。</div></div><form class="chatcomposer" id="chatForm"><input id="chatInput" aria-label="输入演示消息" placeholder="输入消息以预览界面状态（不会发送模型）"><button class="primary" type="submit">发送 ↗</button></form></div></div><div class="flatpanel"><h3>当前模型能力</h3><div class="statusrows"><div class="statusitem"><div class="tiny">文本</div><strong>支持</strong></div><div class="statusitem"><div class="tiny">图片理解</div><strong>待在线 E2E 验收</strong></div><div class="statusitem"><div class="tiny">OpenAI Chat</div><strong>通过 Gateway</strong></div><div class="statusitem"><div class="tiny">其他协议</div><strong>需 Adapter</strong></div></div><div class="guard warn">图片能力须以线上图片→文本推理通过为准，不能仅凭 encoder 离线测试或布尔健康值宣告完整可用。</div><button class="secondary" data-go="api">查看 API 接入方式 ↗</button></div></div></section>
+  <section class="view" id="view-api" aria-labelledby="api-title"><div class="breadcrumb">LLM LAB / <b>API CONTROL</b></div><div class="hero"><div><h1 id="api-title">API 管理 <em class="title-whisper">API Control.</em></h1><p>个人与团队的 Endpoint、凭据、用量和限额由同一服务端权限规则管理。</p></div><div class="hero-right"><span class="badge">只读演示 · 真实签发未启用</span></div></div><div class="stats"><div class="stat"><span>我的 Endpoints</span><strong class="number">02</strong><small>示例</small></div><div class="stat"><span>个人 Key</span><strong class="number">02</strong><small>均已遮蔽</small></div><div class="stat"><span>本月调用</span><strong class="number">8,412</strong><small>演示计量</small></div><div class="stat"><span>剩余预算</span><strong class="number">—</strong><small>未配置</small></div></div><div class="group-title"><h2>Endpoints</h2><button class="secondary" id="newEndpoint">申请新 Endpoint ↗</button></div><div class="tablewrap"><table><thead><tr><th>名称</th><th>调用协议</th><th>发布范围</th><th>模型</th><th>状态</th></tr></thead><tbody><tr><td><span class="rowtitle">my-chat</span><span class="rowmuted mono">/v1/chat/completions</span></td><td>OpenAI Chat</td><td>Private</td><td>Qwen3.8</td><td><span class="badge good">演示就绪</span></td></tr><tr><td><span class="rowtitle">team-vision</span><span class="rowmuted mono">/v1/chat/completions</span></td><td>Images / Chat</td><td>Team · 需授权</td><td>Qwen3.8</td><td><span class="badge warn">E2E 待验</span></td></tr></tbody></table></div><div class="columns api-keys"><section><div class="group-title"><h2>个人 API Keys</h2><span class="smallmeta">SECRET IS NEVER LISTED</span></div><div class="tablewrap"><table style="min-width:450px"><thead><tr><th>名称</th><th>前缀</th><th>Scope</th><th>状态</th></tr></thead><tbody><tr><td><span class="rowtitle">workstation</span></td><td><span class="key">llk_••••8m</span></td><td>models.read</td><td><span class="badge good">演示有效</span></td></tr><tr><td><span class="rowtitle">team-ci</span></td><td><span class="key">llk_••••2a</span></td><td>usage.read</td><td><span class="badge">演示密钥</span></td></tr></tbody></table></div><div class="guard">正式系统仅在签发时展示一次明文；服务端保存摘要，按项目和 Endpoint 审核 scope、到期与撤销。</div></section><aside class="flatpanel"><h3>SDK 接入示意</h3><p>所有外部应用通过 Gateway 的受管 API，绝不直接拿到 Strata 上游主密钥。</p><div class="codearea" id="curlExample">curl https://lab.example/v1/chat/completions \
+  -H 'Authorization: Bearer &lt;YOUR_SCOPED_KEY&gt;' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"qwen3.8-flash-next-iq2_xs","messages":[]}'</div><div class="actions"><button class="secondary" id="copyCurl">复制示例</button><span class="tiny">示例地址与 Key 占位符，不可直接调用</span></div></aside></div></section>
+  <section class="view" id="view-observability" aria-labelledby="obs-title"><div class="breadcrumb">LLM LAB / <b>OBSERVABILITY</b></div><div class="hero"><div><h1 id="obs-title">监控与日志 <em class="title-whisper">Observability.</em></h1><p>在 Portal 查看关键指标和调用溯源；完整 Grafana 原生大盘用于深度排障。</p></div><div class="hero-right"><span class="badge">来源与新鲜度优先</span></div></div><div class="service-grid" style="grid-template-columns:repeat(3,minmax(0,1fr))"><article class="service"><div class="service-icon">P<span class="monogram-tail">.</span></div><h3>Prometheus</h3><p>采集计算资源、服务健康、吞吐量与时间序列。</p><div class="service-foot">SERVER QUERIES <span>受控</span></div></article><article class="service"><div class="service-icon">G<span class="monogram-tail">.</span></div><h3>Grafana</h3><p>原生完整交互图表，经可信反代与 SSO 权限映射进入。</p><div class="service-foot">DEEP VIEW <span>待接线</span></div></article><article class="service"><div class="service-icon">L<span class="monogram-tail">.</span></div><h3>Gateway 日志</h3><p>按 request metadata、key_id、项目查询，不默认记录消息正文。</p><div class="service-foot">ACCESS METADATA <span>按权限</span></div></article></div><div class="group-title" style="margin-top:36px"><h2>观测指标</h2><span class="smallmeta">FAIL-CLOSED · UNKNOWN ≠ ZERO</span></div><div class="tablewrap"><table><thead><tr><th>指标</th><th>当前显示</th><th>权威来源</th><th>数据口径</th></tr></thead><tbody><tr><td class="rowtitle">p95 响应延迟</td><td>—</td><td>Gateway usage</td><td>成功请求且具有效样本</td></tr><tr><td class="rowtitle">GPU 可用显存</td><td>UNKNOWN</td><td>NVML / Strata</td><td>仅可信观测数据，明确来源</td></tr><tr><td class="rowtitle">API 请求数 / 429</td><td>—</td><td>Gateway usage</td><td>key_id → principal/project</td></tr><tr><td class="rowtitle">TTFT</td><td>—</td><td>Gateway streaming</td><td>仅流式且有效样本</td></tr></tbody></table></div></section>
+  <section class="view" id="view-evaluation" aria-labelledby="eval-title"><div class="breadcrumb">LLM LAB / <b>EVALUATION</b></div><div class="hero"><div><h1 id="eval-title">评测中心 <em class="title-whisper">Evaluation.</em></h1><p>EvalScope 负责评测任务与报告，Portal 负责展示授权的结果、运行状态和资源预算。</p></div><div class="hero-right"><span class="badge">当前未连接真实评测 Job</span></div></div><div class="columns"><div class="infobox"><div class="headrow"><h2 class="section-h">EvalScope 集成</h2><span class="badge warn">待接线</span></div><p class="muted" style="font-size:12px;max-width:520px;margin:10px 0 26px">已保存评测结果由服务端 Adapter 安全读取；原生 UI 仅在资源路径、子路径代理与身份边界完整验证之后开放。</p><ol class="steps"><li><span class="count">01</span><div><b>模型 / Endpoint 选择</b><p>从已授权的模型版本和 API 别名中选择评测目标。</p></div></li><li><span class="count">02</span><div><b>数据集、预算与排队</b><p>评测资源预检，不抢占现有 Strata GPU 服务。</p></div></li><li><span class="count">03</span><div><b>报告索引与对比</b><p>记录数据集版本、模型版本、指标及可复现实验信息。</p></div></li></ol></div><aside class="flatpanel"><h3>当前结果</h3><p>尚无经授权读取的真实评测记录。</p><div class="surface"><span class="caps">EMPTY STATE</span><div style="font-size:22px;letter-spacing:-.04em;margin:12px 0">等待数据接入</div><span class="tiny">这不是评测失败，也不代表已有模型得分为 0。</span></div><div class="guard">基准测试和实际部署是两条独立资源工作流；正式使用前需建立隔离队列与版本审计。</div></aside></div></section>
+  <section class="view" id="view-admin" aria-labelledby="admin-title"><div class="breadcrumb">LLM LAB / <b>ADMINISTRATION</b></div><div class="hero"><div><h1 id="admin-title">团队与系统管理 <em class="title-whisper">Administration.</em></h1><p>飞书负责登录身份；Portal 控制用户、项目、模型与 API 权限。物理部署仍需独立审批。</p></div><div class="hero-right"><button class="secondary" id="previewAuth">查看飞书登录方案 ↗</button></div></div><div class="columns"><div><div class="group-title"><h2>身份与权限</h2><span class="smallmeta">AUTHN IS NOT AUTHZ</span></div><div class="statusrows"><div class="statusitem"><div class="tiny">统一入口</div><strong>飞书 OAuth 2.0</strong><div class="badge warn" style="margin-top:10px">未启用的设计状态</div></div><div class="statusitem"><div class="tiny">Portal 会话</div><strong>HttpOnly Cookie + CSRF</strong><div class="badge" style="margin-top:10px">服务端授权</div></div><div class="statusitem"><div class="tiny">角色</div><strong>Viewer / User / Operator / Admin</strong></div><div class="statusitem"><div class="tiny">项目资源</div><strong>Principal × Project × Scope</strong></div></div><div class="group-title" style="margin-top:31px"><h2>权限边界</h2><span class="smallmeta">TRUST BOUNDARIES</span></div><div class="tablewrap"><table><thead><tr><th>身份凭据</th><th>主要用途</th><th>绝不能替代</th></tr></thead><tbody><tr><td>飞书 Session</td><td>浏览器登录 Portal</td><td>Gateway API Key</td></tr><tr><td>个人 Token</td><td>llmlab CLI / 管理 REST</td><td>管理员 / Fleet Master</td></tr><tr><td>Endpoint Key</td><td>应用调用模型</td><td>Linux / Portal 登录</td></tr><tr><td>Strata 上游密钥</td><td>Gateway 到推理引擎</td><td>公开到浏览器</td></tr></tbody></table></div></div><aside class="flatpanel"><h3>实体部署安全流程</h3><p>平台不从 Web 按钮直接执行系统命令，更不会在后台替换运行中的他人模型服务。</p><ol class="steps"><li><span class="count">01</span><div><b>Deployment Profile</b><p>模型版本、引擎、显存预算和协议能力。</p></div></li><li><span class="count">02</span><div><b>Preflight / Dry-run</b><p>检查 NVML、资源占用、维护窗口与备份。</p></div></li><li><span class="count">03</span><div><b>管理员审批</b><p>申请与实际执行分离；保留审计。</p></div></li><li><span class="count">04</span><div><b>执行 / Canary / 回滚</b><p>仅在专门授权维护任务中执行。</p></div></li></ol><button class="secondary unavailable" type="button" disabled title="正式部署功能尚未上线">执行部署 · 尚未开放</button></aside></div></section>
+  <footer class="footbar"><span>DELL LLM LAB / ATELIER OBSERVATORY Nº 03</span><span>TYPOGRAPHY · MEASUREMENT · RESTRAINT &nbsp; / &nbsp; 纯离线前端概念 · 不含真实密钥</span></footer>
+</main>
+<dialog id="explainDialog" aria-labelledby="modalTitle"><div class="modal-head"><h2 id="modalTitle">功能说明</h2><button class="close" id="closeDialog" aria-label="关闭说明">×</button></div><div class="modal-body" id="modalBody"></div><div class="modal-actions"><button class="primary" id="confirmDialog">了解</button></div></dialog>
+<script>
+(()=>{
+  const $$=(s)=>[...document.querySelectorAll(s)]; const $=(s)=>document.querySelector(s);
+  const pages=['overview','models','api','observability','evaluation','admin'];
+  function goto(name){if(!pages.includes(name))return; $$('.view').forEach(v=>v.classList.toggle('active',v.id==='view-'+name)); $$('[data-page]').forEach(b=>{const active=b.dataset.page===name;b.classList.toggle('active',active);b.setAttribute('aria-current',active?'page':'false')});history.replaceState(null,'','#'+name);document.title='Dell LLM Lab · '+({overview:'实验室概览',models:'模型与对话',api:'API 管理',observability:'监控',evaluation:'评测中心',admin:'管理'}[name]);window.scrollTo({top:0,behavior:'instant'});}
+  $$('[data-page], [data-go]').forEach(el=>el.addEventListener('click',e=>{e.preventDefault();goto(el.dataset.page||el.dataset.go)}));
+  const initial=location.hash.slice(1);if(pages.includes(initial))goto(initial);
+  const themeBtn=$('#themeButton');function applyTheme(t){document.documentElement.dataset.theme=t;themeBtn.textContent=t==='light'?'☾':'☼';themeBtn.title=t==='light'?'切换深色模式':'切换明亮模式'}applyTheme('light');themeBtn.addEventListener('click',()=>applyTheme(document.documentElement.dataset.theme==='light'?'dark':'light'));
+  $$('[data-range]').forEach(b=>b.addEventListener('click',()=>{$$('[data-range]').forEach(a=>a.classList.toggle('active',a===b));$('#timelineChart').setAttribute('aria-label','示例图表 · '+b.textContent+' · 不代表真实历史数据')}));
+  const data={calls:[22,18,21,25,20,24,28,27,31,38,49,45,51,53,56,51,43,49,46,42,52,62,58,54],latency:[31,35,28,34,36,32,39,39,37,44,46,39,47,40,43,52,51,48,46,57,61,55,49,45],tokens:[20,21,23,18,24,23,34,40,36,38,47,55,52,58,51,49,46,47,48,51,60,56,62,58]};
+  function chart(kind){let v=data[kind]||data.calls;const W=730,H=328,L=42,R=12,T=20,B=44,PW=W-L-R,PH=H-T-B,mi=12,ma=70;let lines='';for(let i=0;i<5;i++){const yy=T+i*PH/4;lines+=`<line x1="${L}" y1="${yy}" x2="${W-R}" y2="${yy}" stroke="var(--line)" stroke-width=".8"/><text x="${L-11}" y="${yy+4}" text-anchor="end" fill="var(--dim)" font-size="10">${Math.round(ma-i*(ma-mi)/4)}</text>`;}let pts=v.map((d,i)=>[L+i*PW/(v.length-1),T+(ma-d)/(ma-mi)*PH]);let line=pts.map(([x,y],i)=>`${i?'L':'M'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');let area=line+` L${(L+PW).toFixed(1)},${T+PH} L${L},${T+PH} Z`;const periods=['00:00','04:00','08:00','12:00','16:00','20:00','23:00'];const labels=periods.map((t,i)=>`<text x="${L+(i/6)*PW}" y="${H-14}" text-anchor="${i===0?'start':i===6?'end':'middle'}" fill="var(--dim)" font-size="10">${t}</text>`).join('');$('#timelineChart').innerHTML=`<defs><linearGradient id="fillTrend" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--rust)" stop-opacity=".17"/><stop offset="1" stop-color="var(--rust)" stop-opacity="0"/></linearGradient></defs>${lines}<path d="${area}" fill="url(#fillTrend)"/><path d="${line}" fill="none" stroke="var(--rust)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>${pts.filter((_,i)=>i===10||i===21).map(([x,y])=>`<circle cx="${x}" cy="${y}" r="5" fill="var(--rust)" stroke="var(--bg)" stroke-width="3"/>`).join('')}${labels}`;$('#timelineChart').setAttribute('aria-label','演示示例 '+({calls:'请求量',latency:'p95 延迟',tokens:'Tokens'}[kind])+' 折线图')}
+  chart('calls');$$('[data-chart]').forEach(b=>b.addEventListener('click',()=>{$$('[data-chart]').forEach(a=>a.classList.toggle('active',a===b));chart(b.dataset.chart)}));
+  const dlg=$('#explainDialog');function explain(title,text){$('#modalTitle').textContent=title;$('#modalBody').innerHTML=text;dlg.showModal();}$('#closeDialog').onclick=()=>dlg.close();$('#confirmDialog').onclick=()=>dlg.close();
+  $('#accountButton').onclick=()=>explain('飞书统一登录（设计方案）','<p>真实平台会通过 <strong>飞书 OAuth 2.0 / 扫码授权</strong> 建立 Portal 服务端 Session，再由 Portal RBAC 授予用户、项目及 API 权限。</p><p>当前为静态演示页，不发起 OAuth 请求，不创建用户或密钥。正式上线须配置企业应用、回调白名单、租户 allowlist、Cookie / CSRF、权限表和 Caddy 信任边界。</p>');
+  $('#previewAuth').onclick=$('#accountButton').onclick;
+  $('#newEndpoint').onclick=()=>explain('申请 Endpoint','<p>正式流程为：<strong>选择模型 → 配置 Deployment Profile → Dry-run → 项目审批 → 发布私有 Endpoint</strong>。</p><p>此演示不创建任何 Endpoint、不占用 GPU、不开放端口。生产发布必须额外授权。</p>');
+  $('#copyCurl').onclick=async()=>{const str="curl https://lab.example/v1/chat/completions -H 'Authorization: Bearer <YOUR_SCOPED_KEY>' -H 'Content-Type: application/json' -d '{\"model\":\"qwen3.8-flash-next-iq2_xs\",\"messages\":[]}'";try{await navigator.clipboard.writeText(str);explain('示例已复制','<p>复制的是<strong>占位符请求</strong>，无实际 API Key，也不指向真实服务器。</p>')}catch(e){explain('复制提示','<p>浏览器未授予剪贴板权限，可从代码块手动复制；不需要任何真实密钥。</p>')}};
+  $('#chatForm').addEventListener('submit',e=>{e.preventDefault();const input=$('#chatInput');const val=input.value.trim();if(!val)return;const mine=document.createElement('div');mine.className='chatbubble me';mine.textContent=val;$('#chatLog').append(mine);const response=document.createElement('div');response.className='chatbubble bot';response.textContent='这是离线设计原型：消息未发送到 Gateway 或 Strata。正式页面会显示流式响应、模型来源和用量归属。';$('#chatLog').append(response);input.value='';response.scrollIntoView({behavior:'smooth',block:'nearest'})});
+})();
+</script>
+</body></html>

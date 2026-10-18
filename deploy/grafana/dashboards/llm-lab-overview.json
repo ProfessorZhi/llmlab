@@ -1,0 +1,354 @@
+{
+  "uid": "llmlab-overview",
+  "title": "LLM Lab — Strata 推理节点总览",
+  "description": "所有数据来自 Strata 自身的 /metrics，经 metrics-adapter 转成 Prometheus 文本格式。没有示例数据，没有合成序列：面板为空就代表那条链路没通。",
+  "tags": ["llm-lab", "strata"],
+  "editable": false,
+  "graphTooltip": 1,
+  "refresh": "30s",
+  "time": { "from": "now-3h", "to": "now" },
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "数据链路",
+      "description": "adapter 是否取到了 Strata 的 /metrics。为 0 时下面的面板会一起变空,这是链路断了,不是负载为 0。",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "llmlab_strata_up", "legendFormat": "Strata 可达" }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "链路中断", "color": "red", "index": 0 } } },
+            { "type": "value", "options": { "1": { "text": "正常", "color": "green", "index": 1 } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "采集耗时",
+      "description": "adapter 每次抓取 Strata 花的时间。它随 GPU 负载上升,因为 Strata 的 /metrics 要读一次显存与功耗。",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "datasource": { "type": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "llmlab_strata_scrape_duration_seconds" }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "none",
+        "graphMode": "area",
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "decimals": 3, "color": { "mode": "fixed", "fixedColor": "blue" } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "模型",
+      "description": "Strata 自己报告的已加载模型,来自 llmlab_strata_info 的标签。",
+      "gridPos": { "h": 4, "w": 6, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "llmlab_strata_info", "format": "table", "instant": true }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "/^gpu_name$/", "values": true },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "GPU 显存",
+      "gridPos": { "h": 4, "w": 5, "x": 14, "y": 0 },
+      "datasource": { "type": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "llmlab_strata_gpu_memory_used_bytes" },
+        { "refId": "B", "expr": "llmlab_strata_gpu_memory_total_bytes" }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": { "unit": "bytes", "color": { "mode": "palette-classic" } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "当前输出速率",
+      "gridPos": { "h": 4, "w": 5, "x": 19, "y": 0 },
+      "datasource": { "type": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "llmlab_strata_tokens_per_second" },
+        { "refId": "B", "expr": "llmlab_strata_tokens_per_second_mean" }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": { "unit": "none", "decimals": 1, "color": { "mode": "palette-classic" } },
+        "overrides": []
+      }
+    },
+
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "GPU 利用率",
+      "description": "Strata 报的是百分比,adapter 除以 100 存成 0..1,PROMQL 与面板单位都以比率为准。",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "llmlab_strata_gpu_utilization_ratio", "legendFormat": "GPU" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "custom": { "fillOpacity": 18, "lineWidth": 2, "showPoints": "never" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "显存占用",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "llmlab_strata_gpu_memory_used_bytes", "legendFormat": "已用" },
+        { "refId": "B", "expr": "llmlab_strata_gpu_memory_total_bytes", "legendFormat": "总量" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0,
+          "custom": { "fillOpacity": 10, "lineWidth": 2, "showPoints": "never" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "温度与功耗",
+      "description": "两条不同量纲放在一起,各自独立轴。功耗在闲置时接近个位瓦数,跑推理时才会上去。",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 11 },
+      "datasource": { "type": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "llmlab_strata_gpu_temperature_celsius", "legendFormat": "温度 °C" },
+        { "refId": "B", "expr": "llmlab_strata_gpu_power_watts", "legendFormat": "功耗 W" },
+        { "refId": "C", "expr": "llmlab_strata_gpu_power_limit_watts", "legendFormat": "功耗上限 W" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 0, "lineWidth": 2, "showPoints": "never" }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "温度 °C" },
+            "properties": [{ "id": "unit", "value": "celsius" }, { "id": "custom.axisPlacement", "value": "left" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "功耗 W" },
+            "properties": [{ "id": "unit", "value": "watt" }, { "id": "custom.axisPlacement", "value": "right" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "功耗上限 W" },
+            "properties": [{ "id": "unit", "value": "watt" }, { "id": "custom.axisPlacement", "value": "right" }]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "吞吐:token 与请求",
+      "description": "由计数器求导得到。计数器在 Strata 重启后归零,rate() 会自己识别这种回落,所以这条曲线不会因为一次重启出现一个负的尖峰。",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 11 },
+      "datasource": { "type": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(llmlab_strata_output_tokens_total[5m])",
+          "legendFormat": "输出 token/s"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(llmlab_strata_requests_total[5m])",
+          "legendFormat": "请求/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "fillOpacity": 10, "lineWidth": 2, "showPoints": "never" }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "请求/s" },
+            "properties": [{ "id": "unit", "value": "reqps" }]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "前缀缓存命中率",
+      "description": "由两个计数器相除得到。这是 PROMQL 里的推导,不在 adapter 里 —— 换个窗口就换个答案,窗口属于查询不属于数据源。",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 18 },
+      "datasource": { "type": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(llmlab_strata_cached_prompt_tokens_total[10m]) / clamp_min(rate(llmlab_strata_prompt_tokens_total[10m]), 1)",
+          "legendFormat": "命中率(10 分钟窗口)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "custom": { "fillOpacity": 18, "lineWidth": 2, "showPoints": "never" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "投机解码接受率",
+      "description": "drafts_accepted / drafts_offered。这个比值低说明草稿模型与实际输出偏差大,是调参的入口。",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 18 },
+      "datasource": { "type": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(llmlab_strata_speculative_drafts_accepted_total[10m]) / clamp_min(rate(llmlab_strata_speculative_drafts_offered_total[10m]), 1)",
+          "legendFormat": "接受率"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "custom": { "fillOpacity": 18, "lineWidth": 2, "showPoints": "never" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "主机 CPU 与内存",
+      "description": "Strata 在它自己的 /metrics 里一并报的宿主机读数。它不是 node_exporter,所以只有 Strata 愿意报的那几项 —— 够用,且不需要在机器上再装一个采集器。",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 25 },
+      "datasource": { "type": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "llmlab_strata_cpu_utilization_ratio", "legendFormat": "CPU" },
+        {
+          "refId": "B",
+          "expr": "llmlab_strata_ram_used_bytes / llmlab_strata_ram_total_bytes",
+          "legendFormat": "内存占用比"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "custom": { "fillOpacity": 10, "lineWidth": 2, "showPoints": "never" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "PCIe 吞吐",
+      "description": "显存与主机之间的搬运量。权重换出/换入、以及大批量 prefill 会在这里显形。",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 25 },
+      "datasource": { "type": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "llmlab_strata_gpu_pcie_rx_bytes", "legendFormat": "接收" },
+        { "refId": "B", "expr": "llmlab_strata_gpu_pcie_tx_bytes", "legendFormat": "发送" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "custom": { "fillOpacity": 10, "lineWidth": 2, "showPoints": "never" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    }
+  ]
+}

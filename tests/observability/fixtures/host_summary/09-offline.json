@@ -1,0 +1,93 @@
+{
+  "note": "The projection's offline shape: a complete envelope where every metric is unknown with reason=offline. Not an error, and not a zero.",
+  "now": "2026-10-16T12:00:00Z",
+  "expect": {
+    "accepted": true,
+    "any_live": false,
+    "live_keys": [],
+    "envelope_reason": null,
+    "metric_reasons": [
+      "offline"
+    ],
+    "display_state": "unknown"
+  },
+  "payload": {
+    "version": 1,
+    "source": "prometheus-readonly",
+    "synthetic": false,
+    "readonly": true,
+    "state": "unknown",
+    "observed_at": "2026-10-16T11:59:56Z",
+    "metrics": {
+      "gpu_utilization_ratio": {
+        "state": "unknown",
+        "value": null,
+        "unit": "ratio",
+        "source": "prometheus-readonly",
+        "reason": "offline"
+      },
+      "gpu_temperature_celsius": {
+        "state": "unknown",
+        "value": null,
+        "unit": "celsius",
+        "source": "prometheus-readonly",
+        "reason": "offline"
+      },
+      "gpu_power_watts": {
+        "state": "unknown",
+        "value": null,
+        "unit": "watts",
+        "source": "prometheus-readonly",
+        "reason": "offline"
+      },
+      "strata_up": {
+        "state": "unknown",
+        "value": null,
+        "unit": "bool",
+        "source": "prometheus-readonly",
+        "reason": "offline"
+      },
+      "gpu_memory_used_mib": {
+        "state": "unknown",
+        "value": null,
+        "unit": "mib",
+        "source": "prometheus-readonly",
+        "reason": "offline"
+      },
+      "gpu_memory_total_mib": {
+        "state": "unknown",
+        "value": null,
+        "unit": "mib",
+        "source": "prometheus-readonly",
+        "reason": "offline"
+      }
+    },
+    "services": {
+      "prometheus": {
+        "state": "known",
+        "up": true,
+        "reason": null
+      },
+      "gateway": {
+        "state": "known",
+        "up": true,
+        "reason": null
+      },
+      "grafana": {
+        "state": "known",
+        "up": true,
+        "reason": null
+      },
+      "evalscope": {
+        "state": "unknown",
+        "up": null,
+        "reason": "unreachable"
+      },
+      "strata": {
+        "state": "known",
+        "up": true,
+        "reason": null
+      }
+    }
+  }
+}

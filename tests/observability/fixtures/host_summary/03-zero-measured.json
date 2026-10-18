@@ -1,0 +1,116 @@
+{
+  "note": "GPU utilisation measured at exactly 0. A measured zero is LIVE and must stay 0 \u2014 it must not be confused with a missing sample.",
+  "now": "2026-10-16T12:00:00Z",
+  "expect": {
+    "accepted": true,
+    "any_live": true,
+    "live_keys": [
+      "gpu_memory_total_mib",
+      "gpu_memory_used_mib",
+      "gpu_power_watts",
+      "gpu_temperature_celsius",
+      "gpu_utilization_ratio",
+      "strata_up"
+    ],
+    "envelope_reason": null,
+    "metric_reasons": [],
+    "display_state": "live"
+  },
+  "payload": {
+    "version": 1,
+    "source": "prometheus-readonly",
+    "synthetic": false,
+    "readonly": true,
+    "state": "known",
+    "observed_at": "2026-10-16T11:59:56Z",
+    "metrics": {
+      "gpu_utilization_ratio": {
+        "state": "known",
+        "value": 0,
+        "unit": "ratio",
+        "source": "prometheus-readonly",
+        "metric": "llmlab_strata_gpu_utilization_ratio",
+        "series": 1,
+        "age_s": 8,
+        "sample_at": "2026-10-16T11:59:52Z"
+      },
+      "gpu_temperature_celsius": {
+        "state": "known",
+        "value": 64.0,
+        "unit": "celsius",
+        "source": "prometheus-readonly",
+        "metric": "llmlab_strata_gpu_temperature_celsius",
+        "series": 1,
+        "age_s": 8,
+        "sample_at": "2026-10-16T11:59:52Z"
+      },
+      "gpu_power_watts": {
+        "state": "known",
+        "value": 231.0,
+        "unit": "watts",
+        "source": "prometheus-readonly",
+        "metric": "llmlab_strata_gpu_power_watts",
+        "series": 1,
+        "age_s": 8,
+        "sample_at": "2026-10-16T11:59:52Z"
+      },
+      "strata_up": {
+        "state": "known",
+        "value": 1,
+        "unit": "bool",
+        "source": "prometheus-readonly",
+        "metric": "llmlab_strata_strata_up",
+        "series": 1,
+        "age_s": 8,
+        "sample_at": "2026-10-16T11:59:52Z"
+      },
+      "gpu_memory_used_mib": {
+        "state": "known",
+        "value": 9216.0,
+        "unit": "mib",
+        "source": "prometheus-readonly",
+        "metric": "llmlab_strata_gpu_memory_used_mib",
+        "series": 1,
+        "age_s": 8,
+        "sample_at": "2026-10-16T11:59:52Z"
+      },
+      "gpu_memory_total_mib": {
+        "state": "known",
+        "value": 24576.0,
+        "unit": "mib",
+        "source": "prometheus-readonly",
+        "metric": "llmlab_strata_gpu_memory_total_mib",
+        "series": 1,
+        "age_s": 8,
+        "sample_at": "2026-10-16T11:59:52Z"
+      }
+    },
+    "services": {
+      "prometheus": {
+        "state": "known",
+        "up": true,
+        "reason": null
+      },
+      "gateway": {
+        "state": "known",
+        "up": true,
+        "reason": null
+      },
+      "grafana": {
+        "state": "known",
+        "up": true,
+        "reason": null
+      },
+      "evalscope": {
+        "state": "unknown",
+        "up": null,
+        "reason": "unreachable"
+      },
+      "strata": {
+        "state": "known",
+        "up": true,
+        "reason": null
+      }
+    }
+  }
+}

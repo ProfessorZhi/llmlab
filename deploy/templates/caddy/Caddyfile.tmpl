@@ -1,0 +1,224 @@
+# ===========================================================================
+# LLM Lab -- the front door.
+#
+# This is a TEMPLATE.  `deploy/templates/node/52-caddy.sh` renders it on the node,
+# substituting the listen address and two bcrypt hashes, and writes the result
+# to {{LAB_ROOT}}/services/caddy/Caddyfile at mode 600.  It is a template
+# and not a finished file for one reason: a bcrypt hash cannot be committed,
+# and a password that is committed is a password that is not one.
+#
+# WHAT THIS FILE IS FOR.  The portal binds localhost:8765 and must keep doing
+# so -- that binding is the boundary, not a leftover.  Everything a remote
+# browser is allowed to reach goes through here, and here owns three things the
+# portal deliberately does not: TLS, authentication, and the rule about which
+# authenticated user may reach which route.
+#
+# THREE PROPERTIES, and where each one is enforced:
+#
+#   1. Nothing is anonymous.  Every route sits under a `basic_auth`, so an
+#      unauthenticated request is answered by Caddy and never reaches the
+#      portal's API.  This is checked by requesting an API path with no
+#      credentials and requiring 401 -- not by reading this file.
+#
+#   2. Client-supplied identity headers are destroyed, not forwarded.  A
+#      reverse proxy that passes `X-Forwarded-User` through is a proxy that
+#      lets anyone type any name.  The portal happens to read no such header
+#      today, which is exactly why this belongs here: the day one is added, the
+#      protection should already be in place rather than added afterwards.
+#
+#   3. Switching services is admin-only.  `/api/service/*` is the state-changing
+#      surface -- start and stop -- and it is matched separately with a
+#      credential set that does not include the read-only user.  Monitoring is
+#      something a reader may do; stopping a service is not.
+# ===========================================================================
+
+{
+	# Caddy's admin API is a second control plane: a local HTTP endpoint that
+	# rewrites the running configuration.  Nothing here uses it -- the config is
+	# this file, loaded at start -- and an unused control plane is pure surface.
+	admin off
+
+	# No HTTP->HTTPS redirect listener.
+	#
+	# Automatic HTTPS normally opens a second listener on :80 to redirect
+	# cleartext requests.  :80 is privileged, this account has no sudo by design,
+	# and the result was a proxy that refused to start at all -- `listen tcp :80:
+	# bind: permission denied` -- which arrives *after* the log has already said
+	# it adapted the config and enabled HTTP/3, so the failure reads like a late,
+	# unrelated one.  There is nothing to redirect anyway: the entry address is
+	# :8443 and no browser will reach this host on :80.
+	#
+	# GLOBAL, not site-level.  It was written inside the site block first and
+	# `caddy validate` answered "unrecognized directive: auto_https" -- the same
+	# mistake as `protocols` below, in the same session, which is why both are
+	# annotated: this class of error is invisible until something executes the
+	# file.  The validator is the only reason it did not reach a running proxy.
+	auto_https disable_redirects
+
+	# Where certificates and the local CA live.  Set explicitly rather than
+	# inherited, because the default is under $HOME and this deployment keeps
+	# every piece of its state in one tree that can be backed up, moved or
+	# deleted as a unit.
+	storage file_system {{LAB_ROOT}}/services/caddy/data
+
+	# Certificate work happens in the background; it must not hold up the
+	# listener, or the first request after a reboot pays for it.
+	grace_period 5s
+
+	servers {
+		# h1 and h2 only.  Without this Caddy also opens a UDP listener for
+		# HTTP/3 on the same port (`enabling HTTP/3 listener addr=:8443`), which
+		# is a second transport and a second thing to keep patched for no gain
+		# on a LAN console.  Attempted once at site level as `protocols h1 h2`
+		# and rejected -- "unrecognized directive" -- because it is a *server*
+		# option, and the validator is what said so.
+		protocols h1 h2
+		timeouts {
+			read_header 10s
+			read_body   30s
+			# 300 s because a Benchmark export is a large zip built on demand,
+			# and a write timeout shorter than that turns a slow success into a
+			# truncated download.
+			write       300s
+			idle        120s
+		}
+	}
+}
+
+# ---------------------------------------------------------------------------
+# The site address.  The *host* in it is not a bind address -- this is the one
+# thing about Caddy that reading the file cannot tell you.
+#
+# Written first as `https://{{LAB_HOST}}:8443` with a comment claiming that
+# spelling out the address avoided a wildcard bind.  That comment was false and
+# the measurement is what showed it: `ss` reported `*:8443`, and a bare TCP
+# connect answered on localhost, {{LAB_HOST}} *and* {{LAB_PEER_HOST}}.  Caddy uses
+# the host in a site address to match requests and to choose certificates; the
+# socket it opens is per-port, on every address.  A proxy published on an
+# address nobody chose, described by a comment saying it was not.
+#
+# `bind` is the directive that actually constrains the socket, and it is here
+# now, so the sentence and the behaviour agree.  This host answers on two
+# addresses; only one of them was ever part of the plan.
+#
+# `tls internal` means Caddy runs a local certificate authority and issues this
+# site a certificate from it.  The alternative -- a public CA -- cannot work for
+# a private address: no public CA will issue for {{LAB_HOST}} or for a name
+# that does not resolve on the public internet.  So the trust anchor is a file
+# the operator installs once, and the browser then validates the chain for real
+# rather than being told to skip it.  Disabling verification would be easier and
+# is not the same thing: it would also accept a certificate from anyone else.
+#
+# The root certificate is at
+#   {{LAB_ROOT}}/services/caddy/data/pki/authorities/local/root.crt
+# and the acceptance script prints the exact command to install it per-user.
+# ---------------------------------------------------------------------------
+https://{{LISTEN_ADDR}} {
+	tls internal
+	bind {{BIND_ADDR}}
+
+	# ---- identity headers: removed at the edge --------------------------
+	# Listed one per line so the set is auditable.  These are the header names
+	# the common authenticating proxies use; a client may send any of them and
+	# none of them survive the hop.
+	request_header -X-Forwarded-User
+	request_header -X-Forwarded-Email
+	request_header -X-Forwarded-Groups
+	request_header -X-Remote-User
+	request_header -Remote-User
+	request_header -X-Auth-Request-User
+	request_header -X-Auth-Request-Email
+
+	# =======================================================================
+	# admin-only: everything that changes state
+	#
+	# Matched first, and with a credential set of its own, so this is an
+	# authorisation decision rather than a check inside an already-authorised
+	# request.  A viewer's credentials do not open this block at all.
+	# =======================================================================
+	@admin path /api/service /api/service/*
+	handle @admin {
+		basic_auth {
+			admin {{ADMIN_HASH}}
+		}
+		reverse_proxy localhost:8765
+	}
+
+	# =======================================================================
+	# Grafana, under its own path.
+	#
+	# Grafana is told to serve from this sub-path (GF_SERVER_SERVE_FROM_SUB_PATH),
+	# so the asset URLs it emits already carry /grafana/ and the prefix does not
+	# have to be rewritten.  Rewriting would be the fragile version: it needs a
+	# URL parser in the proxy and it breaks the moment an endpoint returns an
+	# absolute path in JSON.
+	#
+	# The datasource is configured for server-side access, so Grafana dials
+	# Prometheus itself over loopback; Prometheus is never published.
+	# =======================================================================
+	handle /grafana/* {
+		basic_auth {
+			admin {{ADMIN_HASH}}
+			viewer {{VIEWER_HASH}}
+		}
+		reverse_proxy localhost:3000
+	}
+
+	# =======================================================================
+	# Strata, under its own path.
+	#
+	# MEASURED, NOT ASSUMED.  The earlier reasoning -- recorded in the migration
+	# notes -- was that Strata's console emits absolute asset paths and would
+	# break under a stripped prefix, so it could not be published here at all.
+	# That was wrong, and it was wrong in a way that would have quietly removed
+	# a feature: the page references `web/app.css` and `web/app.js` relatively,
+	# carries no <base> tag, and every request in app.js is a relative one --
+	# `fetch("v1/chat/completions")`, `fetch("health")`, `fetch("metrics")`.
+	# There is no WebSocket and no use of location.origin.  So the console works
+	# mounted under a prefix, and `handle_path` -- which strips it -- is the
+	# right handler: the browser asks for /strata/v1/... and Strata is asked for
+	# /v1/..., which is the path it has always served.
+	#
+	# The trailing-slash redirect is load-bearing rather than tidy.  Relative
+	# resolution is against the page's *directory*: at /strata the browser
+	# resolves `v1/chat/completions` to /v1/chat/completions -- one segment too
+	# high, straight past this handler and into the portal's catch-all.  At
+	# /strata/ it resolves to /strata/v1/chat/completions, which is what this
+	# handler expects.
+	# =======================================================================
+	redir /strata /strata/ 308
+
+	handle_path /strata/* {
+		basic_auth {
+			admin {{ADMIN_HASH}}
+			viewer {{VIEWER_HASH}}
+		}
+		reverse_proxy localhost:8080
+	}
+
+	# =======================================================================
+	# everything else: the portal
+	#
+	# Reached last, so a new prefix added above cannot be shadowed by the
+	# catch-all.  Both users.
+	# =======================================================================
+	handle {
+		basic_auth {
+			admin {{ADMIN_HASH}}
+			viewer {{VIEWER_HASH}}
+		}
+		reverse_proxy localhost:8765
+	}
+
+	# ---- audit trail -----------------------------------------------------
+	# JSON, because the interesting question after an incident is "which user
+	# called which route and what came back", and that is a query, not a read.
+	# Rolled and capped so an unattended box cannot fill its own disk.
+	log {
+		output file {{LAB_ROOT}}/services/caddy/logs/access.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+		format json
+	}
+}

@@ -1,0 +1,19 @@
+# Where Grafana looks for the dashboards this repository ships.
+#
+# `allowUiUpdates: false` is deliberate: the file on disk is the source of
+# truth, so an edit made in the browser is lost on the next provision and
+# nobody is left wondering which of two versions is live.  To change a
+# dashboard, change the JSON here, commit it, and re-run the deploy.
+apiVersion: 1
+
+providers:
+  - name: llm-lab
+    orgId: 1
+    folder: "LLM Lab"
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: "{{LAB_ROOT}}/services/grafana/dashboards"
+      foldersFromFilesStructure: false

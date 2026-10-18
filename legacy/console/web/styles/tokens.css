@@ -1,0 +1,286 @@
+/* ==========================================================================
+   LLM Lab V2 -- design tokens
+
+   One source of truth for both themes.  Every colour, distance, duration and
+   easing used anywhere in the app is named here; a literal anywhere else is a
+   bug, because it is the one value no theme switch can reach.
+
+   Two rules carried over from the V1 stylesheet, because they were validated
+   rather than chosen by eye and nothing about a redesign changes the maths:
+
+     * the categorical series hues (--series-1/2/3) were run through a palette
+       contrast validator against the chart surface before any chart code was
+       written.  They keep their slot order and are never cycled.
+     * status colours are a reserved set.  They are never used as a series
+       colour, and they always ship beside a word -- never as the only signal.
+
+   The V2 values are re-tuned for the glass surfaces (the chart surface moved
+   from #1a1a19 to a slightly darker, bluer #14161c, so the series hues were
+   re-checked against it).
+
+   Fonts are deliberately the Windows stack.  No Apple private faces: this app
+   only ever runs on Windows, and a font that has to be installed first is a
+   font that renders as Times New Roman on the machine it was built for.
+   ========================================================================== */
+
+:root {
+  /* ---------------------------------------------------------- typography */
+  /* A modular scale (~1.2) rather than ad-hoc px.  Display sizes get tighter
+     tracking because at 34px the default spacing reads as loose. */
+  --font-sans: "Segoe UI Variable Display", "Segoe UI Variable Text", "Segoe UI",
+               "Microsoft YaHei UI", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  --font-mono: "Cascadia Code", "Cascadia Mono", Consolas, "JetBrains Mono",
+               ui-monospace, "SF Mono", monospace;
+
+  --fs-2xs:  10.5px;
+  --fs-xs:   11.5px;
+  --fs-sm:   12.5px;
+  --fs-base: 13.5px;
+  --fs-md:   14.5px;
+  --fs-lg:   16px;
+  --fs-xl:   19px;
+  --fs-2xl:  23px;
+  --fs-3xl:  28px;
+  --fs-4xl:  34px;
+
+  --lh-tight: 1.18;
+  --lh-snug:  1.38;
+  --lh-base:  1.6;
+
+  --fw-normal: 400;
+  --fw-medium: 500;
+  --fw-semi:   600;
+  --fw-bold:   700;
+
+  --track-tight: -0.022em;
+  --track-snug:  -0.011em;
+  --track-wide:   0.06em;   /* for the small all-caps section labels */
+
+  /* ------------------------------------------------------------- spacing */
+  /* 4px base.  Everything is a multiple; the named steps are the ones that
+     actually recur, not a claim that all sixteen are used. */
+  --sp-1:  4px;
+  --sp-2:  6px;
+  --sp-3:  8px;
+  --sp-4:  12px;
+  --sp-5:  16px;
+  --sp-6:  20px;
+  --sp-7:  24px;
+  --sp-8:  32px;
+  --sp-9:  40px;
+  --sp-10: 56px;
+
+  --gutter:     clamp(16px, 2.2vw, 28px);
+  --stack-gap:  var(--sp-6);
+
+  /* -------------------------------------------------------------- radius */
+  --r-xs:   6px;
+  --r-sm:   9px;
+  --r-md:   13px;
+  --r-lg:   18px;
+  --r-xl:   24px;
+  --r-pill: 999px;
+
+  /* ---------------------------------------------------------- motion */
+  /* Three durations with distinct jobs: a tap must feel instant, a panel
+     needs enough time to read as movement rather than a jump-cut. */
+  --dur-instant: 90ms;
+  --dur-fast:    140ms;
+  --dur-base:    220ms;
+  --dur-slow:    380ms;
+  --dur-slower:  620ms;
+
+  /* Spring-like: a slight overshoot on entry, no bounce on exit.  Exit is
+     linear-ish on purpose -- a bounce on something leaving reads as a
+     malfunction. */
+  --ease-out:    cubic-bezier(.16, 1, .3, 1);
+  --ease-in-out: cubic-bezier(.65, 0, .35, 1);
+  --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
+  --ease-exit:   cubic-bezier(.4, 0, .8, .4);
+
+  /* --------------------------------------------------------- breakpoints */
+  /* Named for documentation; CSS cannot read these into a media query, so the
+     literal values also appear in layout.css.  Keep the two in step. */
+  --bp-mobile:  640px;
+  --bp-tablet:  900px;
+  --bp-narrow:  1180px;
+}
+
+/* ==========================================================================
+   Dark -- graphite black, deep-sea blue, a little cyan/violet ambient light.
+   The default, and the one the app is designed against.
+   ========================================================================== */
+
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* --- background: three independent ambient lights over graphite ------ */
+  --bg:          #07080b;
+  --bg-ambient-1: rgba(56, 118, 208, .16);   /* deep sea blue, top-left   */
+  --bg-ambient-2: rgba(122, 86, 224, .11);   /* violet, bottom-right      */
+  --bg-ambient-3: rgba(38, 176, 176, .07);   /* teal, centre              */
+
+  /* --- surfaces: elevation by opacity, not by a single hand-picked grey -- */
+  --surface-0:   rgba(255, 255, 255, .028);
+  --surface-1:   rgba(255, 255, 255, .046);
+  --surface-2:   rgba(255, 255, 255, .068);
+  --surface-solid: #101219;
+  --surface-sunken: rgba(0, 0, 0, .26);
+
+  /* --- glass: only for nav, toolbar, overlay and a few focal containers -- */
+  --glass-bg:      rgba(20, 23, 32, .62);
+  --glass-bg-strong: rgba(17, 20, 28, .84);
+  --glass-blur:    18px;
+  --glass-saturate: 150%;
+  --glass-border:  rgba(255, 255, 255, .095);
+  --glass-hi:      rgba(255, 255, 255, .055);  /* inner top highlight      */
+
+  /* --- ink: measured against --surface-solid and the glass stack ------- */
+  --ink:       #f2f4f8;
+  --ink-2:     #c2c8d4;
+  --ink-3:     #98a0b0;
+  --ink-muted: #6f7889;
+  --ink-faint: #4a515f;
+
+  /* --- lines ---------------------------------------------------------- */
+  --hair:      rgba(255, 255, 255, .075);
+  --hair-strong: rgba(255, 255, 255, .13);
+  --grid:      rgba(255, 255, 255, .065);
+  --axis:      rgba(255, 255, 255, .13);
+
+  /* --- accent: the cyan-blue the UI is keyed on ----------------------- */
+  --accent:      #4d9bf5;
+  --accent-hi:   #74b3ff;
+  --accent-lo:   #2f6fc4;
+  --accent-soft: rgba(77, 155, 245, .15);
+  --accent-ring: rgba(77, 155, 245, .45);
+  --accent-ink:  #ffffff;
+
+  /* second ambient accent, used sparingly (active nav dot, focus glow) */
+  --accent-2:      #8f7bf0;
+  --accent-2-soft: rgba(143, 123, 240, .16);
+
+  /* --- categorical series: FIXED slot order, validated against the chart
+         surface (#14161c) for contrast and colour-vision separation ------ */
+  --series-1: #4f95ee;   /* slot 1 -- blue   */
+  --series-2: #e0713c;   /* slot 2 -- orange */
+  --series-3: #23a87b;   /* slot 3 -- green  */
+  --series-4: #a98bf0;   /* slot 4 -- violet (V2 addition; validated too)  */
+
+  --chart-surface: #14161c;
+
+  /* --- status: RESERVED.  Never a series colour.  Always beside a word - */
+  --good:     #35c05a;
+  --good-soft: rgba(53, 192, 90, .14);
+  --warning:  #e8b03c;
+  --warning-soft: rgba(232, 176, 60, .14);
+  --serious:  #ef8354;
+  --serious-soft: rgba(239, 131, 84, .14);
+  --critical: #f0616b;
+  --critical-soft: rgba(240, 97, 107, .15);
+  --info:     #5aa9f0;
+  --info-soft: rgba(90, 169, 240, .14);
+  --neutral:  #8b93a3;
+  --neutral-soft: rgba(139, 147, 163, .13);
+
+  /* --- shadow: layered, never a single big black blur ------------------ */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .30), 0 1px 1px rgba(0, 0, 0, .20);
+  --shadow-2: 0 4px 12px rgba(0, 0, 0, .34), 0 1px 3px rgba(0, 0, 0, .26);
+  --shadow-3: 0 12px 32px rgba(0, 0, 0, .40), 0 3px 8px rgba(0, 0, 0, .28);
+  --shadow-4: 0 24px 64px rgba(0, 0, 0, .50), 0 8px 20px rgba(0, 0, 0, .32);
+  --shadow-inset-hi: inset 0 1px 0 var(--glass-hi);
+  --shadow-accent: 0 6px 20px -6px rgba(77, 155, 245, .50);
+
+  --scrollbar-thumb: rgba(255, 255, 255, .14);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, .24);
+  --scrim: rgba(4, 5, 8, .62);
+}
+
+/* ==========================================================================
+   Light -- soft silver-white and pale blue.  Not a naive inversion of the
+   dark theme: glass on light backgrounds needs *higher* opacity to stay
+   legible, and the shadow direction has to carry the elevation because a
+   white surface has no highlight left to give.
+   ========================================================================== */
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg:          #eef1f6;
+  --bg-ambient-1: rgba(64, 132, 224, .20);
+  --bg-ambient-2: rgba(130, 96, 224, .13);
+  --bg-ambient-3: rgba(56, 168, 172, .09);
+
+  --surface-0:   rgba(255, 255, 255, .58);
+  --surface-1:   rgba(255, 255, 255, .74);
+  --surface-2:   rgba(255, 255, 255, .90);
+  --surface-solid: #ffffff;
+  --surface-sunken: rgba(16, 22, 34, .045);
+
+  --glass-bg:      rgba(255, 255, 255, .66);
+  --glass-bg-strong: rgba(255, 255, 255, .86);
+  --glass-blur:    18px;
+  --glass-saturate: 160%;
+  --glass-border:  rgba(16, 24, 40, .10);
+  --glass-hi:      rgba(255, 255, 255, .85);
+
+  --ink:       #10141c;
+  --ink-2:     #333c4c;
+  --ink-3:     #5a6478;
+  --ink-muted: #7a8496;
+  --ink-faint: #a8b0be;
+
+  --hair:      rgba(16, 24, 40, .085);
+  --hair-strong: rgba(16, 24, 40, .16);
+  --grid:      rgba(16, 24, 40, .085);
+  --axis:      rgba(16, 24, 40, .20);
+
+  --accent:      #1f6fdc;
+  --accent-hi:   #3b86ee;
+  --accent-lo:   #1758ad;
+  --accent-soft: rgba(31, 111, 220, .11);
+  --accent-ring: rgba(31, 111, 220, .40);
+  --accent-ink:  #ffffff;
+
+  --accent-2:      #6c53d8;
+  --accent-2-soft: rgba(108, 83, 216, .12);
+
+  /* re-tuned for the light chart surface -- the dark hues fail contrast on
+     white, so the series are re-derived rather than reused */
+  --series-1: #1f6fdc;
+  --series-2: #c2521f;
+  --series-3: #0f8a5f;
+  --series-4: #6c53d8;
+
+  --chart-surface: #ffffff;
+
+  --good:     #128a3c;
+  --good-soft: rgba(18, 138, 60, .11);
+  --warning:  #a76f00;
+  --warning-soft: rgba(167, 111, 0, .12);
+  --serious:  #b8501f;
+  --serious-soft: rgba(184, 80, 31, .12);
+  --critical: #c02b38;
+  --critical-soft: rgba(192, 43, 56, .11);
+  --info:     #1c6bc4;
+  --info-soft: rgba(28, 107, 196, .11);
+  --neutral:  #5f6b7e;
+  --neutral-soft: rgba(95, 107, 126, .12);
+
+  --shadow-1: 0 1px 2px rgba(16, 24, 40, .07), 0 1px 1px rgba(16, 24, 40, .05);
+  --shadow-2: 0 4px 12px rgba(16, 24, 40, .10), 0 1px 3px rgba(16, 24, 40, .07);
+  --shadow-3: 0 12px 32px rgba(16, 24, 40, .14), 0 3px 8px rgba(16, 24, 40, .08);
+  --shadow-4: 0 24px 64px rgba(16, 24, 40, .20), 0 8px 20px rgba(16, 24, 40, .10);
+  --shadow-inset-hi: inset 0 1px 0 var(--glass-hi);
+  --shadow-accent: 0 6px 20px -6px rgba(31, 111, 220, .42);
+
+  --scrollbar-thumb: rgba(16, 24, 40, .18);
+  --scrollbar-thumb-hover: rgba(16, 24, 40, .30);
+  --scrim: rgba(16, 22, 34, .34);
+}
+
+/* Density: the sidebar and tables tighten up on shorter viewports.  A token
+   rather than a media query so JS can read it if it ever needs to. */
+:root { --row-h: 46px; --sidebar-w: 252px; }
+@media (max-height: 780px) { :root { --row-h: 41px; } }

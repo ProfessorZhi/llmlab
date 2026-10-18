@@ -1,0 +1,95 @@
+{
+  "_comment": [
+    "An EXAMPLE EndpointRoutingSnapshot.  The portal's registry writes this",
+    "shape; the gateway reads it and nothing else.  Every value here is",
+    "synthetic -- the addresses, the secret files and the model ids are",
+    "placeholders, and the users are the four platform accounts the brief",
+    "names, shown once each so the three ACL kinds are all visible.",
+    "",
+    "It is loaded with `--routing-snapshot PATH`.  Without that flag the",
+    "gateway has exactly the single upstream it had before this file existed.",
+    "",
+    "The file must be a regular file, owned by root or by the gateway's own",
+    "user, and not group- or other-writable; anything else is refused and",
+    "reported in status.json under routing.error.  There is no signature here:",
+    "the trust model is 'read-only and trusted', and the sha256 of what was",
+    "actually loaded is published in the status document so an operator can",
+    "tell whether what is in force is what they approved.",
+    "",
+    "`secret_ref` names a file and a variable inside it -- never a value.",
+    "An inline secret would put a credential in a file the registry writes.",
+    "",
+    "`transport` is `http` (an IP literal, loopback unless the operator",
+    "allowlisted the address on the command line) or `unix` (an absolute",
+    "socket path).  There is no third option: no DNS, no file://, no scheme",
+    "this process would fetch."
+  ],
+  "schema": "llmlab.endpoint-routing/1",
+  "revision": 7,
+  "generated_at": "2026-10-15T09:30:00Z",
+  "source": "llm-lab-portal registry (synthetic example)",
+
+  "engines": [
+    {
+      "engine_id": "strata-primary",
+      "kind": "openai-compatible",
+      "upstream": {"transport": "http", "host": "localhost", "port": 8080},
+      "secret_ref": {
+        "file": "{{LAB_ROOT}}/services/secrets/strata-key.env",
+        "var": "STRATA_API_KEY"
+      },
+      "models_path": "/v1/models"
+    },
+    {
+      "engine_id": "engine-alice",
+      "kind": "openai-compatible",
+      "upstream": {"transport": "unix", "path": "/run/llmlab/{{LAB_USER}}.sock"},
+      "secret_ref": {
+        "file": "{{LAB_ROOT}}/services/secrets/engines.env",
+        "var": "ENGINE_ALICE_KEY"
+      }
+    },
+    {
+      "engine_id": "engine-carol",
+      "kind": "openai-compatible",
+      "upstream": {"transport": "http", "host": "localhost", "port": 8100},
+      "secret_ref": {
+        "file": "{{LAB_ROOT}}/services/secrets/engines.env",
+        "var": "ENGINE_CAROL_KEY"
+      }
+    }
+  ],
+
+  "endpoints": [
+    {
+      "endpoint_id": "ep-bob-llmlab-chat",
+      "engine_id": "strata-primary",
+      "model_alias": "llmlab-chat",
+      "model_id": "strata-iq2-xs",
+      "owner_uid": "{{LAB_ADMIN_USER}}",
+      "acl": {"kind": "all"},
+      "state": "active",
+      "note": "the house model; the only one every platform user may call"
+    },
+    {
+      "endpoint_id": "ep-alice-qwen",
+      "engine_id": "engine-alice",
+      "model_alias": "alice-qwen",
+      "model_id": "Qwen/Qwen2.5-7B-Instruct",
+      "owner_uid": "{{LAB_USER}}",
+      "acl": {"kind": "private"},
+      "state": "active",
+      "note": "{{LAB_USER}}'s own; nobody else sees it, including in /v1/models"
+    },
+    {
+      "endpoint_id": "ep-carol-llama",
+      "engine_id": "engine-carol",
+      "model_alias": "carol-llama",
+      "model_id": "meta-llama/Llama-3.1-8B-Instruct",
+      "owner_uid": "carol",
+      "acl": {"kind": "users", "principals": ["{{LAB_USER_3}}", "uid:1004"]},
+      "state": "active",
+      "note": "shared with one named user and with one trusted uid; both forms are exact"
+    }
+  ]
+}

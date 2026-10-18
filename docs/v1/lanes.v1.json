@@ -1,0 +1,200 @@
+{
+  "schema_version": "atelier-v1-program/1",
+  "as_of": "2026-10-17",
+  "basis": {
+    "ui_pr": 71,
+    "contract_pr": 72,
+    "production_issue": 65,
+    "contract_issue": 73,
+    "dispatcher_issue": 80
+  },
+  "current_runtime_status": "not_inspected_this_task",
+  "ci_policy": {
+    "github_actions_quota": "not_a_code_test_gate",
+    "local_test_evidence_required": true,
+    "real_failed_tests_must_block": true,
+    "protected_branch_override_permitted": false
+  },
+  "user_data_policy": {
+    "fabricated_business_records": 0,
+    "fabricated_metric_points": 0,
+    "real_secrets_in_repository": 0,
+    "production_demo_fallback": false
+  },
+  "devices": {
+    "primary_runtime": "Dell-LLM-Lab / {{LAB_HOST}}, verification pending",
+    "worker_preference": [
+      "explicitly authorized linux development servers",
+      "Dell only when workload safe"
+    ],
+    "windows_default_enabled": false,
+    "fleet_creation_requires": [
+      "fleet:create scope",
+      "local allow_create",
+      "allowed project id",
+      "conversation-scope authorization"
+    ]
+  },
+  "statuses": [
+    "NOT_STARTED",
+    "READY",
+    "ASSIGNED",
+    "RUNNING",
+    "PR_OPEN",
+    "LOCAL_TESTED",
+    "INTEGRATED",
+    "HOST_VERIFIED",
+    "BLOCKED_ACCESS",
+    "BLOCKED_DEPENDENCY",
+    "BLOCKED_APPROVAL",
+    "NEEDS_FIX",
+    "RELEASE_APPROVED",
+    "V1_VERIFIED_COMPLETE"
+  ],
+  "lanes": [
+    {
+      "id": "frontend",
+      "issue": 66,
+      "priority": "P0",
+      "owns": [
+        "prototypes/v6/additions.*",
+        "web/js/**",
+        "tests/browser/**",
+        "tests/web-features/**"
+      ],
+      "depends_on_for_dev": [
+        "contract"
+      ],
+      "depends_on_for_live": [
+        "bff",
+        "iam"
+      ],
+      "target": "nine real-data-aware V6.2 pages and all truthful failure states"
+    },
+    {
+      "id": "host",
+      "issue": 74,
+      "priority": "P0",
+      "owns": [
+        "backend/observability/sources.py",
+        "Host-specific read adapters/validators"
+      ],
+      "depends_on_for_dev": [
+        "contract"
+      ],
+      "depends_on_for_live": [
+        "verified_dell_metrics"
+      ],
+      "target": "fixed Prometheus/Strata source validation and HostSummary integration seam"
+    },
+    {
+      "id": "iam",
+      "issue": 75,
+      "priority": "P0",
+      "owns": [
+        "backend/auth/**",
+        "backend/auth_linux/**"
+      ],
+      "depends_on_for_dev": [
+        "contract"
+      ],
+      "depends_on_for_live": [
+        "approved_pam_broker"
+      ],
+      "target": "actual Linux principal/session/token and production-approved temporary admin"
+    },
+    {
+      "id": "registry",
+      "issue": 76,
+      "priority": "P1",
+      "owns": [
+        "backend/registry/**",
+        "cli/llmlab/**"
+      ],
+      "depends_on_for_dev": [
+        "contract"
+      ],
+      "depends_on_for_live": [
+        "iam",
+        "verified_gateway_router"
+      ],
+      "target": "Owner/ACL resource lifecycle with Router revision ACK"
+    },
+    {
+      "id": "calls",
+      "issue": 77,
+      "priority": "P1",
+      "owns": [
+        "backend/atlas/**",
+        "backend/observability/gateway.py"
+      ],
+      "depends_on_for_dev": [
+        "contract"
+      ],
+      "depends_on_for_live": [
+        "iam",
+        "registry",
+        "trusted_gateway_key_directory"
+      ],
+      "target": "own call metadata and safe project-scoped Atlas aggregations"
+    },
+    {
+      "id": "evaluation",
+      "issue": 78,
+      "priority": "P1",
+      "owns": [
+        "backend/evaluation/**"
+      ],
+      "depends_on_for_dev": [
+        "contract"
+      ],
+      "depends_on_for_live": [
+        "iam",
+        "audited_report_owners"
+      ],
+      "target": "source-separated scoped EvalScope and legacy reports"
+    },
+    {
+      "id": "bff",
+      "issue": 79,
+      "priority": "P0",
+      "owns": [
+        "backend/bff/**"
+      ],
+      "depends_on_for_dev": [
+        "contract"
+      ],
+      "depends_on_for_live": [
+        "host",
+        "iam",
+        "registry",
+        "calls",
+        "evaluation"
+      ],
+      "target": "only shared BFF writer, auth/source/capabilities/events/health mount"
+    }
+  ],
+  "coordinators": [
+    {
+      "id": "dispatcher",
+      "issue": 80,
+      "role": "track sessions/PR/test evidence, assign safe ready work after authorization, never auto-approve high-risk changes"
+    },
+    {
+      "id": "integrator",
+      "issue": 67,
+      "role": "single tested integration SHA, incremental merge, regression and route guards"
+    },
+    {
+      "id": "quality_release",
+      "issue": 69,
+      "role": "local offline/host evidence, canary and rollback with independent approval"
+    },
+    {
+      "id": "linux_quality_runner",
+      "issue": 82,
+      "role": "authorized Linux CPU-only reproducible tests, redacted evidence receipts, SHA-bound results; no root/GPU/Windows"
+    }
+  ],
+  "validation": "See docs/v1/V1_ACCEPTANCE.md V1-01..V1-15; no checkbox here implies verified"
+}

@@ -1,0 +1,58 @@
+{
+  "_comment": [
+    "An OpenAI-compatible chat completion carrying one picture and one question.",
+    "",
+    "Two things were wrong with the copy this replaces, and both are fixed here:",
+    "  * it named the model 'qwen3.8-flash-next'. Nothing on this box serves that",
+    "    id -- GET /health on the running Strata reports 'qwen3.8-flash-next-iq2_xs'",
+    "    and so does GET /v1/models through the gateway -- so the sample could not",
+    "    have worked even against an engine that had the vision encoder loaded.",
+    "  * it pointed at evidence/resume_sample.png, which is not in the repository",
+    "    and never was.",
+    "",
+    "The picture is now drawn, not shipped: run",
+    "    python3 examples/vision/make_synthetic_image.py",
+    "and red_square.png appears beside this file. Nothing is downloaded and no",
+    "real document is involved -- a fixture that has to be a real CV is a fixture",
+    "that cannot be committed.",
+    "",
+    "The placeholder below is filled in by examples/vision/request_contract.py,",
+    "which substitutes the drawn fixture and then runs this request through",
+    "Strata's own parser to check the shape is the shape a server accepts."
+  ],
+  "model": "qwen3.8-flash-next-iq2_xs",
+  "stream": false,
+  "temperature": 0,
+  "max_tokens": 8,
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a strict resume screener. Answer with exactly one word: YES or NO. No punctuation, no explanation."
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Is the large central shape red? Answer with exactly one word: YES or NO."
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "file://<ABSOLUTE-PATH-TO-red_square.png>"
+          }
+        }
+      ]
+    }
+  ],
+
+  "_what_this_sample_does_not_do": [
+    "It is not a test of answer quality. A reply of YES from a running engine",
+    "would say the picture reached the model, not that the model read it -- see",
+    "the 'a 200 is not accuracy' control in",
+    "legacy/gateway/vision_protocol_selftest.py.",
+    "On this host a picture request is rejected before it gets that far: Strata",
+    "is running without --vision and GET /health reports \"images\": false.",
+    "Do not point this at the production port to find out."
+  ]
+}

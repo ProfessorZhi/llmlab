@@ -1,0 +1,610 @@
+"""``llmlab`` 子命令的实现。
+
+命令面刻意与 Registry 的三条链一一对应（注册 / 验证 / 共享），而不是把后端
+端点原样搬过来：
+
+    llmlab whoami                     我是谁、我能做什么
+    llmlab engines   list|register|get|verify
+    llmlab models    list|register|get
+    llmlab deployments list|register|get|verify
+    llmlab endpoints list|register|get|verify|share|unshare|acl
+    llmlab usage --mine               （``logs --mine`` 是它的别名）
+    llmlab invoke <id>               经授权网关调用一个共享 Endpoint
+    llmlab status                    服务与来源的可用性
+
+每个命令都支持 ``--json``：给 CC Agent 用的形态。**没有 ``--json`` 时**输出人类可读
+的表格；两种形态都来自同一份响应，不存在「JSON 里是 null、表格里是 0」这种分歧。
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from typing import Callable
+
+from .client import ApiClient
+from .errors import CliError, EXIT_OK, EXIT_USAGE
+
+#: 人类可读输出里的 null 表示。刻意与 JSON 的 ``null`` 一致，不用 0 顶替。
+NULL = "—"
+
+
+def _fmt(value: object) -> str:
+    if value is None:
+        return NULL
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, (list, tuple)):
+        return ",".join(str(item) for item in value) if value else NULL
+    return str(value)
+
+
+def _print_envelope(envelope: dict, as_json: bool, *, default_render: Callable[[dict], None]) -> None:
+    if as_json:
+        print(json.dumps(envelope, indent=2, ensure_ascii=False, sort_keys=False))
+        return
+    default_render(envelope.get("data") or {})
+    notes = envelope.get("notes") or []
+    hints = envelope.get("display_hints") or []
+    for line in hints:
+        print(f"! {line}")
+    for line in notes:
+        print(f"· {line}")
+
+
+def _table(rows: list[list[str]], header: list[str]) -> None:
+    if not rows:
+        print("(empty)")
+        return
+    widths = [len(cell) for cell in header]
+    for row in rows:
+        for index, cell in enumerate(row):
+            widths[index] = max(widths[index], len(cell))
+    print("  ".join(cell.ljust(widths[i]) for i, cell in enumerate(header)))
+    print("  ".join("-" * width for width in widths))
+    for row in rows:
+        print("  ".join(cell.ljust(widths[i]) for i, cell in enumerate(row)))
+
+
+def _health_cell(record: dict) -> str:
+    health = record.get("health") or {}
+    state = health.get("state", "unknown")
+    latency = health.get("latency_ms")
+    if latency is None:
+        # 没有量过就不写数字 —— 「正正常常的一个数」是最容易骗到人的东西。
+        return state
+    return f"{state}/{latency}ms"
+
+
+# --- 各命令 ---------------------------------------------------------------
+
+
+def cmd_whoami(client: ApiClient, args: argparse.Namespace, as_json: bool) -> int:
+    envelope = client.get("/whoami")
+    _print_envelope(
+        envelope,
+        as_json,
+        default_render=lambda data: print(
+            f"principal : {_fmt(data['identity']['principal'])}\n"
+            f"uid       : {_fmt(data['identity']['uid'])}\n"
+            f"linux user: {_fmt(data['identity']['linux_user'])}\n"
+            f"scopes    : {_fmt(data['authorized']['scopes'])}\n"
+            f"roles     : {_fmt(data['authorized']['roles'])}  (roles 不产生权限)\n"
+            f"can write : {_fmt(data['capabilities']['can_write'])}\n"
+            f"can share : {_fmt(data['capabilities']['can_share'])}\n"
+            f"can invoke: {_fmt(data['capabilities']['can_invoke'])}\n"
+            f"can read all: {_fmt(data['capabilities']['can_read_all'])}\n"
+            f"visible   : engines={data['visible_counts']['engines']} "
+            f"models={data['visible_counts']['models']} "
+            f"deployments={data['visible_counts']['deployments']} "
+            f"endpoints={data['visible_counts']['endpoints']}\n"
+            f"mode      : {_fmt(data['deployment']['mode'])} "
+            f"(prober={'on' if data['deployment']['prober_attached'] else 'off'}, "
+            f"gateway={_fmt(data['deployment']['gateway_adapter'])})"
+        ),
+    )
+    return EXIT_OK
+
+
+def cmd_engines(client: ApiClient, args: argparse.Namespace, as_json: bool) -> int:
+    if args.engines_command == "list":
+        envelope = client.get("/engines")
+
+        def render(data: dict) -> None:
+            rows = [
+                [
+                    item["id"],
+                    item["name"],
+                    _fmt(item["owner"]),
+                    _fmt(item["status"]),
+                    _health_cell(item),
+                    _fmt((item.get("target") or {}).get("url")) or "redacted",
+                ]
+                for item in data["items"]
+            ]
+            _table(rows, ["ID", "NAME", "OWNER", "STATUS", "HEALTH", "TARGET"])
+            print(f"{data['count']} engine(s)")
+
+        _print_envelope(envelope, as_json, default_render=render)
+        return EXIT_OK
+
+    if args.engines_command == "register":
+        body: dict = {"name": args.name, "target_url": args.target_url}
+        if args.protocol:
+            body["protocol"] = args.protocol
+        if args.description:
+            body["description"] = args.description
+        if args.tag:
+            body["tags"] = list(args.tag)
+        envelope = client.post("/engines", body, idempotency_key=args.idempotency_key)
+        data = envelope.get("data") or {}
+        _print_envelope(
+            envelope,
+            as_json,
+            default_render=lambda payload: print(
+                f"registered engine {payload['id']} ({payload['name']})\n"
+                f"  status   : {_fmt(payload['status'])}\n"
+                f"  health   : {_health_cell(payload)}  (reason: {_fmt((payload.get('health') or {}).get('reason'))})\n"
+                f"  verified : {_fmt((payload.get('verification') or {}).get('status'))}\n"
+                f"  replay   : {_fmt(payload.get('idempotent_replay'))}"
+            ),
+        )
+        return EXIT_OK
+
+    if args.engines_command == "get":
+        envelope = client.get(f"/engines/{args.object_id}")
+        _print_envelope(
+            envelope, as_json, default_render=lambda data: print(json.dumps(data, indent=2, ensure_ascii=False))
+        )
+        return EXIT_OK
+
+    if args.engines_command == "verify":
+        envelope = client.post(f"/engines/{args.object_id}/verify")
+        _print_envelope(
+            envelope,
+            as_json,
+            default_render=lambda data: print(
+                f"engine {data['id']}: status={_fmt(data['status'])} "
+                f"verification={_fmt((data.get('verification') or {}).get('status'))} "
+                f"health={_health_cell(data)}"
+            ),
+        )
+        return EXIT_OK
+    raise CliError(EXIT_USAGE, f"unknown engines subcommand: {args.engines_command}")
+
+
+def cmd_models(client: ApiClient, args: argparse.Namespace, as_json: bool) -> int:
+    if args.models_command == "list":
+        envelope = client.get("/models")
+
+        def render(data: dict) -> None:
+            rows = [
+                [
+                    item["id"],
+                    item["name"],
+                    _fmt(item["owner"]),
+                    _fmt(item["status"]),
+                    "(redacted)" if item.get("weight_path_redacted") else _fmt(item.get("weight_path")),
+                ]
+                for item in data["items"]
+            ]
+            _table(rows, ["ID", "NAME", "OWNER", "STATUS", "WEIGHT PATH"])
+            print(f"{data['count']} model(s)")
+
+        _print_envelope(envelope, as_json, default_render=render)
+        return EXIT_OK
+
+    if args.models_command == "register":
+        body: dict = {"name": args.name}
+        if args.weight_path:
+            body["weight_path"] = args.weight_path
+        if args.format:
+            body["format"] = args.format
+        if args.parameter_count:
+            body["parameter_count"] = args.parameter_count
+        if args.description:
+            body["description"] = args.description
+        envelope = client.post("/models", body, idempotency_key=args.idempotency_key)
+        _print_envelope(
+            envelope,
+            as_json,
+            default_render=lambda data: print(
+                f"registered model {data['id']} ({data['name']})\n"
+                f"  weight ref: {_fmt(data.get('weight_path'))} "
+                f"sha={_fmt(data.get('weight_path_sha256'))}\n"
+                f"  weight_present: {_fmt(data.get('weight_present'))} "
+                "(Registry 从不打开权重文件，所以这里是未观测而不是 false)"
+            ),
+        )
+        return EXIT_OK
+
+    if args.models_command == "get":
+        envelope = client.get(f"/models/{args.object_id}")
+        _print_envelope(
+            envelope, as_json, default_render=lambda data: print(json.dumps(data, indent=2, ensure_ascii=False))
+        )
+        return EXIT_OK
+    raise CliError(EXIT_USAGE, f"unknown models subcommand: {args.models_command}")
+
+
+def cmd_deployments(client: ApiClient, args: argparse.Namespace, as_json: bool) -> int:
+    if args.deployments_command == "list":
+        envelope = client.get("/deployments")
+
+        def render(data: dict) -> None:
+            rows = [
+                [
+                    item["id"],
+                    item["name"],
+                    _fmt(item["owner"]),
+                    _fmt(item["status"]),
+                    _fmt(item["ready"]),
+                    _health_cell(item),
+                ]
+                for item in data["items"]
+            ]
+            _table(rows, ["ID", "NAME", "OWNER", "STATUS", "READY", "HEALTH"])
+            print(f"{data['count']} deployment(s)")
+
+        _print_envelope(envelope, as_json, default_render=render)
+        return EXIT_OK
+
+    if args.deployments_command == "register":
+        envelope = client.post(
+            "/deployments",
+            {"name": args.name, "engine_id": args.engine, "model_id": args.model},
+            idempotency_key=args.idempotency_key,
+        )
+        _print_envelope(
+            envelope,
+            as_json,
+            default_render=lambda data: print(
+                f"registered deployment {data['id']} ({data['name']})\n"
+                f"  registered : {_fmt(data['registered'])}\n"
+                f"  ready      : {_fmt(data['ready'])}  "
+                "(注册 != 就绪：ready 需要一次真实的 engine 验证)"
+            ),
+        )
+        return EXIT_OK
+
+    if args.deployments_command == "get":
+        envelope = client.get(f"/deployments/{args.object_id}")
+        _print_envelope(
+            envelope, as_json, default_render=lambda data: print(json.dumps(data, indent=2, ensure_ascii=False))
+        )
+        return EXIT_OK
+
+    if args.deployments_command == "verify":
+        envelope = client.post(f"/deployments/{args.object_id}/verify")
+        _print_envelope(
+            envelope,
+            as_json,
+            default_render=lambda data: print(
+                f"deployment {data['id']}: status={_fmt(data['status'])} ready={_fmt(data['ready'])}"
+            ),
+        )
+        return EXIT_OK
+    raise CliError(EXIT_USAGE, f"unknown deployments subcommand: {args.deployments_command}")
+
+
+def cmd_endpoints(client: ApiClient, args: argparse.Namespace, as_json: bool) -> int:
+    if args.endpoints_command == "list":
+        envelope = client.get("/endpoints")
+
+        def render(data: dict) -> None:
+            rows = [
+                [
+                    item["id"],
+                    item["name"],
+                    _fmt(item["owner"]),
+                    _fmt(item["visibility"]),
+                    _fmt(item["status"]),
+                    _fmt(item["shareable"]),
+                    _fmt(item.get("route_path")),
+                ]
+                for item in data["items"]
+            ]
+            _table(rows, ["ID", "NAME", "OWNER", "VISIBILITY", "STATUS", "SHAREABLE", "ROUTE"])
+            print(f"{data['count']} endpoint(s)")
+
+        _print_envelope(envelope, as_json, default_render=render)
+        return EXIT_OK
+
+    if args.endpoints_command == "register":
+        envelope = client.post(
+            "/endpoints",
+            {"name": args.name, "deployment_id": args.deployment},
+            idempotency_key=args.idempotency_key,
+        )
+        _print_envelope(
+            envelope,
+            as_json,
+            default_render=lambda data: print(
+                f"registered endpoint {data['id']} ({data['name']})\n"
+                f"  visibility: {_fmt(data['visibility'])}  (默认私有；共享走 share)\n"
+                f"  status    : {_fmt(data['status'])}  shareable={_fmt(data['shareable'])}\n"
+                f"  route     : {_fmt(data.get('route_path'))}"
+            ),
+        )
+        return EXIT_OK
+
+    if args.endpoints_command == "get":
+        envelope = client.get(f"/endpoints/{args.object_id}")
+        _print_envelope(
+            envelope, as_json, default_render=lambda data: print(json.dumps(data, indent=2, ensure_ascii=False))
+        )
+        return EXIT_OK
+
+    if args.endpoints_command == "verify":
+        envelope = client.post(f"/endpoints/{args.object_id}/verify")
+        _print_envelope(
+            envelope,
+            as_json,
+            default_render=lambda data: print(
+                f"endpoint {data['id']}: status={_fmt(data['status'])} shareable={_fmt(data['shareable'])}"
+            ),
+        )
+        return EXIT_OK
+
+    if args.endpoints_command == "share":
+        # 先按**原始**取值判断再归一化：反过来会把 'all-approved' 先变成
+        # 'all_approved'，于是那句相等判断永远不成立。
+        if args.mode == "all-approved":
+            mode = "all_approved_platform_users"
+        else:
+            mode = args.mode
+        body: dict = {"mode": mode}
+        if args.grantee:
+            body["grantees"] = list(args.grantee)
+        envelope = client.post(f"/endpoints/{args.object_id}/share", body)
+        meta = envelope.get("meta") or {}
+        _print_envelope(
+            envelope,
+            as_json,
+            default_render=lambda data: print(
+                f"endpoint {data['id']} shared:\n"
+                f"  mode      : {_fmt(data['visibility'])}\n"
+                f"  grantees  : {_fmt(meta.get('grantees'))}\n"
+                f"  ready     : {_fmt(data['shareable'])}\n"
+                f"  revoked previously: {_fmt(meta.get('revoked_previously'))}"
+            ),
+        )
+        return EXIT_OK
+
+    if args.endpoints_command == "unshare":
+        body = {"grantee": args.grantee} if args.grantee else {}
+        envelope = client.post(f"/endpoints/{args.object_id}/unshare", body)
+        meta = envelope.get("meta") or {}
+        _print_envelope(
+            envelope,
+            as_json,
+            default_render=lambda data: print(
+                f"endpoint {data['id']} now {_fmt(data['visibility'])} "
+                f"(removed={_fmt(meta.get('removed'))})"
+            ),
+        )
+        return EXIT_OK
+
+    if args.endpoints_command == "acl":
+        envelope = client.get(f"/endpoints/{args.object_id}/acl")
+        _print_envelope(
+            envelope,
+            as_json,
+            default_render=lambda data: print(
+                f"endpoint {data['endpoint_id']} acl:\n"
+                f"  mode     : {_fmt(data['mode'])}\n"
+                f"  grantees : {_fmt(data['grantees'])}\n"
+                f"  ready    : {_fmt(data['ready'])}"
+            ),
+        )
+        return EXIT_OK
+
+    if args.endpoints_command == "routings":
+        envelope = client.get(f"/endpoints/{args.object_id}/routings")
+
+        def render_routings(data: dict) -> None:
+            rows = [
+                [
+                    str(item["revision"]),
+                    _fmt(item.get("model_name")),
+                    _fmt(item.get("previous_model_name")),
+                    _fmt(item["deployment_id"]),
+                    _fmt(item["activated_at"]),
+                    _fmt(item["actor"]),
+                ]
+                for item in data["items"]
+            ]
+            _table(
+                rows,
+                ["REV", "MODEL", "WAS", "DEPLOYMENT", "ACTIVATED AT", "ACTOR"],
+            )
+            print(f"route path: {_fmt(data['route_path'])}  current revision: {data['current_revision']}")
+
+        _print_envelope(envelope, as_json, default_render=render_routings)
+        return EXIT_OK
+
+    if args.endpoints_command in ("repoint", "rollback"):
+        if args.endpoints_command == "repoint":
+            # --deployment 由 argparse 强制（required=True），这里不必再查一次。
+            body: dict = {"target_deployment_id": args.deployment}
+        else:
+            body = {}
+        # CAS：没有 --expected-revision 就先读一次；给了就照用（脚本要精确控制竞争时用）。
+        if args.expected_revision is not None:
+            body["expected_revision"] = args.expected_revision
+        else:
+            current = client.get(f"/endpoints/{args.object_id}")["data"]
+            body["expected_revision"] = current["revision"]
+        if args.reason:
+            body["reason"] = args.reason
+        if args.regrant:
+            body["reauthorize"] = {"mode": "users", "grantees": list(args.regrant)}
+
+        envelope = client.post(f"/endpoints/{args.object_id}/{args.endpoints_command}", body)
+        meta = envelope.get("meta") or {}
+
+        def render_switch(data: dict, meta: dict = meta) -> None:
+            print(
+                f"{meta.get('operation')}: {_fmt(meta.get('previous_model_id'))} -> "
+                f"{_fmt(meta.get('model_id'))}\n"
+                f"  route path: {_fmt(data['route_path'])}  (alias 不变)\n"
+                f"  revision  : {_fmt(meta.get('revision_from'))} -> {_fmt(meta.get('revision_to'))}\n"
+                f"  visibility: {_fmt(meta.get('visibility'))}  "
+                f"granted={_fmt(meta.get('granted'))} "
+                f"revoked={_fmt(meta.get('revoked'))} "
+                f"reestablished={_fmt(meta.get('reestablished'))}\n"
+                f"  router    : {_fmt(meta.get('router_sync'))}  "
+                f"applied={_fmt(meta.get('router_applied'))}"
+            )
+
+        _print_envelope(envelope, as_json, default_render=render_switch)
+        return EXIT_OK
+
+    if args.endpoints_command == "routing-applied":
+        if args.generation is None:
+            raise CliError(EXIT_USAGE, "--generation is required")
+        envelope = client.post(
+            f"/endpoints/{args.object_id}/routing-applied", {"generation": args.generation}
+        )
+        _print_envelope(
+            envelope,
+            as_json,
+            default_render=lambda data: print(
+                f"endpoint {data['id']}: router sync "
+                f"{_fmt(data['router_sync']['state'])} "
+                f"(generation {_fmt(data['router_generation'])}, "
+                f"evidence {_fmt(data['router_sync'].get('evidence'))})"
+            ),
+        )
+        return EXIT_OK
+    raise CliError(EXIT_USAGE, f"unknown endpoints subcommand: {args.endpoints_command}")
+
+
+def cmd_usage(client: ApiClient, args: argparse.Namespace, as_json: bool) -> int:
+    """``usage --mine`` / ``logs --mine``：**没接上就是 NOT_CONFIGURED**。"""
+    if not getattr(args, "mine", False):
+        raise CliError(
+            EXIT_USAGE,
+            "this command only supports --mine in this build",
+            hint="llmlab usage --mine",
+        )
+    envelope = client.get("/usage/mine")
+
+    def render(data: dict) -> None:
+        print(f"status: {_fmt(data.get('status'))}  reason: {_fmt(data.get('reason'))}")
+        rows = []
+        for name, metric in (data.get("metrics") or {}).items():
+            rows.append(
+                [
+                    name,
+                    _fmt(metric.get("value")),
+                    _fmt(metric.get("state")),
+                    _fmt(metric.get("source")),
+                    _fmt(metric.get("unit")),
+                ]
+            )
+        _table(rows, ["METRIC", "VALUE", "STATE", "SOURCE", "UNIT"])
+        for line in data.get("notes") or []:
+            print(f"· {line}")
+
+    _print_envelope(envelope, as_json, default_render=render)
+    return EXIT_OK
+
+
+def cmd_invoke(client: ApiClient, args: argparse.Namespace, as_json: bool) -> int:
+    if args.payload and args.prompt:
+        raise CliError(EXIT_USAGE, "use either --payload or --prompt, not both")
+    if args.payload:
+        try:
+            body = json.loads(args.payload)
+        except json.JSONDecodeError as exc:
+            raise CliError(EXIT_USAGE, f"--payload is not valid JSON: {exc.msg}") from None
+        if not isinstance(body, dict):
+            raise CliError(EXIT_USAGE, "--payload must be a JSON object")
+    elif args.prompt is not None:
+        body = {"prompt": args.prompt}
+    else:
+        body = {}
+    envelope = client.post(f"/endpoints/{args.object_id}/invoke", body)
+    _print_envelope(
+        envelope,
+        as_json,
+        default_render=lambda data: print(
+            f"invoked endpoint {data['endpoint_id']} (model {_fmt(data['model'])})\n"
+            f"  gateway   : {_fmt((data.get('gateway') or {}).get('adapter'))} "
+            f"attached={_fmt((data.get('gateway') or {}).get('attached'))}\n"
+            f"  metering  : tokens={_fmt((data.get('metering') or {}).get('tokens'))} "
+            f"latency={_fmt((data.get('metering') or {}).get('latency_ms'))}\n"
+            f"  result    : {json.dumps((data.get('result') or {}), ensure_ascii=False)}"
+        ),
+    )
+    return EXIT_OK
+
+
+def cmd_routing(client: ApiClient, args: argparse.Namespace, as_json: bool) -> int:
+    """``routing``：管理员导出 Gateway 快照，或读只读路由契约。
+
+    两条都**只是读**：本仓库不写任何 Gateway。``snapshot`` 是写给 Gateway 的
+    ``llmlab.endpoint-routing/1``（并列仓库 PR #20 的形状），``config`` 是本仓库
+    自己的只读契约。两者都需要 ``registry:admin:read``。
+    """
+    sub = getattr(args, "routing_command", None)
+    if sub == "config":
+        envelope = client.get("/routing-config")
+        _print_envelope(
+            envelope,
+            as_json,
+            default_render=lambda data: print(
+                f"contract  : {_fmt(data.get('contract'))} read_only={_fmt(data.get('read_only'))}\n"
+                f"entries   : {len(data.get('entries') or [])} "
+                f"excluded={_fmt(data.get('excluded_endpoints'))}\n"
+                f"pending   : {_fmt((data.get('pending_router_sync') or {}).get('count'))} "
+                "endpoint(s) awaiting a router ack"
+            ),
+        )
+        return EXIT_OK
+    if sub == "snapshot":
+        envelope = client.get("/routing-snapshot")
+        _print_envelope(
+            envelope,
+            as_json,
+            default_render=lambda data: print(
+                f"schema    : {_fmt(data.get('schema'))}\n"
+                f"revision  : {_fmt(data.get('revision'))} "
+                f"generated_at={_fmt(data.get('generated_at'))}\n"
+                f"engines   : {len(data.get('engines') or [])} "
+                f"endpoints={len(data.get('endpoints') or [])}\n"
+                f"router    : attached={_fmt((data.get('router') or {}).get('attached'))} "
+                f"adapter={_fmt((data.get('router') or {}).get('adapter'))}\n"
+                f"excluded  : {json.dumps(data.get('excluded') or [], ensure_ascii=False)}"
+            ),
+        )
+        return EXIT_OK
+    raise CliError(
+        EXIT_USAGE,
+        "routing needs a subcommand",
+        hint="llmlab routing config | snapshot",
+    )
+
+
+def cmd_status(client: ApiClient, args: argparse.Namespace, as_json: bool) -> int:
+    envelope = client.get("/status")
+    _print_envelope(
+        envelope,
+        as_json,
+        default_render=lambda data: print(
+            f"registry   : {_fmt(data['registry']['state'])} "
+            f"mode={_fmt(data['registry']['mode'])} schema={_fmt(data['registry']['schema_version'])}\n"
+            f"observation: prober={_fmt(data['observation']['prober_attached'])} "
+            f"reason={_fmt(data['observation']['reason'])}\n"
+            f"gateway    : attached={_fmt(data['gateway']['attached'])} "
+            f"adapter={_fmt(data['gateway']['adapter'])} reason={_fmt(data['gateway']['reason'])}\n"
+            f"router     : attached={_fmt((data.get('router') or {}).get('attached'))} "
+            f"adapter={_fmt((data.get('router') or {}).get('adapter'))} "
+            f"reason={_fmt((data.get('router') or {}).get('reason'))}\n"
+            f"usage pipe : state={_fmt(data['usage_pipeline']['state'])} "
+            f"reason={_fmt(data['usage_pipeline']['reason'])}\n"
+            f"counts     : {json.dumps(data['counts'], ensure_ascii=False)}"
+        ),
+    )
+    return EXIT_OK

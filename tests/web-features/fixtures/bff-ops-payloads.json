@@ -1,0 +1,1228 @@
+{
+  "admin_private": {
+    "admin": {
+      "available": true,
+      "principals": [
+        {
+          "display_name": "carol",
+          "roles": [
+            "member"
+          ],
+          "scopes": [
+            "atlas:calls:self:read",
+            "portal:endpoints:share",
+            "portal:modules:read"
+          ],
+          "uid": "linux:dell-test-01:4000"
+        },
+        {
+          "display_name": "alice",
+          "roles": [
+            "member"
+          ],
+          "scopes": [
+            "atlas:calls:self:read",
+            "portal:endpoints:share",
+            "portal:modules:read"
+          ],
+          "uid": "linux:dell-test-01:4001"
+        },
+        {
+          "display_name": "dave",
+          "uid": "linux:dell-test-01:4002"
+        },
+        {
+          "display_name": "bob",
+          "roles": [
+            "member"
+          ],
+          "scopes": [
+            "atlas:calls:self:read",
+            "portal:endpoints:share",
+            "portal:modules:read"
+          ],
+          "uid": "linux:dell-test-01:4003"
+        }
+      ],
+      "reason": null
+    },
+    "evaluation": {
+      "runs": [
+        {
+          "created_at": "2026-10-15T12:00:00Z",
+          "dataset": null,
+          "metric": null,
+          "metric_unit": null,
+          "model_id": "mdl_id002",
+          "reason": "admin_dispatch_disabled",
+          "run_id": "evj-id000000000000000000001",
+          "scope": "global",
+          "status": "queued",
+          "updated_at": "2026-10-15T12:00:00Z"
+        }
+      ],
+      "submit": {
+        "ready": false,
+        "reason": "admin_dispatch_disabled"
+      }
+    },
+    "keys": [],
+    "links": [
+      {
+        "href": "/atlas#calls",
+        "kind": "internal",
+        "label": "我的调用日志",
+        "requires": "atlas:calls:self:read"
+      }
+    ],
+    "metrics": {
+      "global_source": null,
+      "items": [
+        {
+          "kind": "observability",
+          "label": "本人已验证 key 的请求数",
+          "name": "principal.requests",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "count",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人已验证 key 的失败请求数",
+          "name": "principal.errors",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "count",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人被限流的请求数",
+          "name": "principal.throttled_429",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "count",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人输入 token 数",
+          "name": "principal.tokens.input",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "tokens",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人输出 token 数",
+          "name": "principal.tokens.output",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "tokens",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人排队 p50",
+          "name": "principal.queue_p50_ms",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "milliseconds",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人排队 p95",
+          "name": "principal.queue_p95_ms",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "milliseconds",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人总延迟 p50",
+          "name": "principal.latency_p50_ms",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "milliseconds",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人总延迟 p95",
+          "name": "principal.latency_p95_ms",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "milliseconds",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "整机 CPU 使用率",
+          "name": "node.cpu.utilization_percent",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "percent",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "1 分钟平均负载",
+          "name": "node.cpu.load1",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "load",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "物理内存总量",
+          "name": "node.memory.total_bytes",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "bytes",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "可用物理内存",
+          "name": "node.memory.available_bytes",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "bytes",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "已用物理内存",
+          "name": "node.memory.used_bytes",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "bytes",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "根文件系统容量",
+          "name": "node.disk.total_bytes",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "bytes",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "根文件系统已用",
+          "name": "node.disk.used_bytes",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "bytes",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "可见 GPU 数量",
+          "name": "node.gpu.count",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "count",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "GPU 驱动 / NVML 可用性状态",
+          "name": "node.gpu.driver.status",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "state",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "内核模块自报版本（与用户态不一致即 mismatch）",
+          "name": "node.gpu.driver.kernel_module_version",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "text",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "NVML 用户态库自报版本",
+          "name": "node.gpu.driver.userspace_version",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "text",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "构建内核模块所用的编译器版本（驱动报告里的第二行，用于交叉印证）",
+          "name": "node.gpu.driver.compiler_version",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "text",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "整卡显存总量",
+          "name": "device.gpu.memory.total_bytes",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "bytes",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "整卡已用显存（共享，非按人）",
+          "name": "device.gpu.memory.used_bytes",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "bytes",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "整卡利用率",
+          "name": "device.gpu.utilization_percent",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "percent",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "整卡温度",
+          "name": "device.gpu.temperature_celsius",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "celsius",
+          "updated_at": null,
+          "value": null
+        }
+      ],
+      "my_source": null,
+      "window": "24h"
+    },
+    "notes": [
+      "本页数据来自同源 BFF，数据源是 Registry 的登记库；转发层是 mock，不是生产 Gateway。",
+      "权限只由服务端根据受信会话断言；请求头里的 UID / 角色一律被拒绝。",
+      "GPU 指标没有已声明的 NVML 来源，因此一律 UNKNOWN，而不是 0。",
+      "全局视图来自 portal:admin:read，不是名字，也不是客户端的开关。",
+      "观测数据来自合成样本；指标卡没有白名单来源（gateway-usage-export / nvml-verified / prometheus-readonly），因此一律 UNKNOWN，只有曲线带 SYNTHETIC 标记。",
+      "真实评测派发在本部署关闭：任务可入队，但不会有 runner 执行它。"
+    ],
+    "playground": {
+      "audited": false,
+      "authorized": false,
+      "backend": null,
+      "endpoint": null,
+      "reason": "no_authorized_backend"
+    },
+    "registry": {
+      "adapter_attached": true,
+      "all": [
+        {
+          "deployment_id": "dep_id003",
+          "health": "unknown",
+          "model_id": "mdl_id002",
+          "model_label": "model-alice",
+          "owner_uid": "linux:dell-test-01:4001",
+          "share": {
+            "mode": "selected",
+            "principals": [
+              "linux:dell-test-01:4003"
+            ],
+            "revocable": true
+          }
+        }
+      ],
+      "owned": [],
+      "reason": null,
+      "shared": []
+    },
+    "schema_version": "portal-ops/1",
+    "scope": {
+      "roles": [
+        "platform_admin"
+      ],
+      "scopes": [
+        "atlas:calls:self:read",
+        "portal:admin:read",
+        "portal:endpoints:share",
+        "portal:modules:read"
+      ],
+      "subject": "linux:dell-test-01:4000",
+      "visibility": "private"
+    },
+    "state": "ready",
+    "synthetic": true,
+    "transport": {
+      "gateway_attached": true,
+      "label": "SYNTHETIC / 本部署无生产 Gateway",
+      "mode": "demo",
+      "synthetic": true
+    },
+    "trends": {
+      "reason": "本部署没有接线真实 Gateway 导出口：这条曲线来自 synthetic-fixture 的合成样本，只用于验证渲染与交互。",
+      "series": [
+        {
+          "kind": "requests",
+          "name": "我的请求",
+          "points": [
+            null,
+            null,
+            null,
+            null,
+            1,
+            null,
+            null,
+            null,
+            null,
+            1,
+            null,
+            null,
+            null,
+            null,
+            1,
+            null,
+            null,
+            null,
+            null,
+            1,
+            null,
+            null,
+            null,
+            null
+          ],
+          "scope": "mine",
+          "unit": "次"
+        },
+        {
+          "kind": "tokens",
+          "name": "我的输出 Tokens",
+          "points": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            202,
+            null,
+            null,
+            null,
+            null,
+            201,
+            null,
+            null,
+            null,
+            null,
+            200,
+            null,
+            null,
+            null,
+            null
+          ],
+          "scope": "mine",
+          "unit": "tokens"
+        },
+        {
+          "kind": "latency",
+          "name": "我的 p95",
+          "p50": 1000.0,
+          "p95": 1090.0,
+          "points": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            1100.0,
+            null,
+            null,
+            null,
+            null,
+            1000.0,
+            null,
+            null,
+            null,
+            null,
+            900.0,
+            null,
+            null,
+            null,
+            null
+          ],
+          "scope": "mine",
+          "unit": "ms"
+        },
+        {
+          "kind": "requests",
+          "name": "全局请求",
+          "points": [
+            null,
+            null,
+            null,
+            1,
+            3,
+            null,
+            1,
+            null,
+            1,
+            2,
+            1,
+            null,
+            1,
+            1,
+            2,
+            null,
+            1,
+            1,
+            null,
+            2,
+            2,
+            null,
+            null,
+            null
+          ],
+          "scope": "global",
+          "unit": "次"
+        },
+        {
+          "kind": "latency",
+          "name": "全局 p95",
+          "p50": null,
+          "p95": null,
+          "points": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            1300.0,
+            null,
+            1200.0,
+            1100.0,
+            1200.0,
+            null,
+            1100.0,
+            1100.0,
+            1000.0,
+            null,
+            1000.0,
+            1000.0,
+            null,
+            900.0,
+            900.0,
+            null,
+            null,
+            null
+          ],
+          "scope": "global",
+          "unit": "ms"
+        }
+      ],
+      "source": null,
+      "synthetic": true,
+      "updated_at": null,
+      "window": "24h"
+    }
+  },
+  "grantee_shared": {
+    "admin": {
+      "available": false,
+      "principals": [],
+      "reason": "missing_required_scope"
+    },
+    "evaluation": {
+      "runs": [],
+      "submit": {
+        "ready": false,
+        "reason": "admin_dispatch_disabled"
+      }
+    },
+    "keys": [],
+    "links": [
+      {
+        "href": "/atlas#calls",
+        "kind": "internal",
+        "label": "我的调用日志",
+        "requires": "atlas:calls:self:read"
+      }
+    ],
+    "metrics": {
+      "global_source": null,
+      "items": [
+        {
+          "kind": "observability",
+          "label": "本人已验证 key 的请求数",
+          "name": "principal.requests",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "count",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人已验证 key 的失败请求数",
+          "name": "principal.errors",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "count",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人被限流的请求数",
+          "name": "principal.throttled_429",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "count",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人输入 token 数",
+          "name": "principal.tokens.input",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "tokens",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人输出 token 数",
+          "name": "principal.tokens.output",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "tokens",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人排队 p50",
+          "name": "principal.queue_p50_ms",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "milliseconds",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人排队 p95",
+          "name": "principal.queue_p95_ms",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "milliseconds",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人总延迟 p50",
+          "name": "principal.latency_p50_ms",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "milliseconds",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人总延迟 p95",
+          "name": "principal.latency_p95_ms",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "milliseconds",
+          "updated_at": null,
+          "value": null
+        }
+      ],
+      "my_source": null,
+      "window": "24h"
+    },
+    "notes": [
+      "本页数据来自同源 BFF，数据源是 Registry 的登记库；转发层是 mock，不是生产 Gateway。",
+      "权限只由服务端根据受信会话断言；请求头里的 UID / 角色一律被拒绝。",
+      "GPU 指标没有已声明的 NVML 来源，因此一律 UNKNOWN，而不是 0。",
+      "共享视图只列出**别人显式共享给我**的 Endpoint；我的部署不会消失。",
+      "没有 portal:admin:read，因此本页不含全局视图与全员名单。",
+      "观测数据来自合成样本；指标卡没有白名单来源（gateway-usage-export / nvml-verified / prometheus-readonly），因此一律 UNKNOWN，只有曲线带 SYNTHETIC 标记。",
+      "真实评测派发在本部署关闭：任务可入队，但不会有 runner 执行它。"
+    ],
+    "playground": {
+      "audited": false,
+      "authorized": false,
+      "backend": null,
+      "endpoint": null,
+      "reason": "no_authorized_backend"
+    },
+    "registry": {
+      "adapter_attached": true,
+      "all": [],
+      "owned": [],
+      "reason": null,
+      "shared": [
+        {
+          "endpoint_id": "ep_id004",
+          "granted_by": "linux:dell-test-01:4001",
+          "links": [
+            {
+              "href": "/atlas#calls",
+              "kind": "internal",
+              "label": "我的调用日志",
+              "requires": "atlas:calls:self:read"
+            }
+          ],
+          "model": "model-alice",
+          "name": "endpoint-alice",
+          "owner_is_self": false,
+          "owner_uid": "linux:dell-test-01:4001",
+          "protocol": "openai_compatible",
+          "share": {
+            "mode": "selected",
+            "principals": [
+              "linux:dell-test-01:4003"
+            ],
+            "revocable": true
+          }
+        }
+      ]
+    },
+    "schema_version": "portal-ops/1",
+    "scope": {
+      "roles": [
+        "member"
+      ],
+      "scopes": [
+        "atlas:calls:self:read",
+        "portal:endpoints:share",
+        "portal:modules:read"
+      ],
+      "subject": "linux:dell-test-01:4003",
+      "visibility": "shared"
+    },
+    "state": "ready",
+    "synthetic": true,
+    "transport": {
+      "gateway_attached": true,
+      "label": "SYNTHETIC / 本部署无生产 Gateway",
+      "mode": "demo",
+      "synthetic": true
+    },
+    "trends": {
+      "reason": "本部署没有接线真实 Gateway 导出口：这条曲线来自 synthetic-fixture 的合成样本，只用于验证渲染与交互。",
+      "series": [
+        {
+          "kind": "requests",
+          "name": "我的请求",
+          "points": [
+            null,
+            null,
+            null,
+            null,
+            1,
+            null,
+            null,
+            null,
+            null,
+            1,
+            null,
+            null,
+            null,
+            null,
+            1,
+            null,
+            null,
+            null,
+            null,
+            1,
+            null,
+            null,
+            null,
+            null
+          ],
+          "scope": "mine",
+          "unit": "次"
+        },
+        {
+          "kind": "tokens",
+          "name": "我的输出 Tokens",
+          "points": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            202,
+            null,
+            null,
+            null,
+            null,
+            201,
+            null,
+            null,
+            null,
+            null,
+            200,
+            null,
+            null,
+            null,
+            null
+          ],
+          "scope": "mine",
+          "unit": "tokens"
+        },
+        {
+          "kind": "latency",
+          "name": "我的 p95",
+          "p50": 1000.0,
+          "p95": 1090.0,
+          "points": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            1100.0,
+            null,
+            null,
+            null,
+            null,
+            1000.0,
+            null,
+            null,
+            null,
+            null,
+            900.0,
+            null,
+            null,
+            null,
+            null
+          ],
+          "scope": "mine",
+          "unit": "ms"
+        }
+      ],
+      "source": null,
+      "synthetic": true,
+      "updated_at": null,
+      "window": "24h"
+    }
+  },
+  "member_private": {
+    "admin": {
+      "available": false,
+      "principals": [],
+      "reason": "missing_required_scope"
+    },
+    "evaluation": {
+      "runs": [
+        {
+          "created_at": "2026-10-15T12:00:00Z",
+          "dataset": null,
+          "metric": null,
+          "metric_unit": null,
+          "model_id": "mdl_id002",
+          "reason": "admin_dispatch_disabled",
+          "run_id": "evj-id000000000000000000001",
+          "scope": "mine",
+          "status": "queued",
+          "updated_at": "2026-10-15T12:00:00Z"
+        }
+      ],
+      "submit": {
+        "ready": false,
+        "reason": "admin_dispatch_disabled"
+      }
+    },
+    "keys": [],
+    "links": [
+      {
+        "href": "/atlas#calls",
+        "kind": "internal",
+        "label": "我的调用日志",
+        "requires": "atlas:calls:self:read"
+      }
+    ],
+    "metrics": {
+      "global_source": null,
+      "items": [
+        {
+          "kind": "observability",
+          "label": "本人已验证 key 的请求数",
+          "name": "principal.requests",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "count",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人已验证 key 的失败请求数",
+          "name": "principal.errors",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "count",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人被限流的请求数",
+          "name": "principal.throttled_429",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "count",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人输入 token 数",
+          "name": "principal.tokens.input",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "tokens",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人输出 token 数",
+          "name": "principal.tokens.output",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "tokens",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人排队 p50",
+          "name": "principal.queue_p50_ms",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "milliseconds",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人排队 p95",
+          "name": "principal.queue_p95_ms",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "milliseconds",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人总延迟 p50",
+          "name": "principal.latency_p50_ms",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "milliseconds",
+          "updated_at": null,
+          "value": null
+        },
+        {
+          "kind": "observability",
+          "label": "本人总延迟 p95",
+          "name": "principal.latency_p95_ms",
+          "reason": "no_verified_metric_source",
+          "source": null,
+          "state": "unknown",
+          "unit": "milliseconds",
+          "updated_at": null,
+          "value": null
+        }
+      ],
+      "my_source": null,
+      "window": "24h"
+    },
+    "notes": [
+      "本页数据来自同源 BFF，数据源是 Registry 的登记库；转发层是 mock，不是生产 Gateway。",
+      "权限只由服务端根据受信会话断言；请求头里的 UID / 角色一律被拒绝。",
+      "GPU 指标没有已声明的 NVML 来源，因此一律 UNKNOWN，而不是 0。",
+      "没有 portal:admin:read，因此本页不含全局视图与全员名单。",
+      "观测数据来自合成样本；指标卡没有白名单来源（gateway-usage-export / nvml-verified / prometheus-readonly），因此一律 UNKNOWN，只有曲线带 SYNTHETIC 标记。",
+      "真实评测派发在本部署关闭：任务可入队，但不会有 runner 执行它。"
+    ],
+    "playground": {
+      "audited": false,
+      "authorized": false,
+      "backend": null,
+      "endpoint": null,
+      "reason": "no_authorized_backend"
+    },
+    "registry": {
+      "adapter_attached": true,
+      "all": [],
+      "owned": [
+        {
+          "deployment_id": "dep_id003",
+          "engine_type": "openai_compatible",
+          "health": "unknown",
+          "health_reason": "never_probed",
+          "links": [
+            {
+              "href": "/atlas#calls",
+              "kind": "internal",
+              "label": "我的调用日志",
+              "requires": "atlas:calls:self:read"
+            }
+          ],
+          "model_id": "mdl_id002",
+          "model_label": "model-alice",
+          "owner_is_self": true,
+          "owner_uid": "linux:dell-test-01:4001",
+          "registered": true,
+          "resources": {
+            "gpu_count": null,
+            "source": null,
+            "updated_at": null,
+            "vram_free_mib": null,
+            "vram_total_mib": null,
+            "vram_used_mib": null
+          },
+          "runtime_reason": "never_probed",
+          "runtime_status": "unknown",
+          "share": {
+            "mode": "selected",
+            "principals": [
+              "linux:dell-test-01:4003"
+            ],
+            "revocable": true
+          },
+          "updated_at": "2026-10-15T12:00:00Z"
+        }
+      ],
+      "reason": null,
+      "shared": []
+    },
+    "schema_version": "portal-ops/1",
+    "scope": {
+      "roles": [
+        "member"
+      ],
+      "scopes": [
+        "atlas:calls:self:read",
+        "portal:endpoints:share",
+        "portal:modules:read"
+      ],
+      "subject": "linux:dell-test-01:4001",
+      "visibility": "private"
+    },
+    "state": "ready",
+    "synthetic": true,
+    "transport": {
+      "gateway_attached": true,
+      "label": "SYNTHETIC / 本部署无生产 Gateway",
+      "mode": "demo",
+      "synthetic": true
+    },
+    "trends": {
+      "reason": "本部署没有接线真实 Gateway 导出口：这条曲线来自 synthetic-fixture 的合成样本，只用于验证渲染与交互。",
+      "series": [
+        {
+          "kind": "requests",
+          "name": "我的请求",
+          "points": [
+            null,
+            null,
+            null,
+            null,
+            1,
+            null,
+            null,
+            null,
+            1,
+            null,
+            null,
+            null,
+            1,
+            null,
+            null,
+            null,
+            1,
+            null,
+            null,
+            null,
+            1,
+            null,
+            null,
+            null
+          ],
+          "scope": "mine",
+          "unit": "次"
+        },
+        {
+          "kind": "tokens",
+          "name": "我的输出 Tokens",
+          "points": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            203,
+            null,
+            null,
+            null,
+            202,
+            null,
+            null,
+            null,
+            201,
+            null,
+            null,
+            null,
+            200,
+            null,
+            null,
+            null
+          ],
+          "scope": "mine",
+          "unit": "tokens"
+        },
+        {
+          "kind": "latency",
+          "name": "我的 p95",
+          "p50": 1050.0,
+          "p95": 1185.0,
+          "points": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            1200.0,
+            null,
+            null,
+            null,
+            1100.0,
+            null,
+            null,
+            null,
+            1000.0,
+            null,
+            null,
+            null,
+            900.0,
+            null,
+            null,
+            null
+          ],
+          "scope": "mine",
+          "unit": "ms"
+        }
+      ],
+      "source": null,
+      "synthetic": true,
+      "updated_at": null,
+      "window": "24h"
+    }
+  }
+}

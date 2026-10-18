@@ -1,0 +1,45 @@
+{
+  "_comment": [
+    "The same question as chat_yesno.openai.json, in the Anthropic Messages",
+    "protocol that Strata serves natively at POST /v1/messages.",
+    "",
+    "The model id is corrected to the one this box actually serves, for the same",
+    "reason as the OpenAI sample.",
+    "",
+    "WHERE THIS CAN AND CANNOT GO. Strata serves /v1/messages itself, but the API",
+    "gateway does NOT publish that route -- its allowlist is GET /v1/models and",
+    "POST /v1/chat/completions only, and a request for /v1/messages comes back",
+    "404 not_published (asserted in",
+    "legacy/gateway/vision_protocol_selftest.py). So this sample is only",
+    "reachable by talking to a Strata instance directly, not through the gateway.",
+    "That is a deliberate gap in the gateway, not an oversight here.",
+    "",
+    "The base64 placeholder is filled in by examples/vision/request_contract.py",
+    "from the drawn fixture; the file is a template until then, exactly as the",
+    "copy it replaces was."
+  ],
+  "model": "qwen3.8-flash-next-iq2_xs",
+  "stream": false,
+  "temperature": 0,
+  "max_tokens": 8,
+  "system": "You are a strict resume screener. Answer with exactly one word: YES or NO. No punctuation, no explanation.",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Is the large central shape red? Answer with exactly one word: YES or NO."
+        },
+        {
+          "type": "image",
+          "source": {
+            "type": "base64",
+            "media_type": "image/png",
+            "data": "<BASE64-OF-red_square.png>"
+          }
+        }
+      ]
+    }
+  ]
+}

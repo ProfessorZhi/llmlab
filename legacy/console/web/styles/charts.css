@@ -1,0 +1,138 @@
+/* ==========================================================================
+   LLM Lab V2 -- charts
+
+   Hand-rolled SVG.  The method constraints from V1 are kept, because they are
+   about honesty rather than taste:
+
+     * one y-axis per chart, never a second scale on the right;
+     * categorical hues in fixed slot order, never cycled;
+     * a legend whenever there are two or more series;
+     * every chart has a table twin -- the accessible equivalent, not a
+       fallback;
+     * status colours never do duty as a series colour.
+
+   V2 adds interaction (hover crosshair, value tooltip, animated draw-in).
+   None of it changes a number.
+   ========================================================================== */
+
+.chart { position: relative; width: 100%; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+
+.grid-line  { stroke: var(--grid); stroke-width: 1; shape-rendering: crispEdges; }
+.axis-line  { stroke: var(--axis); stroke-width: 1; shape-rendering: crispEdges; }
+.axis-text  { fill: var(--ink-muted); font-size: 11px; font-family: var(--font-sans); }
+.axis-text.tick { font-variant-numeric: tabular-nums; }
+.bar-label  { fill: var(--ink-2); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; font-family: var(--font-sans); }
+
+.mark { transition: opacity var(--dur-fast) var(--ease-out); }
+.chart.has-hover .mark { opacity: .42; }
+.chart.has-hover .mark.hot { opacity: 1; }
+
+/* Bars grow from the baseline on first paint.  transform-origin is set per
+   mark by JS (the baseline is data-dependent), so the animation costs one
+   compositor transform rather than a redraw. */
+.mark {
+  transform-box: fill-box;
+  transform-origin: bottom center;
+  animation: bar-in var(--dur-slower) var(--ease-out) both;
+}
+@keyframes bar-in {
+  from { transform: scaleY(.001); opacity: .35; }
+  to   { transform: scaleY(1); opacity: 1; }
+}
+
+.line-path {
+  fill: none; stroke-width: 2;
+  stroke-linejoin: round; stroke-linecap: round;
+  animation: line-in var(--dur-slower) var(--ease-out) both;
+}
+@keyframes line-in { from { opacity: 0; } to { opacity: 1; } }
+.line-area { animation: fade-in var(--dur-slower) var(--ease-out) both; }
+
+.point { transition: r var(--dur-fast) var(--ease-out); }
+.chart.has-hover .point { opacity: .35; }
+.chart.has-hover .point.hot { opacity: 1; }
+
+.crosshair { stroke: var(--hair-strong); stroke-width: 1; stroke-dasharray: 3 3; shape-rendering: crispEdges; }
+
+.chart-legend {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-5);
+  margin-bottom: var(--sp-4);
+  font-size: var(--fs-xs); color: var(--ink-muted);
+}
+.chart-legend .swatch {
+  display: inline-block; width: 9px; height: 9px; border-radius: 2.5px;
+  margin-right: var(--sp-2); vertical-align: -1px;
+}
+.chart-legend .legend-item { display: inline-flex; align-items: center; }
+
+/* the floating value readout */
+.chart-tip {
+  position: absolute; z-index: 5;
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-sm);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-2);
+  font-size: var(--fs-xs); color: var(--ink-2);
+  pointer-events: none;
+  white-space: nowrap;
+  transform: translate(-50%, calc(-100% - 10px));
+  animation: fade-in var(--dur-fast) var(--ease-out) both;
+}
+.chart-tip .tip-cat { font-weight: var(--fw-semi); color: var(--ink); margin-bottom: var(--sp-2); }
+.chart-tip .tip-row { display: flex; align-items: center; gap: var(--sp-3); }
+.chart-tip .tip-row .swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.chart-tip .tip-row .tip-val { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--ink); font-weight: var(--fw-medium); }
+
+/* --- donut / gauge ------------------------------------------------------- */
+
+.gauge-wrap { display: flex; align-items: center; gap: var(--sp-5); }
+.gauge { position: relative; flex: none; }
+.gauge svg { width: 100%; height: 100%; }
+.gauge .gauge-track { fill: none; stroke: var(--surface-sunken); }
+.gauge .gauge-fill {
+  fill: none; stroke-linecap: round;
+  transition: stroke-dashoffset var(--dur-slower) var(--ease-out), stroke var(--dur-base) var(--ease-out);
+}
+.gauge-mid {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center;
+}
+.gauge-mid .gauge-val {
+  font-size: var(--fs-xl); font-weight: var(--fw-semi);
+  font-variant-numeric: tabular-nums; letter-spacing: var(--track-tight);
+  line-height: 1;
+}
+.gauge-mid .gauge-unit { font-size: var(--fs-2xs); color: var(--ink-muted); margin-top: 3px; }
+.gauge-side { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: var(--sp-3); }
+
+/* --- sparkline ----------------------------------------------------------- */
+
+.spark svg { width: 100%; height: 100%; overflow: visible; }
+.spark { height: 56px; }
+
+/* --- scatter (TTFT vs throughput) --------------------------------------- */
+.dot-mark { transition: r var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out); }
+
+/* --- chart shell --------------------------------------------------------- */
+
+.chart-box { position: relative; }
+.chart-toolbar {
+  position: absolute; top: 0; right: 0; z-index: 3;
+  display: flex; gap: var(--sp-2);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.chart-box:hover .chart-toolbar, .chart-box:focus-within .chart-toolbar { opacity: 1; }
+
+/* forced-colours: keep series distinguishable when the palette is overridden */
+@media (forced-colors: active) {
+  .axis-line, .grid-line { stroke: CanvasText; }
+  .axis-text, .bar-label { fill: CanvasText; }
+  .mark, .line-path { forced-color-adjust: none; }
+}

@@ -1,0 +1,29 @@
+# The Prometheus datasource, provisioned rather than clicked.
+#
+# Provisioned because the alternative is a datasource that exists only in one
+# Grafana's SQLite file: it survives a reinstall only if somebody remembered to
+# back up that file, and it cannot be reviewed in a pull request.  A datasource
+# is configuration, so it lives in the repository with the rest of the
+# configuration.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    # Deliberately no fixed uid: this is an example template, and a hard-coded
+    # uid would collide with whatever the operator already runs.
+    type: prometheus
+    # `proxy`, not `direct`.  Direct would make the *browser* query Prometheus,
+    # and Prometheus binds localhost -- it is not reachable from any other
+    # machine by design, and publishing it to make a dashboard chart render
+    # would undo the boundary the whole deployment is built around.  Proxy means
+    # Grafana's own process, which is on this host, does the querying.
+    access: proxy
+    url: http://localhost:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      # Matches the scrape interval.  Grafana uses this to align `rate()` steps
+      # with the actual sample spacing; claiming a finer resolution than exists
+      # makes a chart that looks precise and is interpolated.
+      timeInterval: 30s
+      httpMethod: POST
