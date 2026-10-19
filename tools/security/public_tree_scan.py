@@ -25,6 +25,7 @@ Exit codes: ``0`` clean, ``1`` findings, ``2`` usage error.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -86,18 +87,22 @@ CODE_SUFFIXES = (".py", ".js", ".mjs", ".cjs", ".sh", ".yaml", ".yml", ".toml", 
 
 RAW_SUFFIXES = (".jsonl", ".sqlite", ".sqlite3", ".db", ".log")
 
-#: The identifiers the migration review found in the archived private sources.
-#: They are split so this public file does not reintroduce them; the scanner
-#: joins them at runtime and compares the result.  The list is intentionally
-#: narrow: it catches a re-copy of the reviewed material, not every hostname.
-KNOWN_PRIVATE_IDENTIFIERS = (
-    "192.168." + "32.179",
-    "FJ-NJ-" + "SER-1009",
-    "work" + "-fj",
-    "personal" + "-dell",
-    "tokyo" + "-shared-dev-01",
+#: SHA-256 (lower-case) of the identifiers the migration review found in the
+#: archived private sources.  Only the digests live here: writing the
+#: identifiers themselves would reintroduce exactly what this gate is meant to
+#: keep out.  The list is intentionally narrow — it catches a re-copy of the
+#: reviewed material, not every hostname.
+KNOWN_PRIVATE_IDENTIFIER_SHA256 = frozenset(
+    {
+        "c023d0e26b192813a12b126299d36064dbfbf5c1c633324e7a230fbf3a1b36df",
+        "a6e9641bec5e347de8e10e1897fc284ce7d00f325e33c35ae45fda6e613d0738",
+        "9868077fb91011b78af615329b63b25f28b622db8d4769cc3e4d91fea52a70aa",
+        "95147a0df6c54f2f07fc8dfb4040447e909e76927ef8580e4acffa54a62afdb5",
+        "5ca34bbb2901acd553e678ed31fb17f9bb8baeb1906f0f670dfc124443ae32c6",
+    }
 )
 
+_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{2,}")
 _PRIVATE_KEY = re.compile(r"-----BEGIN (?:RSA |OPENSSH |EC |DSA |PGP )?PRIVATE KEY-----")
 _GITHUB_TOKEN = re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b")
 _SLACK_TOKEN = re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")
@@ -162,7 +167,12 @@ def _tracked_files(root: Path) -> list[str]:
     return [name for name in proc.stdout.decode("utf-8", "surrogateescape").split("\0") if name]
 
 
-def scan_text(relpath: str, text: str) -> list[Finding]:
+def scan_text(
+    relpath: str,
+    text: str,
+    *,
+    known_identifier_digests: frozenset[str] = KNOWN_PRIVATE_IDENTIFIER_SHA256,
+) -> list[Finding]:
     """Scan one file's text.  Exposed for tests and for embedding in CI."""
 
     findings: list[Finding] = []
@@ -176,7 +186,11 @@ def scan_text(relpath: str, text: str) -> list[Finding]:
 
     name = Path(relpath).name.lower()
     for lineno, line in enumerate(text.splitlines(), 1):
-        if any(identifier in line for identifier in KNOWN_PRIVATE_IDENTIFIERS):
+        if any(
+            hashlib.sha256(token.lower().encode()).hexdigest()
+            in known_identifier_digests
+            for token in _TOKEN.findall(line)
+        ):
             add("private-source-identifier", lineno)
 
         if _PRIVATE_KEY.search(line):
@@ -221,7 +235,12 @@ def scan_text(relpath: str, text: str) -> list[Finding]:
     return findings
 
 
-def scan_root(root: str | Path, *, paths: Iterable[str] | None = None) -> list[Finding]:
+def scan_root(
+    root: str | Path,
+    *,
+    paths: Iterable[str] | None = None,
+    known_identifier_digests: frozenset[str] = KNOWN_PRIVATE_IDENTIFIER_SHA256,
+) -> list[Finding]:
     """Scan ``root`` (tracked files by default) and return all findings."""
 
     base = Path(root).resolve()
@@ -234,7 +253,13 @@ def scan_root(root: str | Path, *, paths: Iterable[str] | None = None) -> list[F
             text = (base / relpath).read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        findings.extend(scan_text(relpath.replace("\\", "/"), text))
+        findings.extend(
+            scan_text(
+                relpath.replace("\\", "/"),
+                text,
+                known_identifier_digests=known_identifier_digests,
+            )
+        )
     return sorted(findings, key=lambda finding: (finding.path, finding.line, finding.rule))
 
 

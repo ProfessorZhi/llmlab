@@ -18,6 +18,7 @@ test file does not itself become the leak it is meant to catch.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -32,10 +33,14 @@ SCANNER = REPO_ROOT / "tools" / "security" / "public_tree_scan.py"
 PRIVATE_KEY_HEADER = "-----BEGIN " + "OPENSSH PRIVATE KEY-----"
 GITHUB_TOKEN = "gh" + "p_" + "A" * 36
 BEARER_TOKEN = "Bearer " + "A1b2" * 6
-KNOWN_HOST_ID = "tokyo" + "-shared-dev-01"
-OLD_LAB_IP = "192.168." + "32.179"
+SYNTHETIC_PRIVATE_HOST = "synthetic" + "-private-node-01"
+SYNTHETIC_PRIVATE_IP = "10." + "20.30.40"
 DEVICE_REF = "device:" + "real-node-01"
 REAL_HOME = "/" + "home/" + "realuser"
+
+
+def digest(value: str) -> str:
+    return hashlib.sha256(value.lower().encode()).hexdigest()
 
 
 def scanner():
@@ -74,10 +79,11 @@ class PublicTreeSafetyTest(unittest.TestCase):
         findings = scanner().scan_root(REPO_ROOT)
         self.assertEqual([], findings, [f.as_dict() for f in findings])
 
-    def test_scanner_source_does_not_reintroduce_a_known_identifier(self):
-        text = SCANNER.read_text(encoding="utf-8")
-        for identifier in (KNOWN_HOST_ID, OLD_LAB_IP):
-            self.assertNotIn(identifier, text)
+    def test_reviewed_identifiers_are_stored_as_sha256_digests(self):
+        known = scanner().KNOWN_PRIVATE_IDENTIFIER_SHA256
+        self.assertTrue(known)
+        for value in known:
+            self.assertRegex(value, r"^[0-9a-f]{64}$")
 
     # --- credential rules -----------------------------------------------------
 
@@ -95,13 +101,21 @@ class PublicTreeSafetyTest(unittest.TestCase):
 
     # --- host identity rules --------------------------------------------------
 
-    def test_detects_a_known_private_source_identifier(self):
-        self.write("leak.md", "ran on " + KNOWN_HOST_ID + "\n")
-        self.assertEqual(["private-source-identifier"], self.rules())
+    def test_detects_a_reviewed_private_identifier_token(self):
+        self.write("leak.md", "ran on " + SYNTHETIC_PRIVATE_HOST + "\n")
+        findings = scanner().scan_root(
+            self.root,
+            known_identifier_digests=frozenset({digest(SYNTHETIC_PRIVATE_HOST)}),
+        )
+        self.assertEqual(["private-source-identifier"], [f.rule for f in findings])
 
-    def test_detects_the_old_private_lab_ip(self):
-        self.write("leak.md", "host " + OLD_LAB_IP + "\n")
-        self.assertEqual(["private-source-identifier"], self.rules())
+    def test_detects_a_reviewed_private_ip_token(self):
+        self.write("leak.md", "host " + SYNTHETIC_PRIVATE_IP + "\n")
+        findings = scanner().scan_root(
+            self.root,
+            known_identifier_digests=frozenset({digest(SYNTHETIC_PRIVATE_IP)}),
+        )
+        self.assertEqual(["private-source-identifier"], [f.rule for f in findings])
 
     def test_detects_a_non_placeholder_device_reference(self):
         self.write("leak.md", DEVICE_REF + "\n")
