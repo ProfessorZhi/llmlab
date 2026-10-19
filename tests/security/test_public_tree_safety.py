@@ -117,8 +117,8 @@ class PublicTreeSafetyTest(unittest.TestCase):
         self.write("backend/contentlog.py", "CAPTURE = True\n")
         self.assertEqual(["content-capture"], self.rules())
 
-    def test_detects_a_full_body_capture_default(self):
-        self.write("backend/capture.py", "full_body_capture = True\n")
+    def test_detects_a_rejected_full_body_default(self):
+        self.write("backend/capture.py", "full" + "_body_capture = True\n")
         self.assertEqual(["content-capture"], self.rules())
 
     def test_the_runtime_still_names_the_rejected_content_fields(self):
