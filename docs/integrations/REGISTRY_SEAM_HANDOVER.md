@@ -321,7 +321,7 @@ store.ack_router_generation(
 
 ## 3. 未做、也不声称的（`HOST_PENDING`）
 
-- **没有任何 Dell 现场事实。** 本轮全部是 Tokyo 上的 CPU-only 合成证据。
+- **没有任何 Dell 现场事实。** 本轮全部是 CPU-only Linux 开发主机上的合成证据。
 - RouterAdapter 的真实 `status.json` 发布、真实的 Gateway 进程、真实的 ACL 执行、
   真实的 key 目录：**都没有**。回环上的「Gateway」是**测试替身**，它证明的是
   「代码会照着 Gateway 的判定做决定」，不是「Gateway 真的这么判定」。
@@ -333,7 +333,7 @@ store.ack_router_generation(
 
 ## 4. 复现
 
-Tokyo（`device:tokyo-shared-dev-01`），CPU-only，无 GPU、无网络到 Dell、不安装任何东西：
+CPU-only Linux 开发主机，无 GPU、无网络到 Dell、不安装任何东西：
 
 ```text
 python3 -m unittest discover -s tests/registry -t . -p 'test_*.py'
