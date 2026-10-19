@@ -5,13 +5,34 @@ the tree must never carry private key material, live-looking credentials, host
 identity from those sources, raw request/response artifacts, or the content-body
 capture feature that was deliberately excluded (legacy PR #17).
 
+Scope
+-----
+This scans the **current tracked worktree** (``git ls-files``).  It does not
+walk Git history and it is not gitleaks or trufflehog: a clean result says the
+checked-out tree is clean, not that every historical commit or deleted blob is.
+A history secret scan is a separate control and is **not performed here**.
+
+Path safety
+-----------
+Every selected path is rejected if it is absolute, contains ``.``/``..``/empty
+components, or has a symlink or Windows reparse-point component.  The resolved
+path must stay inside the repository root.  A path that cannot be validated or
+read is a scan failure (exit 2), never a silent skip.
+
+Placeholder policy
+------------------
+Only the **matched value** may be a placeholder (``synthetic-...``,
+``example-...``, ``placeholder-...``, ``{{...}}``, or the documented test
+double).  A placeholder comment elsewhere on the line does not exempt a real
+token, device id or home path.
+
 This is a **regression gate**, not a security boundary: a determined author can
 evade any text scan.  It exists so an accidental copy of the exact identifiers
 and shapes the migration already reviewed fails locally and in the test suite,
 instead of waiting for a reader to notice them in a public diff.
 
 The scan is deterministic and offline.  It reads tracked text files only; it
-never opens a socket, reads a live credential, or follows a symlink out of the
+never opens a socket, reads a live credential, or follows a link out of the
 tree.  Matched text is never included in a finding.
 
 Usage::
@@ -19,7 +40,7 @@ Usage::
     python3 tools/security/public_tree_scan.py --root .
     python3 tools/security/public_tree_scan.py --root . --json
 
-Exit codes: ``0`` clean, ``1`` findings, ``2`` usage error.
+Exit codes: ``0`` clean, ``1`` findings, ``2`` scan failure / usage error.
 """
 
 from __future__ import annotations
@@ -27,11 +48,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import stat
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Iterable, Sequence
 
 #: Files whose bytes are not source or documentation.  The rules below are
@@ -73,12 +96,11 @@ ALLOWED_HOME_NAMES = frozenset(
     {"alice", "bob", "carol", "dave", "x", "user", "example", "placeholder"}
 )
 
-#: A device reference may be published only when it is visibly a placeholder.
-ALLOWED_DEVICE_PREFIXES = ("example", "placeholder", "synthetic")
-
-#: Lines carrying these markers describe a synthetic or placeholder value.  The
-#: credential rule uses them to avoid flagging the repository's own fixtures.
-SAFE_MARKERS = ("synthetic", "example", "placeholder", "{{", "not-in-the-directory")
+#: A value may be published only when it is visibly a placeholder.  The check
+#: is applied to the matched value, never to the whole line.
+PLACEHOLDER_PREFIXES = ("synthetic", "example", "placeholder")
+PLACEHOLDER_EXACT = frozenset({"not-in-the-directory"})
+_PLACEHOLDER_BRACED = re.compile(r"\{\{[^{}\s]+\}\}")
 
 #: Source suffixes to which the content-capture rule applies.  Markdown is
 #: excluded on purpose: the exclusion itself is documented in Markdown, and
@@ -86,6 +108,13 @@ SAFE_MARKERS = ("synthetic", "example", "placeholder", "{{", "not-in-the-directo
 CODE_SUFFIXES = (".py", ".js", ".mjs", ".cjs", ".sh", ".yaml", ".yml", ".toml", ".json")
 
 RAW_SUFFIXES = (".jsonl", ".sqlite", ".sqlite3", ".db", ".log")
+
+#: Windows marks a reparse point (junction, mount point, symlink) with this bit.
+FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
+
+#: Drive-letter prefixes are absolute paths on Windows and must be refused even
+#: when this scanner runs on POSIX.
+_DRIVE_PREFIX = re.compile(r"^[A-Za-z]:")
 
 #: SHA-256 (lower-case) of the identifiers the migration review found in the
 #: archived private sources.  Only the digests live here: writing the
@@ -119,6 +148,18 @@ _CONTENT_CAPTURE = re.compile(
 )
 
 
+class ScanError(Exception):
+    """Base class for a fail-closed scan failure."""
+
+
+class UnsafePathError(ScanError):
+    """A selected path is absolute, traverses, or contains a link component."""
+
+
+class ScanReadError(ScanError):
+    """A selected path could not be read safely."""
+
+
 @dataclass(frozen=True)
 class Finding:
     """One rule violation.  ``rule`` and ``line`` locate it; text is omitted."""
@@ -143,12 +184,103 @@ def _is_allowed_raw(relpath: str) -> bool:
     return any(relpath.startswith(prefix) for prefix in ALLOWED_RAW_PREFIXES)
 
 
-def _is_safe_value(line: str, value: str) -> bool:
-    lowered_line = line.lower()
-    lowered_value = value.lower()
-    if "{{" in line:
+def _is_placeholder_value(value: str) -> bool:
+    """``True`` only for the matched value itself, never for its line."""
+
+    if not isinstance(value, str) or not value:
+        return False
+    if value.lower() in PLACEHOLDER_EXACT:
         return True
-    return any(marker in lowered_line or marker in lowered_value for marker in SAFE_MARKERS)
+    if _PLACEHOLDER_BRACED.fullmatch(value):
+        return True
+    lowered = value.lower()
+    return any(
+        lowered == prefix
+        or lowered.startswith(prefix + "-")
+        or lowered.startswith(prefix + "_")
+        for prefix in PLACEHOLDER_PREFIXES
+    )
+
+
+def _validate_relpath(relpath: str) -> tuple[str, ...]:
+    """Return canonical path components or raise :class:`UnsafePathError`."""
+
+    if not isinstance(relpath, str) or not relpath:
+        raise UnsafePathError("empty or non-string path")
+    if "\x00" in relpath:
+        raise UnsafePathError("NUL in path")
+    if "\\" in relpath:
+        raise UnsafePathError("backslash in path")
+    if relpath.startswith("/") or _DRIVE_PREFIX.match(relpath):
+        raise UnsafePathError("absolute path")
+    if relpath.endswith("/"):
+        raise UnsafePathError("trailing separator")
+    if "//" in relpath:
+        raise UnsafePathError("empty path component")
+    if relpath == "." or relpath.startswith("./") or "/./" in relpath or relpath.endswith("/."):
+        raise UnsafePathError("non-canonical '.' component")
+    parts = PurePosixPath(relpath).parts
+    if not parts or any(part in {"", ".", ".."} for part in parts):
+        raise UnsafePathError("path traversal or non-canonical component")
+    return parts
+
+
+def _safe_path(base: Path, relpath: str) -> Path:
+    """Validate every component without following links; fail closed."""
+
+    parts = _validate_relpath(relpath)
+    current = base
+    final_status = None
+    for index, part in enumerate(parts):
+        current = current / part
+        try:
+            final_status = os.lstat(current)
+        except OSError as exc:
+            raise ScanReadError(
+                f"{relpath}: cannot stat ({exc.strerror or exc.__class__.__name__})"
+            ) from None
+        if stat.S_ISLNK(final_status.st_mode):
+            raise UnsafePathError(f"{relpath}: symlink component {part!r}")
+        if getattr(final_status, "st_file_attributes", 0) & FILE_ATTRIBUTE_REPARSE_POINT:
+            raise UnsafePathError(f"{relpath}: reparse-point component {part!r}")
+        if index < len(parts) - 1 and not stat.S_ISDIR(final_status.st_mode):
+            raise UnsafePathError(f"{relpath}: non-directory component {part!r}")
+
+    try:
+        resolved = current.resolve(strict=True)
+    except OSError as exc:
+        raise ScanReadError(
+            f"{relpath}: cannot resolve ({exc.strerror or exc.__class__.__name__})"
+        ) from None
+    if not resolved.is_relative_to(base):
+        raise UnsafePathError(f"{relpath}: resolves outside the repository root")
+    if final_status is None or not stat.S_ISREG(final_status.st_mode):
+        raise ScanReadError(f"{relpath}: not a regular file")
+    return current
+
+
+def _read_text(path: Path, relpath: str) -> str:
+    """Open without following a final link component, or fail closed."""
+
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise ScanReadError(
+            f"{relpath}: cannot open ({exc.strerror or exc.__class__.__name__})"
+        ) from None
+    try:
+        handle = os.fdopen(descriptor, "r", encoding="utf-8", errors="replace")
+    except Exception:
+        os.close(descriptor)
+        raise
+    with handle:
+        try:
+            return handle.read()
+        except OSError as exc:
+            raise ScanReadError(
+                f"{relpath}: cannot read ({exc.strerror or exc.__class__.__name__})"
+            ) from None
 
 
 def _tracked_files(root: Path) -> list[str]:
@@ -159,12 +291,22 @@ def _tracked_files(root: Path) -> list[str]:
             capture_output=True,
         )
     except (OSError, subprocess.CalledProcessError):
-        return sorted(
-            str(path.relative_to(root))
-            for path in root.rglob("*")
-            if path.is_file()
-        )
-    return [name for name in proc.stdout.decode("utf-8", "surrogateescape").split("\0") if name]
+        discovered: list[str] = []
+        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+            base_dir = Path(dirpath)
+            for name in filenames:
+                discovered.append(str((base_dir / name).relative_to(root)))
+            for name in dirnames:
+                candidate = base_dir / name
+                if candidate.is_symlink():
+                    # Include the link itself so the validator can refuse it.
+                    discovered.append(str(candidate.relative_to(root)))
+        return sorted(discovered)
+    return [
+        name
+        for name in proc.stdout.decode("utf-8", "surrogateescape").split("\0")
+        if name
+    ]
 
 
 def scan_text(
@@ -205,20 +347,20 @@ def scan_text(
             add("credential", lineno)
 
         bearer = _BEARER.search(line)
-        if bearer and not _is_safe_value(line, bearer.group(1)) and any(
-            char.isdigit() for char in bearer.group(1)
+        if (
+            bearer
+            and not _is_placeholder_value(bearer.group(1))
+            and any(char.isdigit() for char in bearer.group(1))
         ):
             add("credential", lineno)
 
         device = _DEVICE.search(line)
-        if device and not device.group(1).lower().startswith(ALLOWED_DEVICE_PREFIXES):
-            if "{{" not in line:
-                add("device-reference", lineno)
+        if device and not _is_placeholder_value(device.group(1)):
+            add("device-reference", lineno)
 
         home = _HOME.search(line)
         if home and home.group(1).lower() not in ALLOWED_HOME_NAMES:
-            if "{{" not in line:
-                add("absolute-home-path", lineno)
+            add("absolute-home-path", lineno)
 
         if _is_code(relpath) and _CONTENT_CAPTURE.search(line):
             add("content-capture", lineno)
@@ -241,18 +383,28 @@ def scan_root(
     paths: Iterable[str] | None = None,
     known_identifier_digests: frozenset[str] = KNOWN_PRIVATE_IDENTIFIER_SHA256,
 ) -> list[Finding]:
-    """Scan ``root`` (tracked files by default) and return all findings."""
+    """Scan ``root`` (tracked files by default) and return all findings.
 
-    base = Path(root).resolve()
+    Raises :class:`UnsafePathError` or :class:`ScanReadError` instead of
+    skipping a path it cannot validate or read.
+    """
+
+    try:
+        base = Path(root).resolve(strict=True)
+    except OSError as exc:
+        raise ScanReadError(
+            f"root: cannot resolve ({exc.strerror or exc.__class__.__name__})"
+        ) from None
+    if not base.is_dir():
+        raise ScanReadError("root: not a directory")
+
     selected = list(paths) if paths is not None else _tracked_files(base)
     findings: list[Finding] = []
     for relpath in selected:
+        safe_path = _safe_path(base, relpath)
         if _is_binary(relpath):
             continue
-        try:
-            text = (base / relpath).read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
+        text = _read_text(safe_path, relpath)
         findings.extend(
             scan_text(
                 relpath.replace("\\", "/"),
@@ -271,9 +423,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     root = Path(args.root)
     if not root.exists():
-        parser.error(f"--root does not exist: {root}")
+        print(f"public-tree safety scan: FAILED: root does not exist: {root}", file=sys.stderr)
+        return 2
 
-    findings = scan_root(root)
+    try:
+        findings = scan_root(root)
+    except (UnsafePathError, ScanReadError) as exc:
+        print(f"public-tree safety scan: FAILED: {exc}", file=sys.stderr)
+        return 2
+
     if args.json:
         print(
             json.dumps(

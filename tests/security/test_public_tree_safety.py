@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -174,6 +175,103 @@ class PublicTreeSafetyTest(unittest.TestCase):
         )
         self.assertEqual([], self.rules())
 
+    # --- path safety / fail closed -------------------------------------------
+
+    def test_rejects_an_absolute_path(self):
+        with self.assertRaises(scanner().UnsafePathError):
+            self.scan(paths=["/" + "etc/passwd"])
+
+    def test_rejects_parent_traversal(self):
+        for relpath in (
+            "../outside.txt",
+            "sub/../../outside.txt",
+            "./safe.txt",
+            "a//b.txt",
+        ):
+            with self.subTest(relpath=relpath):
+                with self.assertRaises(scanner().UnsafePathError):
+                    self.scan(paths=[relpath])
+
+    def test_rejects_a_symlink_leaf_without_reading_the_target(self):
+        outside_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(outside_dir.cleanup)
+        outside = Path(outside_dir.name) / "outside.txt"
+        outside.write_text(GITHUB_TOKEN + "\n", encoding="utf-8")
+        (self.root / "link.txt").symlink_to(outside)
+
+        with self.assertRaises(scanner().UnsafePathError) as caught:
+            self.scan(paths=["link.txt"])
+        self.assertNotIn("gh", str(caught.exception).lower())
+
+    def test_rejects_a_symlink_directory_component(self):
+        outside_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(outside_dir.cleanup)
+        (Path(outside_dir.name) / "secret.txt").write_text(
+            GITHUB_TOKEN + "\n", encoding="utf-8"
+        )
+        (self.root / "linkdir").symlink_to(outside_dir.name, target_is_directory=True)
+
+        with self.assertRaises(scanner().UnsafePathError):
+            self.scan(paths=["linkdir/secret.txt"])
+
+    def test_a_missing_path_fails_closed(self):
+        with self.assertRaises(scanner().ScanReadError):
+            self.scan(paths=["missing.txt"])
+
+    def test_a_directory_path_fails_closed(self):
+        (self.root / "subdir").mkdir()
+        with self.assertRaises(scanner().ScanReadError):
+            self.scan(paths=["subdir"])
+
+    def test_an_unreadable_file_fails_closed(self):
+        if os.name != "posix" or os.geteuid() == 0:
+            self.skipTest("POSIX non-root is required to exercise a permission failure")
+        path = self.write("unreadable.txt", "x\n")
+        path.chmod(0)
+        try:
+            with self.assertRaises(scanner().ScanReadError):
+                self.scan(paths=["unreadable.txt"])
+        finally:
+            path.chmod(0o600)
+
+    # --- strict placeholder validation ---------------------------------------
+
+    def test_a_real_bearer_token_is_not_exempted_by_an_unrelated_placeholder(self):
+        self.write("leak.md", BEARER_TOKEN + "  # {{TOKEN_GOES_HERE}}\n")
+        self.assertEqual(["credential"], self.rules())
+
+    def test_a_real_device_is_not_exempted_by_an_unrelated_placeholder(self):
+        self.write("leak.md", DEVICE_REF + "  # {{DEVICE_ID}}\n")
+        self.assertEqual(["device-reference"], self.rules())
+
+    def test_a_real_home_is_not_exempted_by_an_unrelated_placeholder(self):
+        self.write("leak.md", REAL_HOME + "/models  # {{HOME}}\n")
+        self.assertEqual(["absolute-home-path"], self.rules())
+
+    def test_a_placeholder_is_exempt_only_as_the_matched_value(self):
+        self.write(
+            "safe.md",
+            "\n".join(
+                (
+                    "Bearer {{TOKEN}}",
+                    "Bearer synthetic-test-token",
+                    "device:{{DEVICE}}",
+                    "device:example-node",
+                    "/home/{{USER}}/models",
+                    "/home/alice/models",
+                )
+            )
+            + "\n",
+        )
+        self.assertEqual([], self.rules())
+
+    # --- scope / history boundary --------------------------------------------
+
+    def test_scan_scope_is_the_tracked_tree_not_git_history(self):
+        text = SCANNER.read_text(encoding="utf-8").lower()
+        for needle in ("git history", "gitleaks", "trufflehog", "tracked"):
+            self.assertIn(needle, text)
+
     # --- CLI contract ---------------------------------------------------------
 
     def test_cli_exits_nonzero_and_reports_json_for_a_finding(self):
@@ -196,6 +294,20 @@ class PublicTreeSafetyTest(unittest.TestCase):
             text=True,
         )
         self.assertEqual(0, proc.returncode, proc.stdout + proc.stderr)
+
+    def test_cli_fails_closed_for_an_unsafe_path(self):
+        outside_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(outside_dir.cleanup)
+        outside = Path(outside_dir.name) / "outside.txt"
+        outside.write_text("outside\n", encoding="utf-8")
+        (self.root / "link.txt").symlink_to(outside)
+        proc = subprocess.run(
+            [sys.executable, str(SCANNER), "--root", str(self.root), "--json"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(2, proc.returncode, proc.stderr)
+        self.assertIn("FAILED", proc.stderr)
 
 
 if __name__ == "__main__":
