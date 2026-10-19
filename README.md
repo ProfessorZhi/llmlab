@@ -9,6 +9,52 @@
 
 本仓库与 [`ProfessorZhi/llm-lab`](https://github.com/ProfessorZhi/llm-lab) **并列**，并非对旧仓库的历史重写。现有 Strata/Qwen、Gateway、旧 LAN Portal、Caddy、GPU 作业和其他用户的数据目录均维持各自权限和运行边界。
 
+## 开发入门
+
+以下命令在一个全新 clone + 隔离 venv 中实测通过（Linux，Python 3.12 / Node 24）。后端只用标准库，前端没有第三方运行时依赖。
+
+### Clone
+
+```bash
+git clone https://github.com/ProfessorZhi/llmlab.git
+cd llmlab
+```
+
+### 装依赖
+
+后端零依赖，只需要 Python >= 3.11。需要隔离环境时：
+
+```bash
+python3.12 -m venv .venv
+. .venv/bin/activate
+```
+
+前端没有第三方运行时依赖，可直接使用 `package.json` 里的 npm 脚本，无需 `npm install`。
+
+### 跑测试
+
+```bash
+CUDA_VISIBLE_DEVICES="" nice -n 10 python3 -m unittest discover -s tests -t .
+CUDA_VISIBLE_DEVICES="" nice -n 10 npm test
+```
+
+实测：Python `Ran 3977 tests in 225.661s`，`OK (skipped=8)`；Node `tests 558`、`pass 557`、`skipped 1`、`fail 0`（约 0.7s）。
+
+### 本地启动
+
+前端静态预览（只绑 `127.0.0.1`）：
+
+```bash
+npm run serve
+# http://127.0.0.1:8123/index.html
+```
+
+后端 CLI 入口：
+
+```bash
+python3 -m cli.llmlab --help
+```
+
 ## 1. 产品范围
 
 | 页面 | 核心用途 |
