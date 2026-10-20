@@ -37,6 +37,13 @@ class CanonicalDevelopmentBoundaryTests(unittest.TestCase):
             with self.subTest(term=term):
                 self.assertIn(term, text)
 
+    def test_public_documents_require_placeholders(self):
+        text = read("docs/access-boundaries.md")
+        self.assertIn("公开提交脱敏", text)
+        self.assertIn("{{LAB_HOST}}", text)
+        self.assertIn("{{LAB_USER}}", text)
+        self.assertIn("不得发布真实 Linux 用户名", text)
+
     def test_development_is_not_production(self):
         text = read("docs/access-boundaries.md")
         self.assertIn("DEV_READY", text)
