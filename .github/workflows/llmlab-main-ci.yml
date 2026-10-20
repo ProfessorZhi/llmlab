@@ -1,0 +1,58 @@
+# Source-level regression only. A green run is NOT a Dell host, GPU, PAM,
+# Gateway, browser E2E, security-history, or production deployment acceptance.
+name: llmlab CPU checks (non-release)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: llmlab-cpu-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CUDA_VISIBLE_DEVICES: ""
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  python:
+    name: Python unit regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Full stdlib unit suite
+        run: python -m unittest discover -s tests -t .
+
+  node:
+    name: Node unit and generated UI checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Node tests
+        run: npm test
+      - name: Verify frozen V5 to V6 derivation
+        run: node prototypes/v6/derive-from-v5.mjs --check
+      - name: Verify generated web output
+        run: npm run verify:extract
