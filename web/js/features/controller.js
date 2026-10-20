@@ -45,7 +45,7 @@ import { $, $$ } from '../dom.js';
 import { EXPLAIN_COPIED, EXPLAIN_COPY_BLOCKED } from '../dialog.js';
 import { deriveCapabilities, isGranted } from './capability.js';
 import { mountAdminModeControl } from './admin-mode.js';
-import { OPS_STATES, emptyOps, opsMetricsForDisplay, nextOpsMetricExpiry } from './contract.js';
+import { OPS_STATES, emptyOps, opsMetricsForDisplay, nextOpsMetricExpiry, parseOpsExpiry } from './contract.js';
 import { renderEventsSection } from './events.js';
 import {
   OPS_PANEL_IDS,
@@ -192,9 +192,18 @@ export function createOps({ doc = globalThis.document, source, dialog = null, on
     if (next === null) return;
     // Bounded delay: very distant expiry is rechecked, never a perpetual timer.
     const delay = Math.max(1, Math.min(2_147_000_000, Math.ceil(next - now) + 5));
+    const snapshot = ops;
     metricExpiryTimer = setTimeout(() => {
       metricExpiryTimer = null;
-      if (!ops || state !== OPS_STATES.READY) return;
+      if (ops !== snapshot || state !== OPS_STATES.READY) return;
+      // Timer delays are monotonic even when Date.now() is moved backwards.
+      // A deadline that this very timer was set to expire must NEVER become
+      // fresh again merely because the wall clock was changed before it fired.
+      for (const metric of snapshot.metrics?.items ?? []) {
+        const stamp = snapshot.metrics?.expires_at?.[metric.name];
+        const expiry = parseOpsExpiry(stamp);
+        if (expiry !== null && expiry <= next) expiredMetricNames.add(metric.name);
+      }
       paint(); // Masks expired numbers and notifies Compute without a new request.
       scheduleMetricExpiry();
     }, delay);
