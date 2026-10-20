@@ -34,5 +34,6 @@ carry request-body logging code.
 
 ## Consolidation note
 
-The branch names in the old repository should be treated as read-only history.
-New work happens on the branches of `llm-lab-portal`.
+This page preserves historical PR dispositions and is not a statement of the current development target. The old repository branches remain read-only evidence. Both `ProfessorZhi/llm-lab` and `ProfessorZhi/llm-lab-portal` are **Private + Archived**; their historical PR/Issue references are not new work queues.
+
+New source development happens exclusively through branches and pull requests in [`ProfessorZhi/llmlab`](https://github.com/ProfessorZhi/llmlab), with the Dell RTX A6000 as the designated long-term development environment. This supersedes the former instruction to develop on `llm-lab-portal`, without rewriting the historical decisions above.
