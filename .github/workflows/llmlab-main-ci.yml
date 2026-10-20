@@ -56,3 +56,36 @@ jobs:
         run: node prototypes/v6/derive-from-v5.mjs --check
       - name: Verify generated web output
         run: npm run verify:extract
+
+  browser:
+    name: Headless browser acceptance (non-release)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Node 24 for built-in WebSocket and CDP
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Require preinstalled Chrome or Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHROME_PATH="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          if [[ -z "$CHROME_PATH" ]]; then
+            echo "::error::Chrome/Chromium unavailable. Real-browser checks are NOT_VERIFIED; do not silently skip."
+            exit 1
+          fi
+          "$CHROME_PATH" --version
+          echo "CHROME_PATH=$CHROME_PATH" >> "$GITHUB_ENV"
+      - name: Run real browser suite, one CDP browser test file at a time
+        shell: bash
+        env:
+          ATELIER_INFRA_READONLY: "0"
+        run: |
+          set -euo pipefail
+          node --version
+          node --test --test-concurrency=1 tests/browser/*.test.js
