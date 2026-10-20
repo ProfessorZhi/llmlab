@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 
 from backend.observability import dto as obs_dto
 from backend.bff import observability_adapter as obs_adapter
@@ -82,6 +83,64 @@ class MetricCardTests(unittest.TestCase):
             {name for name in admin if name.startswith("device.gpu")},
             "the host-scoped session got no device readings",
         )
+
+
+class MetricFreshnessMappingTests(unittest.TestCase):
+    """A time-expired verified source must never become an available card."""
+
+    NOW = datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
+
+    def reading(self, seconds_old=5, *, source="gateway-usage-export"):
+        return obs_dto.MetricReading.from_metric(
+            "principal.requests",
+            value=42,
+            source=source,
+            observed_at=self.NOW - timedelta(seconds=seconds_old),
+            now=self.NOW,
+        ).to_dict()
+
+    def test_fresh_verified_reading_remains_available(self):
+        reading = self.reading()
+        self.assertEqual(reading["freshness"]["stale"], False)
+        card = obs_adapter._metric_card("principal.requests", reading)
+        self.assertEqual(card["state"], "available")
+        self.assertEqual(card["value"], 42)
+        self.assertEqual(card["source"], "gateway-usage-export")
+        self.assertIsNone(card["reason"])
+
+    def test_stale_verified_reading_withholds_old_number(self):
+        reading = self.reading(seconds_old=600)
+        self.assertEqual(reading["display_quality"], obs_dto.DISPLAY_STALE)
+        self.assertIs(reading["freshness"]["stale"], True)
+        card = obs_adapter._metric_card("principal.requests", reading)
+        self.assertEqual(card["state"], "unknown")
+        self.assertIsNone(card["value"])
+        self.assertIsNone(card["source"])
+        self.assertIsNone(card["updated_at"])
+        self.assertEqual(card["reason"], "stale_sample")
+
+    def test_future_clock_skew_is_not_considered_fresh(self):
+        reading = self.reading(seconds_old=-600)
+        self.assertIs(reading["freshness"]["clock_skew"], True)
+        card = obs_adapter._metric_card("principal.requests", reading)
+        self.assertEqual(card["state"], "unknown")
+        self.assertIsNone(card["value"])
+        self.assertEqual(card["reason"], "unverified_freshness")
+
+    def test_missing_freshness_is_fail_closed(self):
+        reading = self.reading()
+        reading.pop("freshness")
+        card = obs_adapter._metric_card("principal.requests", reading)
+        self.assertEqual(card["state"], "unknown")
+        self.assertIsNone(card["value"])
+        self.assertEqual(card["reason"], "unverified_freshness")
+
+    def test_synthetic_source_stays_unknown_even_when_recent(self):
+        reading = self.reading(source="synthetic-fixture")
+        card = obs_adapter._metric_card("principal.requests", reading)
+        self.assertEqual(card["state"], "unknown")
+        self.assertIsNone(card["value"])
+        self.assertEqual(card["reason"], "no_verified_metric_source")
 
 
 class TrendTests(unittest.TestCase):
