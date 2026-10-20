@@ -45,7 +45,7 @@ import { $, $$ } from '../dom.js';
 import { EXPLAIN_COPIED, EXPLAIN_COPY_BLOCKED } from '../dialog.js';
 import { deriveCapabilities, isGranted } from './capability.js';
 import { mountAdminModeControl } from './admin-mode.js';
-import { OPS_STATES, emptyOps } from './contract.js';
+import { OPS_STATES, emptyOps, opsMetricsForDisplay, nextOpsMetricExpiry } from './contract.js';
 import { renderEventsSection } from './events.js';
 import {
   OPS_PANEL_IDS,
@@ -173,6 +173,33 @@ export function createOps({ doc = globalThis.document, source, dialog = null, on
   let capabilities = deriveCapabilities({ scopes: [] });
   let loadGeneration = 0;
   let pending = false;
+  // An already-rendered LIVE reading must age out even in an idle tab, without
+  // trusting a second browser-side copy of the producer's TTL.
+  const expiredMetricNames = new Set();
+  let metricExpiryTimer = null;
+  const visibleOps = () => opsMetricsForDisplay(ops, Date.now(), expiredMetricNames);
+  function clearMetricExpiryTimer() {
+    if (metricExpiryTimer !== null) {
+      clearTimeout(metricExpiryTimer);
+      metricExpiryTimer = null;
+    }
+  }
+  function scheduleMetricExpiry() {
+    clearMetricExpiryTimer();
+    if (!ops || state !== OPS_STATES.READY) return;
+    const now = Date.now();
+    const next = nextOpsMetricExpiry(ops, now, expiredMetricNames);
+    if (next === null) return;
+    // Bounded delay: very distant expiry is rechecked, never a perpetual timer.
+    const delay = Math.max(1, Math.min(2_147_000_000, Math.ceil(next - now) + 5));
+    metricExpiryTimer = setTimeout(() => {
+      metricExpiryTimer = null;
+      if (!ops || state !== OPS_STATES.READY) return;
+      paint(); // Masks expired numbers and notifies Compute without a new request.
+      scheduleMetricExpiry();
+    }, delay);
+    metricExpiryTimer.unref?.(); // Do not hold Node-only contract tests open.
+  }
   // The operator audit timeline is a second, independent read. It is never
   // derived from the ops payload, and it is cleared whenever the session scope
   // changes — an elevated read must not outlive the elevation.
@@ -185,7 +212,7 @@ export function createOps({ doc = globalThis.document, source, dialog = null, on
   // session scope is reloaded or invalidated. They do not own any credentials.
   const notify = () => {
     if (typeof onStateChange !== 'function') return;
-    try { onStateChange({ ops, state, mode: opsSource.mode }); } catch {
+    try { onStateChange({ ops: visibleOps(), state, mode: opsSource.mode }); } catch {
       // A secondary view may never block the primary scoped panel repaint.
     }
   };
@@ -223,8 +250,9 @@ export function createOps({ doc = globalThis.document, source, dialog = null, on
       return;
     }
 
-    const strip = renderOpsStrip(ops);
-    const panels = renderPanels(ops, capabilities, {
+    const displayOps = visibleOps();
+    const strip = renderOpsStrip(displayOps);
+    const panels = renderPanels(displayOps, capabilities, {
       visibility,
       trendScope,
       writable,
@@ -382,6 +410,8 @@ export function createOps({ doc = globalThis.document, source, dialog = null, on
       return { state: OPS_STATES.UNKNOWN, reason: 'superseded', errors: [] };
     }
     pending = false;
+    clearMetricExpiryTimer();
+    expiredMetricNames.clear();
     state = answer.state;
     lastReason = answer.reason ?? null;
     ops = answer.ops ?? null;
@@ -396,6 +426,7 @@ export function createOps({ doc = globalThis.document, source, dialog = null, on
     if (state !== OPS_STATES.READY) ops = null;
 
     paint();
+    scheduleMetricExpiry();
     // The audit timeline is read only after the session's scopes are known. A
     // failed ops read grants nothing, so it must not be mistaken for "asked and
     // denied" — that would claim a decision the server never made.
@@ -441,6 +472,8 @@ export function createOps({ doc = globalThis.document, source, dialog = null, on
   }
 
   function invalidate() {
+    clearMetricExpiryTimer();
+    expiredMetricNames.clear();
     ++loadGeneration;
     ++eventsGeneration; // drop any in-flight audit read as well
     pending = false;
@@ -463,7 +496,7 @@ export function createOps({ doc = globalThis.document, source, dialog = null, on
     applyWriteGate,
     panels: PANELS.map((panel) => panel.id),
     get state() { return state; },
-    get ops() { return ops; },
+    get ops() { return visibleOps(); },
     get capabilities() { return capabilities; },
     get visibility() { return visibility; },
     get trendScope() { return trendScope; },
