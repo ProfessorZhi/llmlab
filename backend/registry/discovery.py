@@ -16,7 +16,8 @@ Discovery reads only **injectable descriptors** supplied by an already
 authorized component (a platform launch receipt, an operator-maintained
 descriptor, or a test fixture). It never scans ports, never walks ``/proc``,
 never reads another user's process, and never opens a socket. A source that
-cannot answer returns ``source_unavailable``; it does not guess.
+cannot answer is listed in ``unavailable_sources``; it does not guess,
+and it does not invent a placeholder target.
 
 Why not reuse the UID-shaped seams
 ----------------------------------
@@ -25,9 +26,24 @@ Why not reuse the UID-shaped seams
 (``owner_uid``, ``StaticOwnershipProver`` for ``(host, port) -> uid``). The
 platform account is a separate identity that may share a username with a Linux
 account and still be an unrelated principal. This module therefore carries no
-UID at all: attribution requires an explicit, evidenced binding supplied later
-by an operator-approved path, and every candidate ships with
-``owner_binding = None``.
+UID at all, and every candidate ships with ``owner_binding = None``.
+
+Trusted ownership handoff (deliberately **not** implemented here)
+-----------------------------------------------------------------
+An earlier draft exposed ``bind_candidate(candidate, platform_principal=...,
+evidence_kind="launch_receipt", evidence_id=...)``. That was removed: the
+"evidence" was three caller-supplied strings, so any caller could attribute
+someone else's engine to itself by naming a kind the module already knew. A
+string tag is not proof, and replacing it with a boolean or a dataclass would
+be the same forgery wearing a different shape.
+
+Attribution therefore has exactly one future home: a vetted, privileged
+operator/launch-receipt verifier that (a) holds the signing key or the kernel
+fact, (b) resolves the platform principal from its own authenticated session,
+and (c) writes ownership into the Registry through an audited path. Discovery
+will consume the *result* of that verifier; it must never manufacture one.
+Until that path exists, a candidate is inventory only: ``owner_binding`` is
+``None``, and there is no API in this module that can change it.
 
 TTL / fail-closed
 -----------------
@@ -47,7 +63,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, Mapping, Protocol, Sequence
 from urllib.parse import urlsplit
@@ -57,16 +73,22 @@ from urllib.parse import urlsplit
 #: with its own authorization, not something an inventory sweep may imply.
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
-#: Statuses a candidate can carry. There is deliberately no "healthy" or
-#: "owned" here: those words belong to verification and binding, which this
-#: module does not perform.
+#: The only status a candidate can carry. There is deliberately no "healthy",
+#: "owned" or "unavailable candidate" here: health and ownership belong to
+#: verification and binding, and a source that could not answer is reported in
+#: ``unavailable_sources`` rather than as a fake endpoint.
 STATUS_DETECTED_UNVERIFIED = "detected_unverified"
-STATUS_SOURCE_UNAVAILABLE = "source_unavailable"
 
 #: Defaults chosen to keep one bad source from producing an unbounded page.
 DEFAULT_TTL_SECONDS = 30
 DEFAULT_MAX_CANDIDATES = 64
 MAX_NAME_LENGTH = 120
+
+#: A consumer clock that reads this far *behind* ``generated_at`` is treated as
+#: clock skew rather than freshness, so a future-stamped snapshot cannot be
+#: displayed indefinitely.
+CLOCK_SKEW_TOLERANCE_SECONDS = 5
+_CLOCK_SKEW = timedelta(seconds=CLOCK_SKEW_TOLERANCE_SECONDS)
 
 ALLOWED_SCHEMES = frozenset({"http", "https"})
 
@@ -183,29 +205,39 @@ class DiscoverySnapshot:
         return self.generated_at + timedelta(seconds=self.ttl_seconds)
 
     def is_stale(self, now: datetime) -> bool:
-        return now >= self.expires_at
+        """True when the snapshot may no longer be shown.
+
+        A clock that reads *earlier* than ``generated_at`` is not "very fresh":
+        it means the two clocks disagree, and a snapshot stamped in the future
+        could otherwise stay displayable far past its TTL. That case is treated
+        as stale as well, with its own reason.
+        """
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise DiscoveryError("now must be timezone-aware")
+        return now >= self.expires_at or now < self.generated_at - _CLOCK_SKEW
 
     def for_display(self, now: datetime) -> dict:
         """JSON shape for a dashboard; withholds everything once stale."""
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise DiscoveryError("now must be timezone-aware")
         if self.is_stale(now):
+            reason = "clock_skew" if now < self.generated_at - _CLOCK_SKEW else "snapshot_stale"
             return {
                 "generated_at": _iso(self.generated_at),
                 "expires_at": _iso(self.expires_at),
                 "stale": True,
-                "reason": "snapshot_stale",
+                "reason": reason,
                 "counts": {"total": 0, "detected_unverified": 0,
-                           "source_unavailable": 0, "unavailable_sources": len(self.unavailable_sources)},
+                           "unavailable_sources": len(self.unavailable_sources)},
                 "candidates": [],
                 "unavailable_sources": list(self.unavailable_sources),
                 "truncated": self.truncated,
             }
         counts = {"total": len(self.candidates), "detected_unverified": 0,
-                  "source_unavailable": 0, "unavailable_sources": len(self.unavailable_sources)}
+                  "unavailable_sources": len(self.unavailable_sources)}
         for candidate in self.candidates:
             if candidate.status == STATUS_DETECTED_UNVERIFIED:
                 counts["detected_unverified"] += 1
-            elif candidate.status == STATUS_SOURCE_UNAVAILABLE:
-                counts["source_unavailable"] += 1
         return {
             "generated_at": _iso(self.generated_at),
             "expires_at": _iso(self.expires_at),
@@ -327,21 +359,10 @@ def discover(
         try:
             descriptors = list(source.read(moment))
         except Exception:  # noqa: BLE001 - a broken source is data, not a crash
+            # No placeholder candidate: inventing a 127.0.0.1:0 target so the
+            # list "looks complete" would put a fake endpoint in a dashboard.
+            # The source name goes to ``unavailable_sources``; nothing else.
             unavailable.append(name)
-            candidates.append(
-                EngineCandidate(
-                    candidate_id=_candidate_id(name, "http", "127.0.0.1", 0),
-                    display_name=name,
-                    host="127.0.0.1",
-                    port=0,
-                    scheme="http",
-                    source=name,
-                    source_kind=kind,
-                    status=STATUS_SOURCE_UNAVAILABLE,
-                    observed_at=observed_at,
-                    reason="source_unavailable",
-                )
-            )
             continue
 
         for raw in descriptors:
@@ -366,47 +387,17 @@ def discover(
     )
 
 
-def bind_candidate(
-    candidate: EngineCandidate,
-    *,
-    platform_principal: str,
-    evidence_kind: str,
-    evidence_id: str,
-) -> EngineCandidate:
-    """Attach an **explicitly evidenced** owner binding to a copy.
-
-    This function does not verify anything itself: it exists so the shape of a
-    bound candidate is reviewed once, and so the default path (never calling it)
-    keeps every candidate unowned. Callers must have already approved the
-    evidence through an operator-controlled path; equal usernames, matching
-    passwords, self-reported headers or guessed process names are *not*
-    evidence and must never be passed here.
-    """
-    if not isinstance(candidate, EngineCandidate):
-        raise DiscoveryError("candidate must be an EngineCandidate")
-    if evidence_kind not in {"operator_policy", "launch_receipt"}:
-        raise DiscoveryError(f"unsupported evidence kind: {evidence_kind!r}")
-    if not platform_principal or not evidence_id:
-        raise DiscoveryError("a binding needs a platform principal and an evidence id")
-    bound = replace(candidate, owner_binding=platform_principal)
-    # A binding is still not a registration, a share, or an invoke right.
-    if bound.registered or bound.shareable or bound.invokable:
-        raise DiscoveryError("binding must not grant registration, sharing or invoke")
-    return bound
-
-
 __all__ = [
     "ALLOWED_SCHEMES",
+    "CLOCK_SKEW_TOLERANCE_SECONDS",
     "DEFAULT_MAX_CANDIDATES",
     "DEFAULT_TTL_SECONDS",
     "STATUS_DETECTED_UNVERIFIED",
-    "STATUS_SOURCE_UNAVAILABLE",
     "DiscoveryError",
     "DiscoverySnapshot",
     "DiscoverySource",
     "EngineCandidate",
     "StaticDescriptorSource",
     "UnavailableSource",
-    "bind_candidate",
     "discover",
 ]

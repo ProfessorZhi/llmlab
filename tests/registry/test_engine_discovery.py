@@ -136,8 +136,12 @@ class SourceFailureTest(unittest.TestCase):
             now=NOW,
         )
         self.assertIn("host-proc", snapshot.unavailable_sources)
-        self.assertEqual(snapshot.candidates[0].status, discovery.STATUS_SOURCE_UNAVAILABLE)
-        self.assertEqual(snapshot.candidates[1].status, discovery.STATUS_DETECTED_UNVERIFIED)
+        # Only the source that answered produces an endpoint.
+        self.assertEqual(len(snapshot.candidates), 1)
+        self.assertEqual(snapshot.candidates[0].status, discovery.STATUS_DETECTED_UNVERIFIED)
+        payload = snapshot.for_display(NOW)
+        self.assertEqual(payload["counts"]["unavailable_sources"], 1)
+        self.assertEqual(payload["counts"]["total"], 1)
 
     def test_a_raising_source_does_not_break_the_snapshot(self):
         class Exploding:
@@ -149,7 +153,25 @@ class SourceFailureTest(unittest.TestCase):
 
         snapshot = discovery.discover([Exploding()], now=NOW)
         self.assertEqual(snapshot.unavailable_sources, ("broken",))
-        self.assertEqual(snapshot.candidates[0].status, discovery.STATUS_SOURCE_UNAVAILABLE)
+        # No placeholder endpoint is invented for a source that could not answer.
+        self.assertEqual(snapshot.candidates, ())
+        payload = snapshot.for_display(NOW)
+        self.assertEqual(payload["candidates"], [])
+        self.assertEqual(payload["unavailable_sources"], ["broken"])
+
+    def test_the_exception_message_is_never_surfaced(self):
+        class Leaky:
+            name = "leaky"
+            kind = "descriptor"
+
+            def read(self, now):
+                raise RuntimeError("secret=/etc/shadow token=abc123")
+
+        snapshot = discovery.discover([Leaky()], now=NOW)
+        rendered = json.dumps(snapshot.for_display(NOW)).lower()
+        self.assertNotIn("secret", rendered)
+        self.assertNotIn("abc123", rendered)
+        self.assertNotIn("shadow", rendered)
 
 
 class FreshnessTest(unittest.TestCase):
@@ -170,6 +192,22 @@ class FreshnessTest(unittest.TestCase):
         self.assertEqual(payload["candidates"], [])
         self.assertEqual(payload["counts"]["total"], 0)
 
+    def test_a_future_stamped_snapshot_is_withheld_as_clock_skew(self):
+        # generated_at comes from the caller's clock. If that clock ran ahead,
+        # the snapshot must not stay displayable until real time catches up.
+        future = NOW + timedelta(hours=2)
+        snapshot = discovery.discover([source(descriptors=[descriptor()])], now=future)
+        payload = snapshot.for_display(NOW)
+        self.assertTrue(payload["stale"])
+        self.assertEqual(payload["reason"], "clock_skew")
+        self.assertEqual(payload["candidates"], [])
+
+    def test_small_clock_jitter_is_tolerated(self):
+        snapshot = discovery.discover([source(descriptors=[descriptor()])], now=NOW)
+        payload = snapshot.for_display(NOW - timedelta(seconds=1))
+        self.assertFalse(payload["stale"])
+        self.assertEqual(len(payload["candidates"]), 1)
+
     def test_naive_time_and_bad_limits_are_refused(self):
         with self.assertRaises(discovery.DiscoveryError):
             discovery.discover([], now=datetime(2026, 10, 20, 15, 0))
@@ -177,55 +215,51 @@ class FreshnessTest(unittest.TestCase):
             discovery.discover([], now=NOW, ttl_seconds=0)
         with self.assertRaises(discovery.DiscoveryError):
             discovery.discover([], now=NOW, max_candidates=0)
+        snapshot = discovery.discover([], now=NOW)
+        with self.assertRaises(discovery.DiscoveryError):
+            snapshot.for_display(datetime(2026, 10, 20, 15, 0))
+        with self.assertRaises(discovery.DiscoveryError):
+            snapshot.is_stale(datetime(2026, 10, 20, 15, 0))
 
 
-class BindingTest(unittest.TestCase):
-    def test_binding_requires_evidence_and_never_grants_rights(self):
-        snapshot = discovery.discover([source(descriptors=[descriptor()])], now=NOW)
-        candidate = snapshot.candidates[0]
-        bound = discovery.bind_candidate(
-            candidate,
-            platform_principal="platform:alice",
-            evidence_kind="launch_receipt",
-            evidence_id="receipt-42",
+class OwnershipBoundaryTest(unittest.TestCase):
+    """Discovery must have no way to attribute a candidate to anyone.
+
+    A previous draft exposed ``bind_candidate(candidate, evidence_kind=...,
+    evidence_id=...)``: three caller-supplied strings, checked only for
+    membership and non-emptiness. Any caller could tag another user's engine as
+    its own. The API was removed rather than tightened, because a string tag
+    cannot be made into proof by validating its spelling.
+    """
+
+    def test_there_is_no_owner_binding_api_to_forge(self):
+        for name in ("bind_candidate", "bind_owner", "claim_owner", "set_owner"):
+            with self.subTest(name=name):
+                self.assertFalse(hasattr(discovery, name), name)
+        self.assertNotIn("bind_candidate", discovery.__all__)
+
+    def test_every_candidate_is_unowned_and_rightless(self):
+        snapshot = discovery.discover(
+            [
+                source(descriptors=[descriptor()]),
+                discovery.UnavailableSource(name="host-proc", reason="no permission"),
+            ],
+            now=NOW,
         )
-        self.assertEqual(bound.owner_binding, "platform:alice")
-        self.assertFalse(bound.registered)
-        self.assertFalse(bound.shareable)
-        self.assertFalse(bound.invokable)
-        self.assertEqual(bound.candidate_id, candidate.candidate_id)
-
-    def test_binding_rejects_unreviewed_evidence_kinds(self):
-        snapshot = discovery.discover([source(descriptors=[descriptor()])], now=NOW)
-        candidate = snapshot.candidates[0]
-        for kind in ("same_username", "matching_password", "guessed_process", ""):
-            with self.subTest(kind=kind):
-                with self.assertRaises(discovery.DiscoveryError):
-                    discovery.bind_candidate(
-                        candidate,
-                        platform_principal="platform:alice",
-                        evidence_kind=kind,
-                        evidence_id="x",
-                    )
-
-    def test_binding_needs_a_principal_and_an_evidence_id(self):
-        snapshot = discovery.discover([source(descriptors=[descriptor()])], now=NOW)
-        candidate = snapshot.candidates[0]
-        with self.assertRaises(discovery.DiscoveryError):
-            discovery.bind_candidate(
-                candidate, platform_principal="", evidence_kind="operator_policy",
-                evidence_id="x",
-            )
-        with self.assertRaises(discovery.DiscoveryError):
-            discovery.bind_candidate(
-                candidate, platform_principal="platform:alice",
-                evidence_kind="operator_policy", evidence_id="",
-            )
-
-    def test_discovery_alone_never_binds(self):
-        snapshot = discovery.discover([source(descriptors=[descriptor()])], now=NOW)
+        self.assertTrue(snapshot.candidates)
         for candidate in snapshot.candidates:
-            self.assertIsNone(candidate.owner_binding)
+            with self.subTest(candidate=candidate.candidate_id):
+                self.assertIsNone(candidate.owner_binding)
+                self.assertFalse(candidate.registered)
+                self.assertFalse(candidate.shareable)
+                self.assertFalse(candidate.invokable)
+
+    def test_json_never_invents_an_owner(self):
+        snapshot = discovery.discover([source(descriptors=[descriptor()])], now=NOW)
+        payload = snapshot.for_display(NOW)
+        for item in payload["candidates"]:
+            self.assertIsNone(item["owner_binding"])
+            self.assertFalse(item["registered"] or item["shareable"] or item["invokable"])
 
 
 class JsonShapeTest(unittest.TestCase):
