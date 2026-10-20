@@ -844,6 +844,13 @@ export function renderNotice(state, reason) {
 export function renderOpsStrip(ops) {
   if (!ops) return '';
   if (!isDemo(ops)) {
+    const expired = (ops.metrics?.items ?? []).some((metric) => metric.reason === 'stale_sample');
+    if (expired) {
+      return (
+        `<div class="demo-strip" role="status">` +
+        `<span><strong>STALE</strong> · 部分观测指标已过期或无法证明新鲜，数值已隐藏；请重新读取。</span></div>`
+      );
+    }
     return (
       `<div class="demo-strip" role="status" style="border-left-color:var(--good)">` +
       `<span><strong>LIVE</strong> · 管理数据来自已接线的同源服务。</span></div>`

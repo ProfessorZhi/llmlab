@@ -153,6 +153,8 @@ const REASON_LABELS = Object.freeze({
   evaluation_backend_not_ready: '评测后端尚未就绪',
   no_authorized_backend: '没有经授权的交互式后端',
   no_verified_metric_source: '没有已声明的可信数据来源',
+  stale_sample: '观测值已过期；等待重新读取',
+  unverified_freshness: '观测值缺少可信的新鲜度证据',
   linux_auth_not_enabled: 'Linux 账号 / PAM 认证尚未启用',
   preview_build_has_no_real_backend: '预览构建没有真实后端（合成输出不等于试跑）',
 });
@@ -545,6 +547,50 @@ function checkPlayground(playground, errors) {
 
 // --- metrics ----------------------------------------------------------------
 
+// This is an additive, optional portal-ops/1 metrics-level extension. The BFF
+// derives each deadline from its authoritative metric catalogue, not a browser
+// copy of those TTLs. An unleased LIVE number must fail closed.
+const ISO_WITH_ZONE = /(?:Z|[+-]\d{2}:\d{2})$/;
+export function parseOpsExpiry(value) {
+  if (typeof value !== 'string' || !ISO_WITH_ZONE.test(value)) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+export function opsMetricsForDisplay(ops, nowMs = Date.now(), expiredNames = new Set()) {
+  if (!ops || ops.transport?.mode !== TRANSPORT_MODES.LIVE
+    || !Array.isArray(ops.metrics?.items)) return ops;
+  const leases = ops.metrics.expires_at ?? {};
+  let changed = false;
+  const items = ops.metrics.items.map((metric) => {
+    if (metric.value === null || metric.value === undefined) return metric;
+    const expiry = Object.prototype.hasOwnProperty.call(leases, metric.name)
+      ? parseOpsExpiry(leases[metric.name]) : null;
+    if (expiry !== null && expiry > nowMs && !expiredNames.has(metric.name)
+      && Number.isFinite(nowMs)) return metric;
+    changed = true;
+    expiredNames.add(metric.name);
+    return { ...metric, value: null, state: METRIC_STATES.UNKNOWN,
+      source: null, updated_at: null, reason: 'stale_sample' };
+  });
+  return changed ? { ...ops, metrics: { ...ops.metrics, items } } : ops;
+}
+
+/** Only future deadlines; expired metrics have already been masked on paint. */
+export function nextOpsMetricExpiry(ops, nowMs = Date.now(), expiredNames = new Set()) {
+  if (!ops || ops.transport?.mode !== TRANSPORT_MODES.LIVE
+    || !Array.isArray(ops.metrics?.items)) return null;
+  const leases = ops.metrics.expires_at ?? {};
+  let soonest = Infinity;
+  for (const metric of ops.metrics.items) {
+    if (metric.value === null || metric.value === undefined || expiredNames.has(metric.name)) continue;
+    const expiry = Object.prototype.hasOwnProperty.call(leases, metric.name)
+      ? parseOpsExpiry(leases[metric.name]) : null;
+    if (expiry !== null && expiry > nowMs && expiry < soonest) soonest = expiry;
+  }
+  return Number.isFinite(soonest) ? soonest : null;
+}
+
 const METRIC_FIELDS = Object.freeze([
   'name', 'label', 'unit', 'value', 'state', 'source', 'reason', 'updated_at', 'kind',
 ]);
@@ -602,6 +648,22 @@ function checkMetrics(metrics, errors) {
     return;
   }
   metrics.items.forEach((metric, index) => checkMetric(metric, index, errors));
+  // Public contract addendum: optional map of metric name -> authoritative
+  // expiry instant. Missing map is accepted for DEMO/legacy shape, but the
+  // *renderer* withholds any unleased numeric LIVE metric.
+  if (metrics.expires_at !== undefined) {
+    if (!isPlainObject(metrics.expires_at)) {
+      errors.push('metrics.expires_at must be a name-to-ISO-time object');
+    } else {
+      const names = new Set(metrics.items.filter(isPlainObject).map((m) => m.name));
+      for (const [name, stamp] of Object.entries(metrics.expires_at)) {
+        if (!names.has(name)) errors.push('metrics.expires_at has an unknown metric');
+        if (parseOpsExpiry(stamp) === null) {
+          errors.push('metrics.expires_at has an invalid timezone-aware timestamp');
+        }
+      }
+    }
+  }
   for (const field of ['my_source', 'global_source', 'window']) {
     const value = metrics[field];
     if (value !== undefined && value !== null && !isNonEmptyString(value)) {

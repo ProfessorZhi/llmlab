@@ -26,6 +26,9 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+
+from ..observability import dto as observability_dto
 from typing import Callable, Iterable, Protocol
 
 from ..registry import dto as registry_dto
@@ -346,6 +349,39 @@ def _key_record(binding) -> dict:
 # --------------------------------------------------------------------------
 
 
+def _ops_metric_expiries(cards: list[dict]) -> dict[str, str]:
+    """The browser's per-metric lease, derived from the *source catalogue* TTL.
+
+    It is not a second, arbitrary freshness threshold: only a known catalogue
+    metric with a trusted, timezone-aware observation and finite per-metric TTL
+    receives a deadline. Missing proof means the browser cannot show a numeric
+    LIVE card indefinitely. Synthetic/detached cards normally have no deadline.
+    """
+    expiries: dict[str, str] = {}
+    for card in cards:
+        if card.get("state") != "available" or card.get("value") is None:
+            continue
+        name = card.get("name")
+        if not isinstance(name, str):
+            continue
+        spec = observability_dto.CATALOGUE.get(name)
+        ttl = spec.stale_after_seconds if spec is not None else None
+        if not isinstance(ttl, (float, int)) or isinstance(ttl, bool) or ttl <= 0:
+            continue
+        stamp = card.get("updated_at")
+        if not isinstance(stamp, str):
+            continue
+        try:
+            dt = datetime.fromisoformat(stamp[:-1] + "+00:00" if stamp.endswith("Z") else stamp)
+        except ValueError:
+            continue
+        if dt.tzinfo is None or dt.utcoffset() is None:
+            continue
+        deadline = (dt + timedelta(seconds=ttl)).astimezone(timezone.utc)
+        expiries[name] = deadline.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return expiries
+
+
 def build_ops(
     *,
     principal,
@@ -490,6 +526,11 @@ def build_ops(
         config.gateway_attached and config.gateway_adapter != GATEWAY_ADAPTER_MOCK
     )
 
+    # Read once. The deadline map contains *only* visible metric names and
+    # source-catalogue timestamps; no private owner/UID information is added.
+    metric_cards = observability.metrics(identity=principal, is_admin=is_admin)
+    metric_expiries = _ops_metric_expiries(metric_cards)
+
     return {
         "schema_version": OPS_SCHEMA,
         "synthetic": config.synthetic,
@@ -535,10 +576,11 @@ def build_ops(
             }
         ),
         "metrics": {
-            "items": observability.metrics(identity=principal, is_admin=is_admin),
+            "items": metric_cards,
             "my_source": None,
             "global_source": None,
             "window": config.window,
+            **({"expires_at": metric_expiries} if metric_expiries else {}),
         },
         "trends": observability.trends(
             identity=principal, is_admin=is_admin, window=config.window
