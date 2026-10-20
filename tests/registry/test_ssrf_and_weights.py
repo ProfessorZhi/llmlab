@@ -322,12 +322,12 @@ class RegistryNeverTouchesTheFilesystemTest(unittest.TestCase):
                 principal="alice",
                 body={
                     "name": "definitely-not-here",
-                    "weight_path": "/home/definitely/does/not/exist/model.bin",
+                    "weight_path": "/home/alice/definitely/does/not/exist/model.bin",
                 },
             )
             self.assertEqual(status, 200, payload)
             self.assertEqual(
-                payload["data"]["weight_path"], "/home/definitely/does/not/exist/model.bin"
+                payload["data"]["weight_path"], "/home/alice/definitely/does/not/exist/model.bin"
             )
             self.assertIsNone(payload["data"]["weight_present"])
 

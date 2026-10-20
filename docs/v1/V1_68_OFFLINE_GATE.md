@@ -147,7 +147,7 @@ Wave-5 的正向测试把「缝闭合之后应当成立什么」写成了可执�
 
 ## 5. 复现
 
-Tokyo（`device:tokyo-shared-dev-01`），CPU-only，无 GPU、无出站网络、不安装任何东西：
+CPU-only Linux 开发主机，无 GPU、无出站网络、不安装任何东西：
 
 ```text
 # 当前：公开集成候选 5ea33c9（wave14）
