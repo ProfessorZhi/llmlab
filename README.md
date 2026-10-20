@@ -7,6 +7,8 @@
 > **架构总入口：[`docs/architecture.md`](docs/architecture.md)** — 完整的产品需求、九页信息架构、组件/信任边界、数据模型、API、发布阶段和验收标准。  
 > **状态（2026-10-16）：** V6 有可访问的静态预览与主机只读遥测；[Phase B #60](https://github.com/ProfessorZhi/llm-lab-portal/pull/60) 已提供七 Lane **CPU-only 集成候选**，但它不等于正式部署。真实 PAM、Gateway、Chrome、CI 与业务端到端验收仍为 NO-GO。不得把演示状态或已存在的代码模块写成“生产已上线”。
 
+> **开发基线状态（2026-10-20）：DEV_READY，生产仍为 NO-GO。** GitHub 受保护的 `llmlab/main` 与 Dell 独立项目源码一致，已完成本机 CPU-only Python / Node、前端派生和生成一致性检查；`main` 的 GitHub Actions 也已成功。该验收不等于真实 PAM、Gateway/Strata、HTTPS、三用户端到端、GPU 或生产部署通过；仍应按照 [V1 验收矩阵](docs/v1/V1_ACCEPTANCE.md) 取得真实主机证据。上方 2026-10-16 的 Phase B 状态属于当时的历史记录，不是当前生产判定。
+
 **源码权威与旧仓归档：** [`ProfessorZhi/llmlab`](https://github.com/ProfessorZhi/llmlab) 是唯一正式源码仓。旧 [`ProfessorZhi/llm-lab`](https://github.com/ProfessorZhi/llm-lab) 与 [`ProfessorZhi/llm-lab-portal`](https://github.com/ProfessorZhi/llm-lab-portal) 均为 **Private + Archived** 历史仓；旧 Issue/PR 链接仅作证据追溯，不再作为新开发或推送目标。正式开发/运行位置最终收敛至 **Dell RTX A6000**；其他设备不保留长期 `llmlab` 开发副本（在完成独有文件保全和切换验收后逐目录退役）。这仅是目标拓扑，不代表 Dell CloudCLI 项目、生产服务或多用户联调已通过验收。现有 Strata/Qwen、Gateway、旧 LAN Portal、Caddy、GPU 作业及其他用户目录继续独立运行，不得因仓库清理而覆盖。
 
 ## 开发入门
@@ -38,7 +40,7 @@ CUDA_VISIBLE_DEVICES="" nice -n 10 python3 -m unittest discover -s tests -t .
 CUDA_VISIBLE_DEVICES="" nice -n 10 npm test
 ```
 
-实测：Python `Ran 3977 tests in 225.661s`，`OK (skipped=8)`；Node `tests 558`、`pass 557`、`skipped 1`、`fail 0`（约 0.7s）。
+实测：Python `Ran 3977 tests in 225.661s`，`OK (skipped=8)`；Node `tests 558`、`pass 557`、`skipped 1`、`fail 0`（约 0.7s）。 此段为此前开发环境的历史记录；当前基线以 2026-10-20 的主分支验收与 CI 回执为准。
 
 ### 本地启动
 
