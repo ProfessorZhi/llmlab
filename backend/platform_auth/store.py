@@ -116,6 +116,13 @@ class Store:
         _open_database(self.path)
         self._conn = sqlite3.connect(self.path, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
+        # Journal mode is pinned rather than inherited. WAL would create
+        # ``-wal``/``-shm`` sidecar files whose permissions we would then have to
+        # police on every opening; the rollback journal keeps the 0600 guarantee
+        # in one place, at the cost of concurrency this local CLI does not need.
+        mode = self._conn.execute("PRAGMA journal_mode = DELETE").fetchone()[0]
+        if str(mode).lower() != "delete":
+            raise StorageSecurityError(f"unexpected journal mode: {mode!r}")
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(SCHEMA)
 

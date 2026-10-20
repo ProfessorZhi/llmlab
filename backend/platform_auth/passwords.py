@@ -32,6 +32,13 @@ KEY_BYTES = 32
 #: 64 MiB ceiling keeps one verification from exhausting a shared workstation.
 MAX_MEMORY_BYTES = 64 * 1024 * 1024
 
+#: Bounds applied when *parsing a stored hash*. Parameters travel with the hash,
+#: so a corrupt or hostile row could otherwise ask for an unbounded scrypt and
+#: turn one login into a memory/CPU denial of service.
+MAX_SCRYPT_N = 2 ** 20
+MAX_SCRYPT_R = 32
+MAX_SCRYPT_P = 16
+
 MIN_PASSWORD_LENGTH = 10
 MAX_PASSWORD_LENGTH = 1024
 SCHEME = "scrypt"
@@ -96,7 +103,11 @@ def parse_hash(stored: object) -> tuple[int, int, int, bytes, bytes]:
         salt, digest = _unb64(parts[4]), _unb64(parts[5])
     except (ValueError, TypeError) as exc:  # pragma: no cover - corrupt row
         raise ValidationError("malformed password hash") from exc
-    if n < 2 or r < 1 or p < 1:
+    if (
+        n < 2 or n > MAX_SCRYPT_N or (n & (n - 1)) != 0
+        or r < 1 or r > MAX_SCRYPT_R
+        or p < 1 or p > MAX_SCRYPT_P
+    ):
         raise ValidationError("unsafe password hash parameters")
     return n, r, p, salt, digest
 
@@ -126,6 +137,9 @@ def burn_verification(password: object) -> None:
 __all__ = [
     "DUMMY_HASH",
     "MAX_MEMORY_BYTES",
+    "MAX_SCRYPT_N",
+    "MAX_SCRYPT_P",
+    "MAX_SCRYPT_R",
     "MAX_PASSWORD_LENGTH",
     "MIN_PASSWORD_LENGTH",
     "SCHEME",

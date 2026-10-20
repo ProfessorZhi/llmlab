@@ -6,7 +6,9 @@ Every check is either a unit assertion or a pure WSGI-environ call.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import json
 import os
 import pathlib
@@ -146,6 +148,19 @@ class PasswordTest(BaseTest):
         self.assertEqual(len(digest), 32)
         self.assertTrue(passwords.verify_password(first, "identical-secret-value"))
         self.assertFalse(passwords.verify_password(first, "identical-secret-valuE"))
+
+    def test_stored_hash_parameters_are_bounded(self):
+        # Parameters travel with the hash, so a corrupt row must not be able to
+        # demand an unbounded scrypt on the next login.
+        good = passwords.hash_password("another-long-secret")
+        parts = good.split("$")
+        for bad_n, bad_r, bad_p in ((2 ** 24, 8, 1), (2 ** 14, 4096, 1), (2 ** 14, 8, 4096)):
+            hostile = "$".join([parts[0], str(bad_n), str(bad_r), str(bad_p),
+                                parts[4], parts[5]])
+            with self.subTest(n=bad_n, r=bad_r, p=bad_p):
+                with self.assertRaises(ValidationError):
+                    passwords.parse_hash(hostile)
+                self.assertFalse(passwords.verify_password(hostile, "another-long-secret"))
 
     def test_the_plaintext_is_never_stored(self):
         row = self.service.store.user_by_login("alice")
@@ -383,6 +398,24 @@ class StorageTest(unittest.TestCase):
             with self.assertRaises(StorageSecurityError):
                 Store(state)
 
+    def test_the_journal_mode_is_rollback_so_no_wal_sidecar_appears(self):
+        # WAL would add -wal/-shm files outside the single 0600 guarantee.
+        with tempfile.TemporaryDirectory() as root:
+            state = os.path.join(root, "state")
+            os.makedirs(state, mode=0o700)
+            store = Store(state)
+            mode = store._conn.execute("PRAGMA journal_mode").fetchone()[0]
+            self.assertEqual(str(mode).lower(), "delete")
+            store.insert_session({"token_digest": "d", "platform_user_id": "pu_x",
+                                  "created_at": 1.0, "expires_at": 2.0,
+                                  "idle_expires_at": 2.0, "csrf_digest": "c",
+                                  "user_epoch": 1.0})
+            store.close()
+            names = sorted(os.listdir(state))
+            self.assertIn("platform_auth.sqlite3", names)
+            self.assertNotIn("platform_auth.sqlite3-wal", names)
+            self.assertNotIn("platform_auth.sqlite3-shm", names)
+
     def test_a_group_readable_database_is_refused(self):
         with tempfile.TemporaryDirectory() as root:
             state = os.path.join(root, "state")
@@ -392,6 +425,29 @@ class StorageTest(unittest.TestCase):
             os.chmod(db, 0o644)
             with self.assertRaises(StorageSecurityError):
                 Store(state)
+
+
+class ErrorTextTest(unittest.TestCase):
+    def test_exception_text_is_the_code_not_the_detail(self):
+        # A traceback prints str(exc); it must never be a path for a secret.
+        secret = "SYNTHETIC_CANARY_DO_NOT_LOG_in_detail"
+        exc = ValidationError(secret)
+        self.assertEqual(str(exc), "invalid_request")
+        self.assertNotIn(secret, repr(exc))
+        self.assertNotIn(secret, str(exc))
+
+    def test_invalid_credentials_never_carries_the_attempted_login(self):
+        with tempfile.TemporaryDirectory() as root:
+            state = os.path.join(root, "state")
+            os.makedirs(state, mode=0o700)
+            service = svc.PlatformAuthService(store=Store(state), clock=Clock())
+            try:
+                service.login("someone-else", "wrong-password-value")
+            except InvalidCredentials as exc:
+                self.assertEqual(str(exc), "invalid_credentials")
+                self.assertNotIn("someone-else", str(exc))
+            finally:
+                service.store.close()
 
 
 class AuditTest(BaseTest):
@@ -410,18 +466,70 @@ class AuditTest(BaseTest):
         self.assertIn("platform_login_failed", rendered)
 
 
-class CliSafetyTest(unittest.TestCase):
-    def test_the_cli_has_no_password_option(self):
+CANARY = "SYNTHETIC_CANARY_DO_NOT_LOG_9f3c1e7a"
+
+
+class CliSecretEchoTest(unittest.TestCase):
+    """A rejected secret must not be repeated back to the operator.
+
+    The first implementation relied on argparse alone. argparse formats an
+    unknown option as ``unrecognized arguments: --password <value>``, so the
+    secret landed in stderr even though the option was rejected. These tests
+    drive the real ``main`` and inspect both streams.
+    """
+
+    def run_cli(self, argv):
         from backend.platform_auth import cli
 
-        parser = cli.build_parser()
-        with self.assertRaises(SystemExit):
-            parser.parse_args(["--state-dir", "/tmp/x", "init-admin",
-                               "--login", "a", "--password", "secret"])
-        with self.assertRaises(SystemExit):
-            parser.parse_args(["--state-dir", "/tmp/x", "set-password",
-                               "--user-id", "pu_x", "--password", "secret"])
+        out, err = io.StringIO(), io.StringIO()
+        code = None
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                code = cli.main(argv)
+            except SystemExit as exc:  # argparse paths that are not pre-screened
+                code = exc.code if isinstance(exc.code, int) else 1
+        return code, out.getvalue(), err.getvalue()
 
+    def assert_canary_absent(self, text, where):
+        self.assertNotIn(CANARY, text, f"secret echoed to {where}")
+
+    def test_password_flag_is_refused_without_echoing_the_value(self):
+        for argv in (
+            ["--state-dir", "/tmp/x", "init-admin", "--login", "a", "--password", CANARY],
+            ["--state-dir", "/tmp/x", "init-admin", "--login", "a", f"--password={CANARY}"],
+            ["--state-dir", "/tmp/x", "set-password", "--user-id", "pu_x", "--password", CANARY],
+            ["--state-dir", "/tmp/x", "create-user", "--login", "a", "--secret", CANARY],
+            ["--state-dir", "/tmp/x", "create-user", "--login", "a", f"--token={CANARY}"],
+            ["--state-dir", "/tmp/x", "create-user", "--login", "a", "-p", CANARY],
+        ):
+            with self.subTest(argv=argv[1:]):
+                code, out, err = self.run_cli(argv)
+                self.assertNotEqual(code, 0)
+                self.assert_canary_absent(out, "stdout")
+                self.assert_canary_absent(err, "stderr")
+                self.assertIn("secrets are not accepted as arguments", err)
+
+    def test_an_unrecognised_argument_value_is_not_echoed(self):
+        # Not a password-shaped flag: argparse still must not repeat the value.
+        code, out, err = self.run_cli(
+            ["--state-dir", "/tmp/x", "list-users", "--bogus", CANARY]
+        )
+        self.assertNotEqual(code, 0)
+        self.assert_canary_absent(out, "stdout")
+        self.assert_canary_absent(err, "stderr")
+
+    def test_a_rejected_secret_creates_no_state(self):
+        with tempfile.TemporaryDirectory() as root:
+            state = os.path.join(root, "state")
+            os.makedirs(state, mode=0o700)
+            code, _, _ = self.run_cli(
+                ["--state-dir", state, "init-admin", "--login", "a", "--password", CANARY]
+            )
+            self.assertNotEqual(code, 0)
+            self.assertEqual(os.listdir(state), [])
+
+
+class CliSafetyTest(unittest.TestCase):
     def test_the_cli_never_prints_a_password(self):
         from backend.platform_auth import cli
 

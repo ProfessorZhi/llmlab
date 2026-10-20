@@ -20,6 +20,59 @@ from .errors import PlatformAuthError
 from .service import SCOPE_ADMIN, SCOPE_READ, PlatformAuthService
 from .store import Store
 
+#: Option spellings that are refused **before argparse sees them**. Accepting a
+#: secret as an argument would put it in shell history, in ``ps``, and in the
+#: process environment of every observer; argparse would then also echo it back
+#: in an "unrecognized arguments" error. There is no supported way to pass one.
+SECRET_OPTION_NAMES = frozenset({
+    "password", "passwd", "pass", "pwd", "secret", "token", "api-key", "apikey", "p",
+})
+
+_SECRET_REFUSAL = (
+    "error: platform secrets are not accepted as arguments; "
+    "enter the password interactively when prompted."
+)
+
+
+class _SecretArgumentRefused(Exception):
+    """Raised before parsing. Carries no value, on purpose."""
+
+
+def _looks_like_secret_option(token: object) -> bool:
+    if not isinstance(token, str) or not token.startswith("-"):
+        return False
+    name = token.split("=", 1)[0].lstrip("-").lower().replace("_", "-")
+    if not name:
+        return False
+    return (
+        name in SECRET_OPTION_NAMES
+        or name.startswith("password")
+        or name.startswith("secret")
+        or name.startswith("token")
+    )
+
+
+class _SecretSafeParser(argparse.ArgumentParser):
+    """argparse, minus the habit of echoing unrecognised values.
+
+    ``parse_args`` formats unknown arguments into its error message, which is
+    how a password supplied as ``--password <value>`` used to reach stderr.
+    Values are never repeated here.
+    """
+
+    def error(self, message: str) -> None:  # type: ignore[override]
+        if "unrecognized arguments" in message:
+            message = "unrecognized arguments (values are not echoed)"
+        super().error(message)
+
+
+def parse_args(argv: list[str] | None = None):
+    tokens = list(sys.argv[1:] if argv is None else argv)
+    if any(_looks_like_secret_option(token) for token in tokens):
+        print(_SECRET_REFUSAL, file=sys.stderr)
+        raise _SecretArgumentRefused()
+    return build_parser().parse_args(tokens)
+
 
 def _read_password(prompt: str = "platform password: ") -> str:
     first = getpass.getpass(prompt)
@@ -90,7 +143,7 @@ def cmd_list(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _SecretSafeParser(
         prog="python3 -m backend.platform_auth.cli",
         description=(
             "Manage independent platform accounts. Secrets are read from the "
@@ -130,7 +183,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    try:
+        args = parse_args(argv)
+    except _SecretArgumentRefused:
+        return 2
     try:
         return int(args.func(args))
     except PlatformAuthError as exc:

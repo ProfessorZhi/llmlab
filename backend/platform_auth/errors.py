@@ -15,7 +15,10 @@ class PlatformAuthError(Exception):
     status = 400
 
     def __init__(self, detail: str | None = None) -> None:
-        super().__init__(detail or self.code)
+        # ``str(exc)`` is the code only. ``detail`` is kept for the caller's own
+        # reasoning, but a traceback (which prints ``str(exc)``) must never be a
+        # path for a secret or a raw account fact to reach a log.
+        super().__init__(self.code)
         self.detail = detail
 
     def to_dict(self) -> dict:
