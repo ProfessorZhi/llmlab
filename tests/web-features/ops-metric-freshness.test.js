@@ -110,3 +110,32 @@ test('an idle live controller masks a displayed value when its source lease expi
   assert.ok(seen.includes(null), 'an idle tab must repaint without a new fetch');
   controller.invalidate();
 });
+
+test('an idle metric expires even when the wall clock rolls back before the deadline', async () => {
+  const realNow = Date.now;
+  const initial = realNow();
+  const ops = createMockHttp({persona: 'sharer'}).ops();
+  ops.transport = { mode: 'live', synthetic: false, gateway_attached: true, label: 'LIVE' };
+  ops.synthetic = false;
+  ops.metrics.items = [metric('principal.requests', 42)];
+  ops.metrics.expires_at = {'principal.requests': expiration(initial + 100)};
+  const seen = [];
+  const controller = createOps({
+    doc: emptyDoc(),
+    source: { mode: 'live', load: async () => ({state: 'ready', ops}) },
+    onStateChange: ({ops: displayed}) => seen.push(displayed?.metrics?.items?.[0]?.value),
+  });
+  try {
+    await controller.load();
+    assert.equal(controller.ops.metrics.items[0].value, 42);
+    // Changing the wall clock must not postpone the already-scheduled
+    // monotonic timeout. A stale number must never become LIVE again.
+    Date.now = () => initial - 60 * 60 * 1000;
+    await new Promise((resolve) => setTimeout(resolve, 210));
+    assert.equal(controller.ops.metrics.items[0].value, null);
+    assert.ok(seen.includes(null), 'the idle UI must repaint a stale value');
+  } finally {
+    Date.now = realNow;
+    controller.invalidate();
+  }
+});
