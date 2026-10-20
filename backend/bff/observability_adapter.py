@@ -395,28 +395,43 @@ def _metric_card(metric_id: str, reading: dict) -> dict:
     source = reading.get("source")
     reason = reading.get("reason")
 
-    verified = (
-        raw_value is not None
-        and isinstance(source, str)
-        and source in VERIFIED_METRIC_SOURCES
+    # A trusted producer already supplies display_quality and the catalogue-
+    # specific freshness verdict. A verified source alone does NOT make an
+    # expired or clock-skewed number safe for a LIVE-looking metric card.
+    freshness = reading.get("freshness")
+    display_quality = reading.get("display_quality")
+    verified_source = isinstance(source, str) and source in VERIFIED_METRIC_SOURCES
+    fresh = (
+        display_quality in (obs_dto.QUALITY_MEASURED, obs_dto.QUALITY_PARTIAL)
+        and isinstance(freshness, dict)
+        and freshness.get("stale") is False
+        and freshness.get("clock_skew") is False
     )
+    verified = raw_value is not None and verified_source and fresh
     if verified:
         value = raw_value
         state = "available"
         updated_at = reading.get("observed_at")
         card_reason = None
     else:
+        # Keep the existing portal-ops/1 schema: unknown + null + a safe reason.
+        # A frontend that cannot represent STALE must never show the stale value.
         value = None
         state = "unknown"
         source = None
         updated_at = None
-        # 读数本身 unknown 就报它自己的原因；有值但来源不在白名单，就说明是
-        # 来源不可信——这两种「没有数字」是不同的，不能混成一句话。
-        card_reason = (
-            reason
-            if raw_value is None
-            else REASON_NO_VERIFIED_SOURCE
-        ) or REASON_NO_VERIFIED_SOURCE
+        if raw_value is None:
+            card_reason = reason or REASON_NO_VERIFIED_SOURCE
+        elif not verified_source:
+            card_reason = REASON_NO_VERIFIED_SOURCE
+        elif display_quality == obs_dto.DISPLAY_STALE or (
+            isinstance(freshness, dict) and freshness.get("stale") is True
+        ):
+            card_reason = "stale_sample"
+        else:
+            # Missing/inconsistent quality, missing freshness, or clock skew:
+            # no positive freshness evidence is not a LIVE verdict.
+            card_reason = "unverified_freshness"
 
     unit = reading.get("unit") or (spec.unit if spec is not None else None)
     return {
