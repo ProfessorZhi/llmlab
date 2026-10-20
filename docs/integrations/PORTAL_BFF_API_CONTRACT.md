@@ -64,6 +64,28 @@ Still not mounted: `/api/portal/metrics/history` (no bounded proven sample sourc
 - `/api/portal/events`: **two** app-generated structured ledgers (BFF elevation audit; Registry `audit_log`), read-only, operator-scoped. Never a raw logfile or journal proxy.
 - Grafana/Prometheus native UI: **a guarded link/proxy** only after independently authorized per-user access; not a stand-in for typed APIs.
 
+### Ops metric display leases (M1 additive contract)
+
+The current `portal-ops/1` `metrics` block may contain an optional `expires_at` map:
+`{ "<visible metric name>": "<timezone-aware ISO-8601 instant>" }`.
+The BFF derives each deadline as the original observation time plus **that
+metric's own authoritative catalogue `stale_after_seconds`**; it does **not**
+reuse Host Summary's separate 90-second threshold or invent a deadline.
+Only visible, trustworthy metric names may appear in this map.
+
+The browser accepts older responses and QA fixtures without this optional field,
+but numeric **LIVE** cards without a valid unexpired lease are displayed as
+`unknown` with no value, source or timestamp. A timer expires each already
+rendered card individually while the tab is idle; it does not refresh the
+user's session or make new requests. Once expired, a clock rollback cannot
+make the old snapshot LIVE again. Synthetic QA mode remains explicitly
+labelled and is unaffected by this production-only restriction.
+
+This is a backwards-compatible shape extension, not proof of live Dell
+producer wiring: older clients might ignore the map, so a protected rollout
+requires simultaneous client/BFF review and its own V1 host acceptance.
+Missing freshness evidence is intentionally fail-closed; `null` never becomes 0.
+
 ## 2. Response semantics: producer schema first, normalized UX second
 
 **Do not silently rewrite shipped DTOs.** The contracts are versioned independently: `portal-ops/1`, `atlas-calls/1`, `atlas-usage/1`, `atlas-aggregate/1`, `portal-modules/1` and Evaluation's own envelope. The existing `/api/infra/summary` producer emits `version=1`, `source="prometheus-readonly"`, `synthetic=false`, `readonly=true`, `observed_at`, per-metric `state/value/unit/sample_at/age_s/reason`.
