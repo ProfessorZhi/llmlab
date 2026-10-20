@@ -417,11 +417,6 @@ def build_ops(
     is_admin = bff_scopes.PORTAL_ADMIN_READ in principal.portal_scopes
 
     policy = service.policy(requester)
-    # Read once. The deadline map contains *only* visible metric names and
-    # source-catalogue timestamps; no private owner/UID information is added.
-    metric_cards = observability.metrics(identity=principal, is_admin=is_admin)
-    metric_expiries = _ops_metric_expiries(metric_cards)
-
     store = service.store
 
     endpoints = policy.visible_endpoints()
@@ -530,6 +525,11 @@ def build_ops(
     gateway_authorized = (
         config.gateway_attached and config.gateway_adapter != GATEWAY_ADAPTER_MOCK
     )
+
+    # Read once. The deadline map contains *only* visible metric names and
+    # source-catalogue timestamps; no private owner/UID information is added.
+    metric_cards = observability.metrics(identity=principal, is_admin=is_admin)
+    metric_expiries = _ops_metric_expiries(metric_cards)
 
     return {
         "schema_version": OPS_SCHEMA,
