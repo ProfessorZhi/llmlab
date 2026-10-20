@@ -191,7 +191,7 @@ class StagingSameOriginTest(unittest.TestCase):
 
 class StagingStartupGuardTest(unittest.TestCase):
     def test_non_loopback_bind_is_refused(self):
-        for host in ("0.0.0.0", "192.168.32.179", "::", "example.com"):
+        for host in ("0.0.0.0", "203.0.113.10", "::", "example.com"):
             with self.subTest(host=host):
                 with self.assertRaises(staging.StagingConfigError):
                     staging.validate_bind_host(host)
