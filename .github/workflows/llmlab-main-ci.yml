@@ -23,7 +23,9 @@ env:
 jobs:
   python:
     name: Python unit regression
-    runs-on: ubuntu-latest
+    # A Python release test invokes the real Chrome/CDP smoke via Node.
+    # Match the known-good Browser job runner instead of silently skipping it.
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - name: Checkout
@@ -34,6 +36,21 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Node 24 for the Python-invoked Chrome/CDP smoke
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Require preinstalled Chrome or Chromium for packaged smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHROME_PATH="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          if [[ -z "$CHROME_PATH" ]]; then
+            echo "::error::Packaged browser smoke cannot run; Chrome/Chromium unavailable."
+            exit 1
+          fi
+          "$CHROME_PATH" --version
+          echo "CHROME_PATH=$CHROME_PATH" >> "$GITHUB_ENV"
       - name: Full stdlib unit suite
         run: python -m unittest discover -s tests -t .
 
