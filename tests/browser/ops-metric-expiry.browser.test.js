@@ -58,7 +58,7 @@ test('an idle real Chrome tab hides a verified Ops value at its source deadline'
     try {
       await page.goto(server.origin + '/web/index.html');
       assert.ok(await page.waitFor('window.__OPS__?.ops?.metrics?.items?.[0]?.value === 987654'));
-      const early = await page.evaluate("document.querySelector('[data-ops-body=\"observability\"]')?.textContent ?? ''");
+      const early = await page.evaluate('document.querySelector("[data-ops-body=observability]")?.textContent ?? ""');
       assert.match(early, /LIVE/, 'a fresh verified response first paints as LIVE');
       // The exposed getter consults the clock immediately; the DOM is updated
       // by an independent expiry timer. Wait for that real repaint, not merely
@@ -67,7 +67,7 @@ test('an idle real Chrome tab hides a verified Ops value at its source deadline'
         `(document.querySelector('[data-ops-body="observability"]')?.textContent ?? '').includes('STALE')`,
         { timeoutMs: 8000 }), 'the idle browser must repaint STALE on the lease deadline');
       assert.equal(await page.evaluate('window.__OPS__?.ops?.metrics?.items?.[0]?.value'), null);
-      const late = await page.evaluate("document.querySelector('[data-ops-body=\\"observability\\"]')?.textContent ?? ''");
+      const late = await page.evaluate('document.querySelector("[data-ops-body=observability]")?.textContent ?? ""');
       assert.match(late, /STALE/, 'the expired view must visibly report staleness');
       assert.match(late, /已过期/, 'reason must explain disappearance of the number');
       assert.deepEqual(page.externalRequests(), [], 'no off-origin requests are permitted');
