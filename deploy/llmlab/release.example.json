@@ -1,0 +1,24 @@
+{
+  "schema_version": "llmlab-release/1",
+  "package_name": "llmlab-portal",
+  "package_version": "1.0.0",
+  "git_sha": "0000000000000000000000000000000000000000",
+  "bind_host": "127.0.0.1",
+  "port": 18080,
+  "state_dir": "/var/lib/llmlab/platform-auth",
+  "static_root": "/var/lib/llmlab/static/web",
+  "trusted_proxies": ["127.0.0.1"],
+  "cookie_secure": true,
+  "cookie_http_only": true,
+  "cookie_same_site": "Lax",
+  "csrf_origin_allowlist": ["https://llmlab.example.ts.net"],
+  "static_cache_control": "no-store",
+  "data_sources": ["registry-store", "gateway-metadata"],
+  "gates": {
+    "platform_auth_verified": false,
+    "inference_upstream_verified": false,
+    "same_origin_verified": false,
+    "host_deployment_approved": false,
+    "rollback_drill_verified": false
+  }
+}

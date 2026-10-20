@@ -1,0 +1,48 @@
+# TEMPLATE ONLY — not installed by this repository, not enabled, not started.
+# A host-level operator installs this after the release gates in
+# docs/v1/PRODUCTION_RELEASE_PLAN.md are recorded and a deployment window is
+# approved. Replace every {{PLACEHOLDER}}; never commit a filled copy.
+#
+# User unit (install under ~/.config/systemd/user/) because the portal runs as
+# an ordinary account with no root and no PAM broker access.
+
+[Unit]
+Description=llmlab portal (loopback, non-root)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={{CHECKOUT}}
+# The entrypoint is intentionally a placeholder: this repository does not yet
+# contain a production server that mounts the platform-auth surface (that comes
+# with the auth integration change). Do not substitute the staging composition
+# or the dev server here — both expose Linux-shaped auth and are explicitly not
+# the platform sign-in path.
+ExecStart={{ENTRYPOINT}}
+Restart=on-failure
+RestartSec=5s
+# Environment is deliberately minimal: no secrets on the command line, no
+# environment file with credentials. Platform secrets live in the owner-private
+# state directory, never in the unit.
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+# Hardening: the process needs its checkout, its state directory and loopback.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths={{STATE_DIR}}
+ReadOnlyPaths={{CHECKOUT}}
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=default.target
