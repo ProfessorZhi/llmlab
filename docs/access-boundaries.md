@@ -4,27 +4,30 @@
 
 ## 1. 系统与文件系统边界
 
-### 允许（本仓库范围内）
-- `/home/alice/projects/llm-lab-portal` —— 本仓库的开发工作树，属主 `alice`，目录权限 `0750`。
-- 在 `alice` 账户下进行的**非生产**开发、构建、本地测试。
+### 允许（仅限已授权的非生产开发）
+
+- **唯一正式源码仓**：[`ProfessorZhi/llmlab`](https://github.com/ProfessorZhi/llmlab)；`main` 是受保护的集成基线。
+- **唯一长期开发设备**：Dell RTX A6000 上已注册的独立 `llmlab` 项目。项目工作目录由已获授权的 CloudCLI 项目绑定决定，不由文档中某个示例用户名决定。
+- **公开示意路径**：`~/projects/llmlab` 只表示受权开发者 HOME 下的仓库名称，不是实际主机绝对路径、权限或账号的证明。
+- **允许操作**：在此授权根内开展代码修改、隔离临时 worktree、CPU-only 测试及正常分支/PR 工作；未经额外批准不得从开发目录启动常驻生产服务。
+- Windows、东京等其他设备不承担长期 `llmlab` 开发或生产部署；历史资料必须先私有归档并验证恢复性，才能退役相应的精确工作目录。
 
 ### 禁止（本仓库一律不碰）
+
 | 路径 / 对象 | 说明 |
-|---|---|
-| `/srv/llm-lab/portal` | 未来正式部署点。**本仓库不创建、不预置**，仅在文档中约定 |
-| `/opt/strata` | 既有 Strata 服务，由其他归属方维护 |
-| `/home/bob` | 其他用户家目录 |
-| `/home/carol` | 其他用户家目录 |
+| --- | --- |
+| `/srv/llm-lab/**` | 既有受保护的生产服务、配置、数据与发布根；源码开发不赋予修改权 |
+| `/opt/strata` | 既有 Strata 服务，归原负责人维护 |
+| 其他 Linux 用户 HOME | 不访问、不修改、不删除其他用户文件；任何示例身份都不构成访问许可 |
 | 其他 Linux 用户 / 组 / sudoers | 不新增、不修改 |
 | SSH 配置（`sshd_config`、`authorized_keys`） | 不新增、不修改 |
-| Fleet 配置与绑定关系 | 不修改 |
+| Fleet / CloudCLI 配置及授权关系 | 不修改、不绕过会话审批 |
 | systemd 单元（system / user） | 不新增、不修改、不 enable |
-| Caddy 站点与证书 | 不新增、不修改 |
-| GPU 驱动 / 调度配置 | 不触碰 |
+| Caddy / HTTPS 站点与证书 | 不新增、不修改、不替换 |
+| Gateway / PAM / Strata 进程与配置 | 不启停、不重配、不私自部署 |
+| GPU 驱动、模型与调度 | 不更改、不因 CPU 验收调用生产推理 |
 
-**开发工作树的创建方式有约束**：只创建 `/home/alice/projects/llm-lab-portal`
-这一个目录（及其缺失的父目录 `~/projects`），**不改动 `/home/alice` 下任何既有目录**
-（如 `vision-cutover-staging-*`、`下载`、`公共` 等）。
+**工作树纪律：** 从受保护 `main` 的精确 SHA 创建独立功能分支；临时 worktree 必须相互隔离，不覆盖正式检出，也不得干扰活跃 Agent。分支与 PR 审查完成后，先保全独有内容再退役临时目录；不做父目录批量清扫。
 
 ## 2. 身份与凭据边界
 
@@ -72,14 +75,15 @@
 
 ## 5. 与既有仓库的边界
 
-- 本仓库与 `ProfessorZhi/llm-lab` 是**并列关系**：不整库搬运、不合并 legacy 分支、
-  不继承其提交历史。
-- **禁止**对既有 `ProfessorZhi/llm-lab` 的 `main` 分支或任何生产分支做写操作。
-- 不绕行任何关于代码原始字节跨境转运的安全拦截。若 GitHub 写入被安全策略拦截，
-  **立即停止并上报**，不换方式重试。
+- [`ProfessorZhi/llmlab`](https://github.com/ProfessorZhi/llmlab) 是唯一正式源码仓，不再与旧仓并列作为开发目标。
+- 旧 `ProfessorZhi/llm-lab` 与 `ProfessorZhi/llm-lab-portal` 均为 **Private + Archived** 的只读历史；旧 Issue/PR 链接仅用于证据与恢复追溯，不在旧仓继续开发、推送或合并堆叠分支。
+- 禁止对已归档仓库的 `main` 或历史生产分支写入，也不继承无关 Git 历史来覆盖当前 `main`。
+- 不绕行代码或数据转运的安全拦截。GitHub 写入若被安全策略阻断，**立即停止并报告**，不换凭据、设备或渠道规避审批。
 
 ## 6. 部署与进程边界
 
 - 本仓库不启动任何常驻服务或后台进程。
 - 本仓库不创建 systemd 单元、不注册定时任务。
 - 「让服务跑起来」属于部署流程，需要独立授权，不属于本仓库的初始化范围。
+
+**当前状态（2026-10-20）：DEV_READY ≠ PRODUCTION_GO。** Dell 开发工作树与 CPU-only 测试已验收，但三位独立 Linux 主体的 PAM 登录、真实 Gateway/Strata 读写、受保护 HTTPS 入口、跨 UID 否定测试、正式部署与回滚均须独立批准和真实证据；不能凭本地 Git、端口监听、合成数据或 CI 绿灯声称生产上线。
