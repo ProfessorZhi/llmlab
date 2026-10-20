@@ -19,6 +19,20 @@ prompt/response、主机身份材料、凭据、原始 benchmark 样本都不进
 历史 secret scan 是独立的控制面，**本轮没有执行**，也不在本 PR 的交付范围内。任何
 “已完成历史扫描”的表述都不成立。
 
+## 默认选择：只读 `git ls-files`；失败即 exit 2
+
+默认 `scan_root(root)` 只运行 `git ls-files -z` 来选择文件。以下任一情况都抛
+`ScanReadError`，CLI 以退出码 `2` 失败：
+
+- `git` 不可用；
+- root 不是 Git 仓库；
+- `git ls-files` 非零退出；
+- 命令超时。
+
+**绝不 fallback 到 `os.walk`/`rglob`**：失败时不会遍历目录，因此 ignored、untracked
+文件和 `.git` 都不会被读取。测试 fixture 必须显式传 `paths=`，或在临时目录初始化 Git
+repo 并 `git add` 被测文件；生产/默认模式不应自行合成文件列表。
+
 ## 路径安全：unsafe 即失败，不静默跳过
 
 `scan_root` 对每个选中路径先验证，再读取：
@@ -58,8 +72,8 @@ python3 tools/security/public_tree_scan.py --root . --json
 python3 -m unittest tests.security.test_public_tree_safety -v
 ```
 
-退出码：`0` 干净，`1` 有内容命中，`2` 路径/读取失败或参数错误。路径失败是 fail-closed
-的扫描失败，不是“跳过该文件后 clean”。测试套件会随全量 Python 测试一起运行。
+退出码：`0` 干净，`1` 有内容命中，`2` Git 选择失败、路径/读取失败或参数错误。任何
+fail-closed 扫描失败都不是“跳过该文件后 clean”。测试套件会随全量 Python 测试一起运行。
 
 ## 边界
 

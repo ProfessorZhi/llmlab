@@ -12,6 +12,16 @@ walk Git history and it is not gitleaks or trufflehog: a clean result says the
 checked-out tree is clean, not that every historical commit or deleted blob is.
 A history secret scan is a separate control and is **not performed here**.
 
+Tracked selection
+-----------------
+Default ``scan_root(root)`` selects files with ``git ls-files -z`` only.  If Git
+is unavailable, the root is not a repository, the command times out, or it
+returns non-zero, the scan fails closed with :class:`ScanReadError` and the CLI
+exits 2.  It never falls back to walking the directory, so ignored/untracked
+files and ``.git`` are not read.  Explicit ``paths=`` exists for isolated test
+fixtures or an already-materialized file list; production callers should not
+synthesize a selection.
+
 Path safety
 -----------
 Every selected path is rejected if it is absolute, contains ``.``/``..``/empty
@@ -31,9 +41,9 @@ evade any text scan.  It exists so an accidental copy of the exact identifiers
 and shapes the migration already reviewed fails locally and in the test suite,
 instead of waiting for a reader to notice them in a public diff.
 
-The scan is deterministic and offline.  It reads tracked text files only; it
-never opens a socket, reads a live credential, or follows a link out of the
-tree.  Matched text is never included in a finding.
+The scan is deterministic and offline.  In default mode it reads Git-tracked
+text files only; it never opens a socket, reads a live credential, or follows a
+link out of the tree.  Matched text is never included in a finding.
 
 Usage::
 
@@ -284,24 +294,25 @@ def _read_text(path: Path, relpath: str) -> str:
 
 
 def _tracked_files(root: Path) -> list[str]:
+    """Return the Git-tracked paths, or fail closed.
+
+    There is deliberately **no filesystem fallback**: if ``git ls-files`` is
+    unavailable or fails, walking the directory would read ignored/untracked
+    files and ``.git`` — exactly what this tracked-tree-only gate must not do.
+    Test fixtures must pass explicit ``paths=`` or initialize a Git repo.
+    """
+
     try:
         proc = subprocess.run(
             ["git", "-C", str(root), "ls-files", "-z"],
             check=True,
             capture_output=True,
+            timeout=30,
         )
-    except (OSError, subprocess.CalledProcessError):
-        discovered: list[str] = []
-        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-            base_dir = Path(dirpath)
-            for name in filenames:
-                discovered.append(str((base_dir / name).relative_to(root)))
-            for name in dirnames:
-                candidate = base_dir / name
-                if candidate.is_symlink():
-                    # Include the link itself so the validator can refuse it.
-                    discovered.append(str(candidate.relative_to(root)))
-        return sorted(discovered)
+    except (OSError, subprocess.SubprocessError):
+        raise ScanReadError(
+            "git ls-files failed; refusing to traverse untracked files"
+        ) from None
     return [
         name
         for name in proc.stdout.decode("utf-8", "surrogateescape").split("\0")
@@ -385,8 +396,11 @@ def scan_root(
 ) -> list[Finding]:
     """Scan ``root`` (tracked files by default) and return all findings.
 
-    Raises :class:`UnsafePathError` or :class:`ScanReadError` instead of
-    skipping a path it cannot validate or read.
+    When ``paths`` is ``None``, selection is ``git ls-files`` only; a Git
+    failure raises :class:`ScanReadError` instead of walking the filesystem.
+    Explicit ``paths`` is for isolated test fixtures.  Raises
+    :class:`UnsafePathError` or :class:`ScanReadError` instead of skipping a
+    path it cannot validate or read.
     """
 
     try:

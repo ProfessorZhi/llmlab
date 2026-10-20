@@ -26,6 +26,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCANNER = REPO_ROOT / "tools" / "security" / "public_tree_scan.py"
@@ -69,16 +70,76 @@ class PublicTreeSafetyTest(unittest.TestCase):
         return path
 
     def scan(self, *, paths=None):
+        """Unit fixtures select their files explicitly.
+
+        Production ``scan_root(root)`` must use ``git ls-files``; these tests
+        pass ``paths=`` so a temporary directory does not need a Git repo.
+        """
+
+        if paths is None:
+            paths = sorted(
+                str(path.relative_to(self.root))
+                for path in self.root.rglob("*")
+                if path.is_file() or path.is_symlink()
+            )
         return scanner().scan_root(self.root, paths=paths)
 
     def rules(self, *, paths=None) -> list[str]:
         return [finding.rule for finding in self.scan(paths=paths)]
+
+    def git_init(self) -> None:
+        subprocess.run(["git", "-C", str(self.root), "init", "-q"], check=True)
+
+    def git_add(self, *paths: str) -> None:
+        subprocess.run(["git", "-C", str(self.root), "add", *paths], check=True)
 
     # --- the repository itself ------------------------------------------------
 
     def test_the_tracked_public_tree_has_no_findings(self):
         findings = scanner().scan_root(REPO_ROOT)
         self.assertEqual([], findings, [f.as_dict() for f in findings])
+
+    def test_default_scan_on_a_non_git_directory_fails_closed(self):
+        with self.assertRaises(scanner().ScanReadError):
+            scanner().scan_root(self.root)
+
+    def test_git_selection_failure_fails_closed_without_reading_untracked_sentinel(self):
+        module = scanner()
+        self.write("untracked-sentinel.txt", GITHUB_TOKEN + "\n")
+        with mock.patch.object(
+            module.subprocess, "run", side_effect=OSError("git unavailable")
+        ), mock.patch.object(
+            module.os,
+            "open",
+            side_effect=AssertionError("untracked sentinel was read"),
+        ):
+            with self.assertRaises(module.ScanReadError):
+                module.scan_root(self.root)
+        self.assertTrue((self.root / "untracked-sentinel.txt").exists())
+
+    def test_git_selection_nonzero_exit_fails_closed(self):
+        module = scanner()
+        with mock.patch.object(
+            module.subprocess,
+            "run",
+            side_effect=module.subprocess.CalledProcessError(1, ["git", "ls-files"]),
+        ):
+            with self.assertRaises(module.ScanReadError):
+                module.scan_root(self.root)
+
+    def test_tracked_selection_excludes_untracked_and_ignored_files(self):
+        self.git_init()
+        self.write("tracked.txt", "safe\n")
+        self.write(".gitignore", "ignored.txt\n")
+        self.write("untracked.txt", GITHUB_TOKEN + "\n")
+        self.write("ignored.txt", GITHUB_TOKEN + "\n")
+        self.git_add("tracked.txt", ".gitignore")
+        self.assertEqual([], scanner().scan_root(self.root))
+
+    def test_explicit_paths_still_work_without_a_git_repository(self):
+        self.write("leak.txt", GITHUB_TOKEN + "\n")
+        findings = self.scan(paths=["leak.txt"])
+        self.assertEqual(["credential"], [f.rule for f in findings])
 
     def test_reviewed_identifiers_are_stored_as_sha256_digests(self):
         known = scanner().KNOWN_PRIVATE_IDENTIFIER_SHA256
@@ -106,6 +167,7 @@ class PublicTreeSafetyTest(unittest.TestCase):
         self.write("leak.md", "ran on " + SYNTHETIC_PRIVATE_HOST + "\n")
         findings = scanner().scan_root(
             self.root,
+            paths=["leak.md"],
             known_identifier_digests=frozenset({digest(SYNTHETIC_PRIVATE_HOST)}),
         )
         self.assertEqual(["private-source-identifier"], [f.rule for f in findings])
@@ -114,6 +176,7 @@ class PublicTreeSafetyTest(unittest.TestCase):
         self.write("leak.md", "host " + SYNTHETIC_PRIVATE_IP + "\n")
         findings = scanner().scan_root(
             self.root,
+            paths=["leak.md"],
             known_identifier_digests=frozenset({digest(SYNTHETIC_PRIVATE_IP)}),
         )
         self.assertEqual(["private-source-identifier"], [f.rule for f in findings])
@@ -276,6 +339,8 @@ class PublicTreeSafetyTest(unittest.TestCase):
 
     def test_cli_exits_nonzero_and_reports_json_for_a_finding(self):
         self.write("leak.txt", GITHUB_TOKEN + "\n")
+        self.git_init()
+        self.git_add("leak.txt")
         proc = subprocess.run(
             [sys.executable, str(SCANNER), "--root", str(self.root), "--json"],
             capture_output=True,
@@ -288,6 +353,8 @@ class PublicTreeSafetyTest(unittest.TestCase):
 
     def test_cli_exits_zero_for_a_clean_tree(self):
         self.write("safe.md", "{{LAB_HOST}}\n")
+        self.git_init()
+        self.git_add("safe.md")
         proc = subprocess.run(
             [sys.executable, str(SCANNER), "--root", str(self.root)],
             capture_output=True,
@@ -301,6 +368,8 @@ class PublicTreeSafetyTest(unittest.TestCase):
         outside = Path(outside_dir.name) / "outside.txt"
         outside.write_text("outside\n", encoding="utf-8")
         (self.root / "link.txt").symlink_to(outside)
+        self.git_init()
+        self.git_add("link.txt")
         proc = subprocess.run(
             [sys.executable, str(SCANNER), "--root", str(self.root), "--json"],
             capture_output=True,
