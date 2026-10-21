@@ -16,6 +16,7 @@ token**：本进程没有任何真实凭据可用（PAM 后端未实现），打
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import socketserver
 import sys
 import wsgiref.simple_server
@@ -38,6 +39,7 @@ from ..registry.registry import RegistryConfig, RegistryService
 from ..registry.store import Store
 from . import origin as bff_origin
 from .account_directory import AccountAwareDirectory
+from .integrations import IntegrationStore
 from . import stacks as bff_stacks
 from .app import RESERVED_BIND_PORTS, OpsApplication
 from .evaluation_adapter import ModuleEvaluationAdapter
@@ -163,6 +165,7 @@ def build_application(
             gateway_attached=mock_gateway,
         ),
         authority_policy=authority_policy,
+        integrations=IntegrationStore(Path(state_dir) / "integrations.json"),
     )
 
 

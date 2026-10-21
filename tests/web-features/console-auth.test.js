@@ -67,3 +67,12 @@ test('rate limiting on the account route is reported without a second attempt', 
   assert.equal(r.status, 429);
   assert.ok(!f.calls.some((c) => c.path === PATHS.localLogin));
 });
+
+test('plugin jump links: only http(s) URLs and site paths become links', async () => {
+  const { safeJumpUrl } = await import('../../web/console/js/data.js');
+  assert.equal(safeJumpUrl('/grafana/'), '/grafana/');
+  assert.equal(safeJumpUrl('https://dell.example/strata/'), 'https://dell.example/strata/');
+  for (const bad of ['javascript:alert(1)', '//evil.example/', '/\\evil', 'data:text/html,x', 'https://u:p@h/', '', null, 42]) {
+    assert.equal(safeJumpUrl(bad), null, String(bad));
+  }
+});

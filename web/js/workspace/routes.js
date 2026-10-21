@@ -57,6 +57,9 @@ export const BFF_ROUTES = Object.freeze([
   { name: 'portal.services', method: 'GET', path: '/api/portal/services', auth: 'session', kind: 'read', scope: 'observability:host:read', owner: 'Data#47', ui: '概览 · 服务健康' },
   { name: 'portal.events', method: 'GET', path: '/api/portal/events', auth: 'session', kind: 'read', scope: 'portal:admin:read', owner: 'Integration#49', ui: '管理 · 审计时间线' },
   { name: 'portal.capabilities', method: 'GET', path: '/api/portal/capabilities', auth: 'session', kind: 'read', scope: null, owner: 'Integration#49', ui: '模块入口 · 能力状态' },
+  // Plugin page jump addresses (2026-10-21): each plugin may carry a native-UI URL; admins set it.
+  { name: 'portal.integrations', method: 'GET', path: '/api/portal/integrations', auth: 'session', kind: 'read', scope: null, owner: 'Integration#49', ui: '插件 · 跳转入口' },
+  { name: 'portal.integrations.update', method: 'PUT', path: '/api/portal/integrations/{key}', auth: 'session', kind: 'write', scope: 'portal:admin:read', owner: 'Integration#49', ui: '插件 · 设置跳转地址（管理员）' },
   { name: 'auth.linux.login', method: 'POST', path: '/auth/linux/login', auth: 'anonymous', kind: 'write', scope: null, owner: 'IAM#45', ui: '登录（PAM 未实现时 503）' },
   { name: 'auth.linux.status', method: 'GET', path: '/auth/linux/status', auth: 'anonymous', kind: 'read', scope: null, owner: 'IAM#45', ui: '登录入口状态' },
   { name: 'auth.admin.status', method: 'GET', path: '/auth/admin/status', auth: 'anonymous', kind: 'read', scope: null, owner: 'IAM#45', ui: '管理 · 管理员模式' },

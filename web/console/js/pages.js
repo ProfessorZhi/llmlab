@@ -3,7 +3,7 @@
 import { h } from './dom.js';
 import { fmtInt, fmtGiB } from './charts.js';
 import {
-  PATHS, loadOps, loadHost, loadCalls, loadUsers, send,
+  PATHS, loadOps, loadHost, loadCalls, loadUsers, loadIntegrations, safeJumpUrl, send,
 } from './data.js';
 import {
   overviewModel, servicesFromOps, keysFromOps, callsFacts, hostFacts, engineLabel, modelColorMap, preflightChecks,
@@ -441,39 +441,97 @@ export async function users(ctx) {
   return root;
 }
 
-/* ============================== 扩展 ============================== */
+/* ============================== 插件 ============================== */
+// 推理引擎、监控、评测都以插件形式接入。自带网页界面的插件，在这里多一个跳转入口
+// （新标签页打开，不嵌入）；没有界面的插件（例如只有 API 的 vLLM）就是一张普通卡片。
 const EXTENSIONS = [
-  { key: 'strata', name: 'Strata', glyph: 'S', tint: '#1D1D1F', kind: '推理框架 · 默认', desc: '实验室默认推理框架，提供 OpenAI 兼容接口。', contrib: '推理适配器 · 模型服务详情面板 · 原生控制台' },
-  { key: null, name: 'vLLM', glyph: 'v', tint: '#5856D6', kind: '推理框架', desc: '成员自行启动的 vLLM 服务经此适配器完成注册、健康检查与指标采集。', contrib: '推理适配器 · /metrics 指标映射' },
-  { key: null, name: 'SGLang', glyph: 'G', tint: '#AF52DE', kind: '推理框架', desc: '支持 SGLang 服务的注册与指标采集。', contrib: '推理适配器' },
-  { key: 'gateway', name: 'Gateway', glyph: 'W', tint: '#007AFF', kind: '网关', desc: '统一入口：校验 API 密钥、转发请求并记录请求元数据。', contrib: '请求日志 · 调用量统计' },
-  { key: 'prometheus', name: 'Prometheus', glyph: 'P', tint: '#FF9500', kind: '指标数据源', desc: '采集 GPU、主机与各推理服务的指标，供「资源与用量」查询。', contrib: '数据源 · 资源与用量图表' },
-  { key: 'grafana', name: 'Grafana', glyph: 'G', tint: '#FF6B2C', kind: '仪表盘 · 仅管理员', desc: '面向管理员的深度排查；门户内图表覆盖日常查看。', contrib: '「在 Grafana 中查看」链接' },
-  { key: 'evalscope', name: 'EvalScope', glyph: 'E', tint: '#FF2D55', kind: '评测框架', desc: '对已注册的模型服务发起基准评测，结果在「模型评测」中展示。', contrib: '模型评测页面' },
+  { key: 'strata', name: 'Strata', glyph: 'S', tint: '#1D1D1F', kind: '推理框架 · 默认', desc: '实验室默认推理框架，提供 OpenAI 兼容接口。', contrib: '推理适配器 · 原生控制台', status: 'strata' },
+  { key: 'vllm', name: 'vLLM', glyph: 'v', tint: '#5856D6', kind: '推理框架', desc: '成员自行启动的 vLLM 服务经此适配器完成登记、健康检查与指标采集。', contrib: '推理适配器 · /metrics 指标映射', status: null },
+  { key: 'sglang', name: 'SGLang', glyph: 'G', tint: '#AF52DE', kind: '推理框架', desc: '支持 SGLang 服务的登记与指标采集。', contrib: '推理适配器', status: null },
+  { key: 'gateway', name: 'Gateway', glyph: 'W', tint: '#007AFF', kind: '网关', desc: '统一入口：校验 API 密钥、转发请求并记录请求元数据。', contrib: '请求日志 · 调用量统计', status: 'gateway' },
+  { key: 'prometheus', name: 'Prometheus', glyph: 'P', tint: '#FF9500', kind: '指标数据源', desc: '采集 GPU、主机与各推理服务的指标，供「资源监控」查询。', contrib: '数据源 · 资源监控图表', status: 'prometheus' },
+  { key: 'grafana', name: 'Grafana', glyph: 'G', tint: '#FF6B2C', kind: '高级分析', desc: '深度排查与自定义看板；门户内图表覆盖日常查看。', contrib: '高级分析看板', status: 'grafana' },
+  { key: 'evalscope', name: 'EvalScope', glyph: 'E', tint: '#FF2D55', kind: '评测框架', desc: '对已登记的推理服务发起基准评测，结果在「模型评测」中展示。', contrib: '模型评测页面 · 原生报告', status: 'evalscope' },
 ];
 
 export async function extensions(ctx) {
   let services = {}; let state = 'ready';
-  if (ctx.demo) services = demoOverview().host.services;
-  else { const r = await loadHost(); state = r.state; services = r.state === 'ready' ? (hostFacts(r.value)?.services ?? {}) : {}; }
+  let links = new Map(); let linksState = 'ready';
+  if (ctx.demo) {
+    services = demoOverview().host.services;
+    links = new Map([['strata', { has_ui: true, ui_url: '/strata/', visibility: 'all' }], ['grafana', { has_ui: true, ui_url: '/grafana/', visibility: 'admin' }]]);
+  } else {
+    const [host, integrations] = await Promise.all([loadHost(), loadIntegrations()]);
+    state = host.state; services = host.state === 'ready' ? (hostFacts(host.value)?.services ?? {}) : {};
+    linksState = integrations.state;
+    if (integrations.state === 'ready') links = new Map(integrations.value.map((row) => [row.key, row]));
+  }
+  const admin = ctx.isAdmin?.() === true;
+  const root = h('div', { class: 'page' });
+  const st = { editing: null, draft: '', visibility: 'all', msg: null };
+
   const statusOf = (key) => {
-    if (!key) return { tone: 'off', text: '按服务注册时检测' };
+    if (!key) return { tone: 'off', text: '按服务登记时检测' };
     const v = services[key];
     if (v === true) return { tone: 'ok', text: '已连接' };
     if (v === false) return { tone: 'bad', text: '未响应' };
     return { tone: 'off', text: state === 'ready' ? '状态未知' : '未检测' };
   };
-  return h('div', { class: 'page' },
-    pageHead('扩展', '推理框架、监控与评测以扩展形式接入。每个扩展声明后端适配器与前端贡献点，启用后对应的页面与面板出现在门户中。'),
-    h('div', { class: 'ext-grid' }, EXTENSIONS.map((e) => h('article', { class: 'ext' },
+
+  async function save(key, url, visibility) {
+    if (ctx.demo) { links.set(key, { has_ui: Boolean(url), ui_url: url || null, visibility }); st.editing = null; draw(); return; }
+    const r = await send(`${PATHS.integrations}/${encodeURIComponent(key)}`, { ui_url: url, visibility }, { method: 'PUT' });
+    if (!r.ok) { st.msg = r.message ?? `保存失败（${r.reason}）`; draw(); return; }
+    st.msg = null; st.editing = null;
+    const rows = r.data?.integrations;
+    if (Array.isArray(rows)) links = new Map(rows.map((row) => [row.key, row]));
+    draw();
+  }
+
+  function jump(e) {
+    const link = links.get(e.key);
+    const url = safeJumpUrl(link?.ui_url);
+    if (url) {
+      return h('a', { class: 'btn', href: url, target: '_blank', rel: 'noopener noreferrer', 'aria-label': `打开 ${e.name} 界面（新标签页）` }, '打开界面 ↗');
+    }
+    if (link?.has_ui) return h('span', { class: 'muted', style: { 'font-size': '13px' } }, '界面仅管理员可打开');
+    return null;
+  }
+
+  function editor(e) {
+    if (st.editing !== e.key) {
+      const link = links.get(e.key);
+      return h('button', { type: 'button', class: 'linkbtn', onclick: () => {
+        st.editing = e.key; st.draft = link?.ui_url ?? ''; st.visibility = link?.visibility ?? 'all'; st.msg = null; draw();
+      } }, link?.has_ui ? '修改跳转地址' : '设置跳转地址');
+    }
+    return h('div', { class: 'group', style: { 'margin-top': '4px' } },
+      h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, '跳转地址'),
+        h('input', { value: st.draft, placeholder: 'https://… 或 /grafana/', style: { width: '100%', 'min-width': 0 }, oninput: (ev) => { st.draft = ev.target.value.trim(); } })),
+      h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, '仅管理员可见'),
+        h('input', { type: 'checkbox', checked: st.visibility === 'admin', style: { width: '20px', height: '20px' }, onchange: (ev) => { st.visibility = ev.target.checked ? 'admin' : 'all'; } })),
+      h('div', { class: 'cell', style: { gap: '10px', 'justify-content': 'flex-end' } },
+        h('button', { type: 'button', class: 'btn', onclick: () => { st.editing = null; draw(); } }, '取消'),
+        links.get(e.key)?.has_ui ? h('button', { type: 'button', class: 'btn', onclick: () => save(e.key, '', st.visibility) }, '清除') : null,
+        h('button', { type: 'button', class: 'btn primary', onclick: () => save(e.key, st.draft, st.visibility) }, '保存')));
+  }
+
+  function draw() {
+    while (root.firstChild) root.firstChild.remove();
+    root.append(pageHead('插件', '推理框架、监控与评测以插件形式接入。自带网页界面的插件可以从这里跳转打开；没有界面的就是单纯的推理或数据插件，在平台内直接使用。'));
+    if (st.msg) root.append(h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.msg));
+    if (linksState !== 'ready' && !ctx.demo) root.append(h('p', { class: 'muted', style: { margin: 0, 'font-size': '13px' } }, '跳转地址暂时无法读取，插件卡片仍按已知信息显示。'));
+    root.append(h('div', { class: 'ext-grid' }, EXTENSIONS.map((e) => h('article', { class: 'ext' },
       h('div', { class: 'ext-head' },
         h('span', { class: 'ext-glyph', style: { background: e.tint }, 'aria-hidden': 'true' }, e.glyph),
         h('div', { style: { flex: '1 1 auto', 'min-width': 0 } }, h('h2', { class: 'ext-name' }, e.name), h('div', { class: 'muted', style: { 'font-size': '13px' } }, e.kind)),
-        statusBadge(statusOf(e.key))),
+        statusBadge(statusOf(e.status))),
       h('p', { style: { margin: 0, 'font-size': '13px' } }, e.desc),
-      h('div', { class: 'ext-contrib' }, h('div', { class: 'muted' }, '贡献点'), h('div', {}, e.contrib))))),
-    h('p', { class: 'muted', style: { margin: 0, 'padding-top': '20px', 'border-top': '1px solid var(--hairline)', 'font-size': '13px' } },
-      '扩展的原生界面（如推理框架自带的控制台、Grafana 仪表盘、EvalScope 报告）经网关以同源方式代理，沿用门户的登录状态打开。'));
+      h('div', { class: 'ext-contrib' }, h('div', { class: 'muted' }, '贡献点'), h('div', {}, e.contrib)),
+      h('div', { style: { display: 'flex', 'align-items': 'center', gap: '12px', 'flex-wrap': 'wrap' } }, jump(e), admin ? editor(e) : null)))));
+  }
+  draw();
+  return root;
 }
 
 export { modelColorMap };

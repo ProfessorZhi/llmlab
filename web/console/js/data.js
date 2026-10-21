@@ -30,6 +30,7 @@ export const PATHS = Object.freeze({
   userStatus: '/auth/admin/users/status',
   preflight: '/api/v2/registry/engines/preflight',
   registryEngines: '/api/v2/registry/engines',
+  integrations: '/api/portal/integrations',
 });
 
 const NOT_CONFIGURED = new Set([404, 501, 503]);
@@ -142,6 +143,23 @@ export async function loadUsers(opts) {
   if (r.state !== 'ready') return r;
   const users = r.value?.data?.users ?? r.value?.users;
   return Array.isArray(users) ? { ...r, value: users } : { ...r, state: 'error', value: null, reason: 'bad-shape' };
+}
+
+export async function loadIntegrations(opts) {
+  const r = await getJSON(PATHS.integrations, opts);
+  if (r.state !== 'ready') return r;
+  const list = r.value?.data?.integrations;
+  return Array.isArray(list) ? { ...r, value: list } : { ...r, state: 'error', value: null, reason: 'bad-shape' };
+}
+
+/** 插件的跳转地址只允许 http(s) 绝对地址或站内路径；其余一律不渲染成链接。 */
+export function safeJumpUrl(url) {
+  if (typeof url !== 'string' || !url) return null;
+  if (url.startsWith('/') && !url.startsWith('//') && !url.startsWith('/\\')) return url;
+  try {
+    const u = new URL(url);
+    return (u.protocol === 'http:' || u.protocol === 'https:') && !u.username && !u.password ? u.href : null;
+  } catch { return null; }
 }
 
 /** 各状态在页面上的说明文字。 */

@@ -68,6 +68,7 @@ from . import host_summary as bff_host_summary
 from . import identity as bff_identity
 from . import invoke as bff_invoke
 from . import ops as bff_ops
+from . import integrations as bff_integrations
 from . import origin as bff_origin
 from . import route_map as bff_route_map
 from . import scopes as bff_scopes
@@ -200,6 +201,7 @@ class OpsApplication:
         admin_mode=None,
         authority_policy=None,
         token_source=None,
+        integrations=None,
     ) -> None:
         self.auth_app = auth_app
         self.cfg = auth_app.cfg
@@ -227,6 +229,8 @@ class OpsApplication:
         #: 「反正没人配」而接受任何外部主机名。反代后面用真实主机名属于部署决策，
         #: 由运维显式传进来。
         self.authority_policy = authority_policy or bff_origin.AuthorityPolicy()
+        #: 插件跳转地址的存储。``None`` = 本部署没接：两条路由以 503 收场。
+        self.integrations = integrations
         #: scoped CLI token 通道。``None`` 时建一条**关闭**的：它仍然负责带
         #: ``Authorization`` 头的请求，只是对它们一律答 401。token 的签发/撤销/审计
         #: 归 IAM Lane；在它落地之前，把通道开着就是一条没有审计的旁路。
@@ -836,6 +840,45 @@ class OpsApplication:
 
     # --- PUT /api/v2/ops/deployments/{id}/share -----------------------------
 
+    # --- /api/portal/integrations ------------------------------------------
+
+    def _integration_store(self):
+        if self.integrations is None:
+            raise _IntegrationsNotAttached()
+        return self.integrations
+
+    def _integrations(self, request):
+        """插件目录 + 跳转地址。对看不到某个地址的会话，那一项的 ``ui_url`` 是 ``null``。"""
+        self._reject_asserted_identity(request)
+        principal = self._principal(request)
+        try:
+            store = self._integration_store()
+        except _IntegrationsNotAttached:
+            return _error_response(503, "bff.integrations_not_attached", "plugin settings are not attached")
+        is_admin = bff_scopes.PORTAL_ADMIN_READ in principal.portal_scopes
+        return _json_response(200, {"data": {"integrations": store.listing(is_admin=is_admin)}})
+
+    def _integration_update(self, request, key: str):
+        self._reject_asserted_identity(request)
+        self._write_preflight(request)
+        principal = self._principal(request)
+        if bff_scopes.PORTAL_ADMIN_READ not in principal.portal_scopes:
+            return _error_response(403, "bff.forbidden", "only administrators can change plugin settings")
+        try:
+            store = self._integration_store()
+        except _IntegrationsNotAttached:
+            return _error_response(503, "bff.integrations_not_attached", "plugin settings are not attached")
+        body = _json_body(request)
+        if body is None:
+            return _error_response(400, "bff.invalid_request", "a JSON object body is required")
+        try:
+            store.update(key, ui_url=body.get("ui_url"), visibility=body.get("visibility"))
+        except KeyError:
+            return _error_response(404, "bff.not_found", f"unknown plugin {key!r}")
+        except bff_integrations.InvalidIntegration as exc:
+            return _error_response(400, "bff.invalid_request", str(exc))
+        return _json_response(200, {"data": {"integrations": store.listing(is_admin=True)}})
+
     # --- POST /api/v2/registry/engines[/preflight] --------------------------
 
     def _registry_body(self, request):
@@ -1294,6 +1337,10 @@ def _body_field_names(request) -> tuple[str, ...]:
     if not isinstance(payload, dict):
         return ()
     return tuple(str(name) for name in payload)
+
+
+class _IntegrationsNotAttached(Exception):
+    pass
 
 
 def _json_body(request) -> dict | None:
