@@ -53,27 +53,34 @@ export function clock(iso) {
 }
 
 /* ---------------- 指标条 ---------------- */
+/** 顶部指标：资源与推理服务优先，调用量居末。没有读数一律显示「—」。 */
 export function kpiBar(k) {
-  const pct = (v) => `${(v * 100).toFixed(1)}%`;
+  const pct = (v) => `${Math.round(v * 100)}%`;
   const vramPct = k.vramUsedMiB != null && k.vramTotalMiB ? Math.min(1, k.vramUsedMiB / k.vramTotalMiB) : null;
+  const meter = (ratio, label) => h('div', { class: 'meter', role: 'img', 'aria-label': `${label} ${Math.round(ratio * 100)}%` },
+    h('div', { style: { width: `${(ratio * 100).toFixed(1)}%` } }));
   const cell = (label, value, note) => h('div', { class: 'kpi' }, h('div', { class: 'kpi-label' }, label), value, note);
+  const gpuNote = [k.tempC != null ? `${Math.round(k.tempC)} °C` : null, k.powerW != null ? `${Math.round(k.powerW)} W` : null].filter(Boolean).join(' · ');
   return h('section', { class: 'kpis', 'aria-label': '关键指标' },
-    cell(k.requestsScope ? `请求数 · ${k.requestsScope}` : '请求数',
-      h('div', { class: 'kpi-value' }, fmtInt(k.requests)),
-      k.requestsDelta != null
-        ? h('div', { class: 'kpi-note' }, '较昨日 ', h('span', { style: { color: 'var(--green-text)' } }, `${k.requestsDelta >= 0 ? '+' : ''}${(k.requestsDelta * 100).toFixed(1)}%`))
-        : h('div', { class: 'kpi-note' }, k.requests == null ? '数据源未接入' : ' ')),
-    cell('在线模型服务',
-      h('div', { class: 'kpi-value' }, k.servicesOnline == null ? '—' : String(k.servicesOnline), k.servicesTotal != null ? h('small', {}, ` / ${k.servicesTotal}`) : null),
-      h('div', { class: 'kpi-note' }, k.servicesTotal == null ? '注册中心未接入' : `共 ${k.servicesTotal} 个已注册`)),
     cell('显存占用',
       h('div', { class: 'kpi-value' }, fmtGiB(k.vramUsedMiB), h('small', {}, k.vramTotalMiB != null ? ` / ${fmtGiB(k.vramTotalMiB, 0)} GB` : ' GB')),
-      vramPct == null
-        ? h('div', { class: 'kpi-note' }, 'GPU 读数不可用')
-        : h('div', { class: 'meter', role: 'img', 'aria-label': `显存占用 ${Math.round(vramPct * 100)}%` }, h('div', { style: { width: `${(vramPct * 100).toFixed(1)}%` } }))),
-    cell('请求成功率',
-      h('div', { class: 'kpi-value' }, k.successRate == null ? '—' : pct(k.successRate)),
-      h('div', { class: 'kpi-note' }, k.p95ms == null ? 'P95 延迟 —' : `P95 延迟 ${(k.p95ms / 1000).toFixed(2)} s`)));
+      vramPct == null ? h('div', { class: 'kpi-note' }, '暂无 GPU 读数') : meter(vramPct, '显存占用')),
+    cell('GPU 利用率',
+      h('div', { class: 'kpi-value' }, k.utilRatio == null ? '—' : pct(k.utilRatio)),
+      k.utilRatio == null ? h('div', { class: 'kpi-note' }, '暂无 GPU 读数') : h('div', { class: 'kpi-note' }, gpuNote || ' ')),
+    cell('推理服务',
+      h('div', { class: 'kpi-value' }, k.servicesOnline == null ? '—' : String(k.servicesOnline), k.servicesTotal != null ? h('small', {}, ` / ${k.servicesTotal}`) : null),
+      h('div', { class: 'kpi-note' }, k.servicesTotal == null ? '暂无登记信息' : k.servicesTotal === 0 ? '尚未登记' : '运行中 / 已登记')),
+    cell('调用量',
+      h('div', { class: 'kpi-value' }, k.requests == null ? '—' : fmtInt(k.requests)),
+      h('div', { class: 'kpi-note' }, k.requests == null ? '暂无调用' : (k.requestsScope ?? ' '))));
+}
+
+/** 次要数据（API 调用等）的空态：没配置、没调用都属正常，用平静的说明而不是报错。读取失败仍如实说明。 */
+export function quietEmpty(state, text) {
+  if (state === 'error') return emptyState('error');
+  if (state === 'signed_out') return emptyState('signed_out');
+  return h('div', { class: 'empty quiet' }, h('strong', {}, text.title), text.body);
 }
 
 /* ---------------- 旭日图 ---------------- */

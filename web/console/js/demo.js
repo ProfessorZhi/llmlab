@@ -80,6 +80,7 @@ export function demoOverview() {
       servicesOnline: services.filter((x) => x.runtime === RUNTIME_LABEL.running).length,
       servicesTotal: services.length,
       vramUsedMiB: vramParts.reduce((t, p) => t + p.mib, 0), vramTotalMiB: 49152,
+      utilRatio: 0.63, tempC: 61, powerW: 212,
       successRate: 0.993, p95ms: 1620,
     },
     distribution: { innerLabel: '用户', groups },

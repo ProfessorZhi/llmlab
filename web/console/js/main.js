@@ -13,20 +13,20 @@ const DEMO = resolveDataMode(location.search, { qa: isQaBuild(document) }) === D
 const NAV = [
   { group: null, items: [
     { route: '#/overview', label: '概览', icon: 'overview', color: '#007AFF', page: pages.overview },
-    { route: '#/services', label: '模型服务', icon: 'services', color: '#5856D6', page: pages.services },
+    { route: '#/usage', label: '资源监控', icon: 'usage', color: '#30B0C7', page: pages.usage },
+    { route: '#/services', label: '推理服务', icon: 'services', color: '#5856D6', page: pages.services },
+    { route: '#/evaluation', label: '模型评测', icon: 'evaluation', color: '#FF2D55', page: pages.evaluation },
+  ] },
+  { group: 'API 调用', items: [
     { route: '#/keys', label: 'API 密钥', icon: 'keys', color: '#FF9500', page: pages.keys },
     { route: '#/requests', label: '请求日志', icon: 'requests', color: '#34C759', page: pages.requests },
-  ] },
-  { group: '洞察', items: [
-    { route: '#/usage', label: '资源与用量', icon: 'usage', color: '#30B0C7', page: pages.usage },
-    { route: '#/evaluation', label: '模型评测', icon: 'evaluation', color: '#FF2D55', page: pages.evaluation },
   ] },
   { group: '管理', admin: true, items: [
     { route: '#/admin/users', label: '用户与权限', icon: 'users', color: '#8E8E93', page: pages.users },
     { route: '#/admin/extensions', label: '扩展', icon: 'extensions', color: '#636366', page: pages.extensions },
   ] },
 ];
-const EXTRA_ROUTES = { '#/services/register': { parent: '#/services', page: pages.register, label: '注册模型服务' } };
+const EXTRA_ROUTES = { '#/services/register': { parent: '#/services', page: pages.register, label: '登记推理服务' } };
 
 const ctx = { demo: DEMO, me: null, navigate: (r) => { location.hash = r; } };
 const root = document.getElementById('app');

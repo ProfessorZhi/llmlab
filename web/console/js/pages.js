@@ -13,7 +13,7 @@ import {
 } from './demo.js';
 import {
   pageHead, emptyState, statusBadge, segmented, section, relTime, clock,
-  kpiBar, sunburstPanel, vramPanel, hourlyChart, hbarList, checkIcon,
+  kpiBar, sunburstPanel, vramPanel, hourlyChart, hbarList, checkIcon, quietEmpty,
 } from './ui.js';
 
 const panel = (cls, title, sub, ...body) => h('section', { class: `panel ${cls}` },
@@ -21,6 +21,38 @@ const panel = (cls, title, sub, ...body) => h('section', { class: `panel ${cls}`
   ...body);
 
 /* ============================== 概览 ============================== */
+// 平台的核心是资源监控与推理服务；API 调用统计是次要信息，没配置、没调用都属正常。
+const CALLS_EMPTY = { title: '暂无调用记录', body: '为推理服务创建 API 密钥并通过网关调用后，这里会显示调用统计。' };
+const SERVICES_EMPTY = { title: '还没有登记推理服务', body: '启动推理引擎后，在「推理服务」中登记，这里会显示它的运行状态与显存占用。' };
+
+function servicesTable(list, { compact = false } = {}) {
+  const cols = compact ? ['推理服务', '推理框架', '所有者', '显存', '状态'] : ['推理服务', '推理框架', '所有者', '访问范围', '显存', '健康', '状态'];
+  const vramCol = cols.indexOf('显存');
+  return h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
+    h('thead', {}, h('tr', {}, cols.map((t, i) => h('th', { scope: 'col', class: i === vramCol ? 'num' : null }, t)))),
+    h('tbody', {}, list.map((x) => h('tr', {},
+      h('td', {}, h('div', { style: { 'font-weight': 500 } }, x.label), x.sharedToMe ? h('div', { class: 'muted', style: { 'font-size': '12px' } }, '共享给我') : null),
+      h('td', {}, engineLabel(x.engine)),
+      h('td', { class: 'tnum' }, x.owner ?? '—', x.self ? h('span', { class: 'muted' }, '（我）') : null),
+      compact ? null : h('td', {}, x.share),
+      h('td', { class: 'num' }, x.vramMiB == null ? '—' : `${fmtGiB(x.vramMiB)} GB`),
+      compact ? null : h('td', {}, statusBadge(x.health)),
+      h('td', {}, statusBadge(x.runtime)))))));
+}
+
+function gpuFacts(hf, hostState) {
+  if (!hf) return quietEmpty(hostState, { title: '暂无 GPU 读数', body: '接入 Prometheus 后，这里显示 GPU 利用率、温度与功耗。' });
+  const row = (label, value) => h('div', { class: 'cell' }, h('span', { class: 'grow' }, label), h('span', { class: 'tnum' }, value ?? '—'));
+  const SERVICES = [['prometheus', 'Prometheus'], ['strata', 'Strata'], ['gateway', 'Gateway'], ['evalscope', 'EvalScope']];
+  const svc = (v) => (v === true ? { tone: 'ok', text: '在线' } : v === false ? { tone: 'bad', text: '未响应' } : { tone: 'off', text: '未检测' });
+  return h('div', { style: { display: 'flex', 'flex-direction': 'column', gap: '14px' } },
+    h('div', { class: 'group' },
+      row('利用率', hf.utilRatio == null ? null : `${Math.round(hf.utilRatio * 100)}%`),
+      row('温度', hf.tempC == null ? null : `${Math.round(hf.tempC)} °C`),
+      row('功耗', hf.powerW == null ? null : `${Math.round(hf.powerW)} W`)),
+    h('div', { class: 'group' }, SERVICES.map(([key, name]) => h('div', { class: 'cell' }, h('span', { class: 'grow' }, name), statusBadge(svc(hf.services?.[key]))))));
+}
+
 export async function overview(ctx) {
   let model;
   let states = {};
@@ -31,68 +63,49 @@ export async function overview(ctx) {
     states = { ops: ops.state, host: host.state, calls: calls.state };
     model = overviewModel({ ops: ops.value, host: host.value, log: calls.value });
   }
-  let range = '今日';
   const now = new Date();
   const stamp = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-  const head = pageHead('概览', `数据截至今天 ${stamp}`,
-    segmented('统计周期', ['今日', '近 7 日', '近 30 日'], range, () => {}));
+  const head = pageHead('概览', `RTX A6000 工作站 · 数据截至 ${stamp}`,
+    h('a', { class: 'btn primary', href: '#/services/register' }, '登记推理服务'));
 
   const vramBody = model.vram
     ? vramPanel(model.vram)
-    : emptyState(states.host ?? 'not_configured', { title: 'GPU 读数不可用', body: '尚未读取到经过校验的显存数据。Prometheus 接入后，这里会按模型服务显示显存分配。' });
+    : quietEmpty(states.host ?? 'not_configured', { title: '暂无显存读数', body: '接入 Prometheus 后，这里会按推理服务显示显存分配。' });
+
+  const services = model.services;
+  const servicesBody = services
+    ? (services.length ? servicesTable(services, { compact: true }) : quietEmpty('ready', SERVICES_EMPTY))
+    : quietEmpty(states.ops ?? 'not_configured', { title: '推理服务列表暂不可用', body: '当前会话还读不到注册中心的服务列表。' });
 
   const dist = model.distribution
     ? sunburstPanel(model.distribution, model.modelColors)
-    : emptyState(states.calls ?? 'not_configured');
-
-  const usage = h('div', { style: { display: 'flex', 'flex-direction': 'column', gap: '14px' } },
-    ...(model.modelUsage ? hbarList(model.modelUsage, model.modelColors) : [emptyState(states.calls ?? 'not_configured')]));
-
-  const hourly = model.hourly
-    ? h('div', { style: { 'border-top': '1px solid var(--hairline)', 'padding-top': '14px', 'margin-top': '4px' } },
-      hourlyChart(model.hourly.points))
-    : null;
-
-  const myServices = (model.services ?? []).filter((x) => x.self);
-  const services = section('模型服务',
-    myServices.length
-      ? h('div', { class: 'group' }, myServices.map((x) => h('div', { class: 'cell' },
-        h('div', { class: 'grow' }, h('div', { class: 'title' }, x.label), h('div', { class: 'sub' }, `${engineLabel(x.engine)}${x.port ? ` · 端口 ${x.port}` : ''} · ${x.share}`)),
-        statusBadge(x.runtime))))
-      : h('div', { class: 'group' }, h('div', { class: 'cell' }, h('div', { class: 'grow sub' }, model.services ? '尚未注册模型服务。' : '注册中心未接入。'))));
-
-  const keys = section('API 密钥',
-    h('div', { class: 'group' },
-      (model.keys ?? []).filter((k) => k.active).slice(0, 3).map((k) => h('div', { class: 'cell' },
-        h('div', { class: 'grow' }, h('div', { class: 'title' }, k.name), h('div', { class: 'sub tnum' }, k.prefix)),
-        h('span', { class: 'muted', style: { 'font-size': '13px' } }, relTime(k.lastUsedAt)))),
-      (model.keys ?? []).length ? null : h('div', { class: 'cell' }, h('div', { class: 'grow sub' }, '暂无密钥。')),
-      h('div', { class: 'cell' }, h('span', { class: 'grow muted' }, '接入端点'), h('span', { class: 'mono' }, `${location.origin}/v1`))));
-
-  const recent = model.recent
-    ? h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
-      h('thead', {}, h('tr', {}, ['时间', '模型服务', '密钥', 'Token', '延迟', '状态'].map((t, i) => h('th', { scope: 'col', class: i === 3 || i === 4 ? 'num' : null }, t)))),
-      h('tbody', {}, model.recent.map((r) => h('tr', {},
-        h('td', { class: 'tnum' }, clock(r.ts)), h('td', {}, r.model ?? '—'), h('td', { class: 'muted' }, r.key ?? '—'),
-        h('td', { class: 'num' }, fmtInt(r.tokens)), h('td', { class: 'num' }, r.totalMs == null ? '—' : `${(r.totalMs / 1000).toFixed(2)} s`),
-        h('td', { style: { color: r.ok ? 'var(--green-text)' : 'var(--red-text)' } }, `${r.status ?? '—'} ${r.ok ? '成功' : '失败'}`))))))
-    : emptyState(states.calls ?? 'not_configured');
+    : quietEmpty(states.calls ?? 'not_configured', CALLS_EMPTY);
+  const usage = model.modelUsage
+    ? h('div', { style: { display: 'flex', 'flex-direction': 'column', gap: '14px' } },
+      ...hbarList(model.modelUsage, model.modelColors),
+      model.hourly ? h('div', { style: { 'border-top': '1px solid var(--hairline)', 'padding-top': '14px', 'margin-top': '4px' } }, hourlyChart(model.hourly.points)) : null)
+    : quietEmpty(states.calls ?? 'not_configured', CALLS_EMPTY);
+  const hasCalls = Boolean(model.distribution || model.modelUsage);
 
   return h('div', { class: 'page' },
     head,
     kpiBar(model.kpis),
-    panel('', '显存分配', model.vram ? `GPU 显存 ${fmtGiB(model.vram.totalMiB, 0)} GB · 每个方块代表 0.25 GB` : null, vramBody),
     h('div', { class: 'row' },
-      panel('grow', '调用分布', model.distribution ? `内环为${model.distribution.innerLabel}，外环为其调用的模型服务` : null, dist),
-      panel('side', '模型服务调用量', null, usage, hourly)),
-    h('section', { style: { display: 'flex', 'flex-direction': 'column', gap: '16px' }, 'aria-labelledby': 'ws-title' },
-      h('div', { class: 'page-head' }, h('h2', { id: 'ws-title', style: { margin: 0, 'font-size': '22px', 'font-weight': 700 } }, '我的工作区'),
-        h('a', { class: 'btn primary', href: '#/services/register' }, '注册模型服务')),
-      h('div', { class: 'row' }, h('div', { style: { flex: '1 1 420px', 'min-width': 0 } }, services), h('div', { style: { flex: '1 1 420px', 'min-width': 0 } }, keys)),
-      section('最近请求', recent)));
+      panel('grow', '显存分配', model.vram ? `GPU 显存 ${fmtGiB(model.vram.totalMiB, 0)} GB · 每个方块代表 0.25 GB` : null, vramBody),
+      panel('side', 'GPU 与服务', null, gpuFacts(model.host, states.host ?? 'not_configured'))),
+    panel('', '推理服务与模型', services?.length ? `${services.length} 个已登记 · 点击「推理服务」查看详情与访问范围` : null, servicesBody),
+    h('section', { style: { display: 'flex', 'flex-direction': 'column', gap: '16px' }, 'aria-labelledby': 'calls-title' },
+      h('div', { class: 'page-head' },
+        h('h2', { id: 'calls-title', style: { margin: 0, 'font-size': '19px', 'font-weight': 600 } }, 'API 调用'),
+        h('a', { class: 'linkbtn', href: '#/requests' }, '查看请求日志')),
+      hasCalls
+        ? h('div', { class: 'row' },
+          panel('grow', '调用分布', `内环为${model.distribution?.innerLabel ?? 'API 密钥'}，外环为其调用的推理服务`, dist),
+          panel('side', '各服务调用量', null, usage))
+        : h('div', { class: 'group' }, quietEmpty(states.calls ?? 'not_configured', CALLS_EMPTY))));
 }
 
-/* ============================== 模型服务 ============================== */
+/* ============================== 推理服务 ============================== */
 export async function services(ctx) {
   let list; let state = 'ready';
   if (ctx.demo) list = demoServices();
@@ -102,19 +115,11 @@ export async function services(ctx) {
     list = r.state === 'ready' ? servicesFromOps(r.value) : null;
   }
   const body = list
-    ? (list.length
-      ? h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
-        h('thead', {}, h('tr', {}, ['模型服务', '推理框架', '所有者', '访问范围', '显存', '健康', '状态'].map((t, i) => h('th', { scope: 'col', class: i === 4 ? 'num' : null }, t)))),
-        h('tbody', {}, list.map((x) => h('tr', {},
-          h('td', {}, h('div', { style: { 'font-weight': 500 } }, x.label), x.sharedToMe ? h('div', { class: 'muted', style: { 'font-size': '12px' } }, '共享给我') : null),
-          h('td', {}, engineLabel(x.engine)), h('td', { class: 'tnum' }, x.owner ?? '—', x.self ? h('span', { class: 'muted' }, '（我）') : null),
-          h('td', {}, x.share), h('td', { class: 'num' }, x.vramMiB == null ? '—' : `${fmtGiB(x.vramMiB)} GB`),
-          h('td', {}, statusBadge(x.health)), h('td', {}, statusBadge(x.runtime)))))))
-      : h('div', { class: 'group' }, h('div', { class: 'empty' }, h('strong', {}, '还没有模型服务'), '先用本人的 Linux 账户启动推理服务，再在这里注册。')))
+    ? (list.length ? servicesTable(list) : h('div', { class: 'group' }, quietEmpty('ready', SERVICES_EMPTY)))
     : emptyState(state);
   return h('div', { class: 'page' },
-    pageHead('模型服务', '实验室内已注册的推理服务。成员自行启动服务后注册，系统校验进程归属后发布。',
-      h('a', { class: 'btn primary', href: '#/services/register' }, '注册模型服务')),
+    pageHead('推理服务', '实验室内已登记的推理引擎与模型。成员自行启动推理引擎后登记，系统校验监听进程后发布。',
+      h('a', { class: 'btn primary', href: '#/services/register' }, '登记推理服务')),
     body);
 }
 
@@ -180,8 +185,8 @@ export async function register(ctx) {
     const labels = ['服务配置', '归属校验', '发布'];
     root.append(
       h('header', {},
-        h('a', { class: 'crumb', href: '#/services' }, '模型服务'),
-        h('h1', { class: 'page-title', style: { 'margin-top': '6px' } }, '注册模型服务'),
+        h('a', { class: 'crumb', href: '#/services' }, '推理服务'),
+        h('h1', { class: 'page-title', style: { 'margin-top': '6px' } }, '登记推理服务'),
         h('p', { class: 'page-sub' }, '请先使用本人的 Linux 账户启动推理服务。注册时，系统将校验该端口的监听进程是否归属于您的账户，校验通过后服务方可发布。')),
       h('ol', { class: 'steps', 'aria-label': '注册步骤' }, labels.map((l, i) => {
         const n = i + 1;
@@ -240,7 +245,7 @@ export async function keys(ctx) {
         h('span', { class: 'muted', style: { 'font-size': '13px' } }, k.active ? `最近使用 ${relTime(k.lastUsedAt)}` : '已撤销')))
         : h('div', { class: 'cell' }, h('div', { class: 'grow sub' }, '暂无密钥。'))),
     '密钥只显示前缀，完整内容仅在创建时显示一次。')
-    : emptyState(state);
+    : h('div', { class: 'group' }, quietEmpty(state, { title: '暂无 API 密钥', body: '需要通过网关调用推理服务时，再用 llmlab keys 命令创建密钥。' }));
   return h('div', { class: 'page narrow' },
     pageHead('API 密钥', '调用模型服务时使用的凭据。'),
     body,
@@ -256,12 +261,13 @@ export async function requests(ctx) {
   let rows; let state = 'ready';
   if (ctx.demo) rows = demoCalls();
   else { const r = await loadCalls(); state = r.state; rows = r.state === 'ready' ? (callsFacts(r.value)?.recent ?? []) : null; }
-  if (!rows) return h('div', { class: 'page' }, pageHead('请求日志', '经网关转发的请求元数据。不记录提示词与输出正文。'), emptyState(state));
+  if (!rows) return h('div', { class: 'page' }, pageHead('请求日志', '经网关转发的请求元数据。不记录提示词与输出正文。'), h('div', { class: 'group' }, quietEmpty(state, CALLS_EMPTY)));
   let filter = '全部';
   const holder = h('div', {});
   const draw = () => {
     while (holder.firstChild) holder.firstChild.remove();
     const view = rows.filter((r) => filter === '全部' || (filter === '失败' ? !r.ok : r.ok));
+    if (!view.length) { holder.append(h('div', { class: 'group' }, quietEmpty('ready', rows.length ? { title: '没有符合条件的请求', body: '换一个筛选条件试试。' } : CALLS_EMPTY))); return; }
     holder.append(h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
       h('thead', {}, h('tr', {}, ['时间', '模型服务', '密钥', 'Token', '延迟', '状态'].map((t, i) => h('th', { scope: 'col', class: i === 3 || i === 4 ? 'num' : null }, t)))),
       h('tbody', {}, view.map((r) => h('tr', {},
@@ -274,29 +280,35 @@ export async function requests(ctx) {
   return h('div', { class: 'page' }, pageHead('请求日志', '经网关转发的请求元数据。不记录提示词与输出正文。', seg), holder);
 }
 
-/* ============================== 资源与用量 ============================== */
+/* ============================== 资源监控 ============================== */
 export async function usage(ctx) {
-  let model; let hostState = 'ready';
+  let model; let hostState = 'ready'; let opsState = 'ready';
   if (ctx.demo) model = demoOverview();
   else {
     const [ops, host] = await Promise.all([loadOps(), loadHost()]);
-    hostState = host.state;
+    hostState = host.state; opsState = ops.state;
     model = overviewModel({ ops: ops.value, host: host.value });
   }
   const hf = model.host;
   const metric = (label, value, unit) => h('div', { class: 'cell' }, h('span', { class: 'grow' }, label), h('span', { class: 'tnum' }, value == null ? '—' : `${value}${unit}`));
+  const withVram = (model.services ?? []).filter((x) => x.vramMiB != null);
   return h('div', { class: 'page' },
-    pageHead('资源与用量', 'GPU、主机与各模型服务的资源占用。'),
+    pageHead('资源监控', 'GPU、主机与各推理服务的资源占用。'),
     h('div', { class: 'row' },
       h('div', { style: { flex: '1 1 320px', 'min-width': 0 } }, section('GPU', hf ? h('div', { class: 'group' },
         metric('利用率', hf.utilRatio == null ? null : Math.round(hf.utilRatio * 100), '%'),
         metric('显存', hf.vramUsedMiB == null ? null : `${fmtGiB(hf.vramUsedMiB)} / ${fmtGiB(hf.vramTotalMiB, 0)}`, ' GB'),
         metric('温度', hf.tempC == null ? null : Math.round(hf.tempC), ' °C'),
-        metric('功耗', hf.powerW == null ? null : Math.round(hf.powerW), ' W')) : emptyState(hostState), '数据来自 Prometheus 只读查询，超过 90 秒未更新的读数不予显示。')),
-      h('div', { style: { flex: '2 1 520px', 'min-width': 0 } }, panel('', '显存分配', model.vram ? '每个方块代表 0.25 GB' : null, model.vram ? vramPanel(model.vram) : emptyState(hostState)))),
+        metric('功耗', hf.powerW == null ? null : Math.round(hf.powerW), ' W')) : quietEmpty(hostState, { title: '暂无 GPU 读数', body: '接入 Prometheus 后显示。' }),
+      '数据来自 Prometheus 只读查询，超过 90 秒未更新的读数不予显示。')),
+      h('div', { style: { flex: '2 1 520px', 'min-width': 0 } }, panel('', '显存分配', model.vram ? '每个方块代表 0.25 GB' : null,
+        model.vram ? vramPanel(model.vram) : quietEmpty(hostState, { title: '暂无显存读数', body: '接入 Prometheus 后，这里会按推理服务显示显存分配。' })))),
+    panel('', '各推理服务资源占用', null, model.services
+      ? (withVram.length ? servicesTable(withVram, { compact: true }) : quietEmpty('ready', { title: '暂无按服务统计的显存', body: '推理服务登记并上报进程指标后，这里会列出每个服务的显存占用。' }))
+      : quietEmpty(opsState, SERVICES_EMPTY)),
     h('div', { class: 'row' },
-      panel('grow', '每小时请求数', null, model.hourly ? hourlyChart(model.hourly.points, { title: false }) : emptyState('not_configured')),
-      panel('side', '调用热度', '按星期与小时统计', emptyState('not_configured', { title: '网关尚未提供小时级分布', body: '网关目前只记录累计调用量。按小时汇总后，这里将显示星期 × 小时的调用热力图。' }))));
+      panel('grow', '每小时请求数', null, model.hourly ? hourlyChart(model.hourly.points, { title: false }) : quietEmpty('not_configured', CALLS_EMPTY)),
+      panel('side', '调用热度', '按星期与小时统计', quietEmpty('not_configured', { title: '暂无小时级统计', body: '网关按小时汇总调用后，这里将显示星期 × 小时的调用热力图。' }))));
 }
 
 /* ============================== 模型评测 ============================== */

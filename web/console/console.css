@@ -173,6 +173,8 @@ button, input, select { font: inherit; color: inherit; }
 .panel-sub { margin: 2px 0 0; color: var(--secondary); font-size: 13px; }
 .empty { color: var(--secondary); font-size: 13px; padding: 28px 8px; text-align: center; }
 .empty strong { display: block; color: var(--label); font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.empty.quiet { padding: 20px 8px; }
+.empty.quiet strong { color: var(--secondary); font-weight: 500; }
 
 .chart-row { display: flex; gap: 28px; align-items: center; flex-wrap: wrap; }
 .chart-row > svg { flex: 0 1 280px; max-width: 100%; height: auto; }
