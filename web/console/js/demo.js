@@ -22,11 +22,11 @@ function seeded(seed) {
 
 export function demoServices() {
   return [
-    { id: 'dep-q32', label: MODELS[0], engine: 'strata', owner: 'zhang', self: true, runtime: RUNTIME_LABEL.running, health: HEALTH_LABEL.healthy, share: '全部成员', vramMiB: 18432, port: 18001 },
-    { id: 'dep-l8', label: MODELS[1], engine: 'vllm', owner: 'li', self: false, runtime: RUNTIME_LABEL.running, health: HEALTH_LABEL.healthy, share: '全部成员', vramMiB: 6554, port: 18002 },
-    { id: 'dep-d14', label: MODELS[2], engine: 'vllm', owner: 'wang', self: false, runtime: RUNTIME_LABEL.running, health: HEALTH_LABEL.degraded, share: '指定成员', vramMiB: 5325, port: 18003 },
-    { id: 'dep-bge', label: MODELS[3], engine: 'tei', owner: 'chen', self: false, runtime: RUNTIME_LABEL.stopped, health: HEALTH_LABEL.unknown, share: '全部成员', vramMiB: null, port: 18004 },
-    { id: 'dep-sft', label: MODELS[4], engine: 'vllm', owner: 'zhang', self: true, runtime: RUNTIME_LABEL.starting, health: HEALTH_LABEL.unknown, share: '仅本人', vramMiB: 1843, port: 18009 },
+    { id: 'dep-q32', label: MODELS[0], engine: 'strata', owner: '张伟', runAs: 'zhang', self: true, runtime: RUNTIME_LABEL.running, health: HEALTH_LABEL.healthy, share: '全部成员', vramMiB: 18432, port: 8000 },
+    { id: 'dep-l8', label: MODELS[1], engine: 'vllm', owner: '李娜', runAs: 'li', self: false, runtime: RUNTIME_LABEL.running, health: HEALTH_LABEL.healthy, share: '全部成员', vramMiB: 6554, port: 8001 },
+    { id: 'dep-d14', label: MODELS[2], engine: 'vllm', owner: '王磊', runAs: 'wang', self: false, runtime: RUNTIME_LABEL.running, health: HEALTH_LABEL.degraded, share: '指定成员', vramMiB: 5325, port: 8081 },
+    { id: 'dep-bge', label: MODELS[3], engine: 'tei', owner: '陈静', runAs: 'chen', self: false, runtime: RUNTIME_LABEL.stopped, health: HEALTH_LABEL.unknown, share: '全部成员', vramMiB: null, port: 9000 },
+    { id: 'dep-sft', label: MODELS[4], engine: 'vllm', owner: '张伟', runAs: 'zhang', self: true, runtime: RUNTIME_LABEL.starting, health: HEALTH_LABEL.unknown, share: '仅本人', vramMiB: 1843, port: 9001 },
   ];
 }
 

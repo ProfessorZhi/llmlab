@@ -58,6 +58,7 @@ from .identity import (
     RequesterContext,
     TokenDirectory,
     TrustedTokenIntrospector,
+    is_account_principal,
 )
 from .models import (
     DEPLOYMENT_READY,
@@ -349,9 +350,67 @@ class RegistryService:
         return proof
 
     def _owner_linux_user(self, principal: str) -> str | None:
-        """engine owner 的 Linux 用户名：**只**从受信目录查，查不到就是 ``None``。"""
+        """engine owner 的 Linux 用户名：**只**从受信目录查，查不到就是 ``None``。
+
+        平台账户返回管理员设定的 ``run_as``（可能为 ``None``，即「只观测」）。
+        """
         found = self.principals.lookup(principal)
-        return found.linux_user if found is not None else None
+        return found.ownership_user if found is not None else None
+
+    def _ownership_for_owner(
+        self,
+        principal: str,
+        target: NormalizedTarget,
+        *,
+        entry: OperatorTarget | None,
+        fallback_linux_user: str | None = None,
+    ) -> OwnershipProof:
+        """按 owner 的种类选证明方式，并施加「一个目标只归一个主体」。
+
+        * Linux 主体：监听 uid 必须是这个主体的 uid（历史行为）；
+        * 平台账户、管理员限定了 ``run_as``：监听 uid 必须是那个 Linux 用户；
+        * 平台账户、未限定：只记录观测到的那一个运行 uid（``runtime_observed``）。
+
+        无论哪种，同一个回环目标已被**另一个**主体登记时一律不算证明过
+        （``target_registered_by_another_account``）：账户不绑定 Linux 之后，这条
+        才是防止「把别人跑着的服务登记到自己名下」的那道门。
+        """
+        if not is_account_principal(principal):
+            return self._prove_ownership(
+                target,
+                entry=entry,
+                # 登记/预检用请求者自己的受信用户名（历史行为）；重验用目录里 owner 那一行。
+                owner_linux_user=fallback_linux_user or self._owner_linux_user(principal),
+            )
+        taken_by = self._target_owner_other_than(principal, target)
+        if taken_by is not None:
+            return OwnershipProof(
+                state=ownership_mod.OWNERSHIP_UNVERIFIED,
+                method=ownership_mod.REASON_TARGET_TAKEN,
+                detail=f"{target.host}:{target.port} is already registered by another principal",
+                reason=ownership_mod.REASON_TARGET_TAKEN,
+            )
+        found = self.principals.lookup(principal)
+        if entry is not None or (found is not None and found.run_as):
+            return self._prove_ownership(
+                target, entry=entry, owner_linux_user=found.run_as if found is not None else None
+            )
+        observe = getattr(self.ownership_prover, "observe", None)
+        if observe is None:
+            return ownership_mod.unverified_proof()
+        proof = observe(target)
+        if not isinstance(proof, OwnershipProof):
+            raise InvalidRequest("ownership_prover.observe must return an OwnershipProof")
+        return proof
+
+    def _target_owner_other_than(self, principal: str, target: NormalizedTarget) -> str | None:
+        for engine in self.store.list_engines():
+            other = engine.target or {}
+            if engine.owner_principal != principal and (
+                other.get("host"), other.get("port")
+            ) == (target.host, target.port):
+                return engine.owner_principal
+        return None
 
     def _observe_protocol(self, target: NormalizedTarget, protocol: str) -> ProtocolObservation:
         observation = self.protocol_prober.probe(target, protocol)
@@ -718,9 +777,13 @@ class RegistryService:
             raise Conflict(f"engine {name!r} already exists with different content")
 
         now = self._now()
-        ownership = self._prove_ownership(
-            target, entry=entry, owner_linux_user=requester.linux_user
+        ownership = self._ownership_for_owner(
+            requester.principal, target, entry=entry, fallback_linux_user=requester.linux_user
         )
+        if ownership.reason == ownership_mod.REASON_TARGET_TAKEN:
+            raise Conflict(
+                f"{target.host}:{target.port} is already registered by another account"
+            )
         observation, protocol_obs, merged = self._verification(target, protocol)
 
         status = ENGINE_REGISTERED
@@ -734,7 +797,12 @@ class RegistryService:
         engine = Engine(
             id=new_id("eng"),
             owner_principal=requester.principal,
-            owner_uid=requester.uid,
+            # 平台账户没有自己的 uid：engine 这一行记下观测到的运行 uid。
+            owner_uid=(
+                ownership.uid
+                if is_account_principal(requester.principal) and ownership.uid is not None
+                else requester.uid
+            ),
             name=name,
             target=target.to_dict(),
             protocol=protocol,
@@ -803,8 +871,8 @@ class RegistryService:
         target, entry = self._engine_target_for(requester, payload, mode)
 
         existing = self.store.engine_by_owner_name(requester.principal, name)
-        ownership = self._prove_ownership(
-            target, entry=entry, owner_linux_user=requester.linux_user
+        ownership = self._ownership_for_owner(
+            requester.principal, target, entry=entry, fallback_linux_user=requester.linux_user
         )
         protocol_obs = self._observe_protocol(target, PROTOCOL_OPENAI_COMPAT)
         data = preflight_mod.build_engine_preflight(
@@ -874,11 +942,7 @@ class RegistryService:
         target = NormalizedTarget(**engine.target)
         # 所有权**重新**证明一次：进程可能已经换了个 uid 在跑，旧结论不该被沿用。
         entry = self._operator_entry_for(target) if engine.mode == ENGINE_MODE_SYSTEM_EXISTING else None
-        ownership = self._prove_ownership(
-            target,
-            entry=entry,
-            owner_linux_user=self._owner_linux_user(engine.owner_principal),
-        )
+        ownership = self._ownership_for_owner(engine.owner_principal, target, entry=entry)
         protocol_obs = self._observe_protocol(target, engine.protocol)
         merged = build_verification(
             transport=observation,

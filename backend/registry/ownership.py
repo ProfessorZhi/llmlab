@@ -68,16 +68,23 @@ OWNERSHIP_UNVERIFIED = "ownership_unverified"
 OWNERSHIP_OPERATOR_VERIFIED = "operator_verified"
 #: 由某个 prover 依据本机事实（uid / socket 属主）证明过。
 OWNERSHIP_UID_VERIFIED = "uid_verified"
+#: 平台账户登记（不限定 Linux 用户时）：本机事实观测到**恰好一个**运行 uid，
+#: 且该目标没有被其他主体登记过。证明的是「这个服务由谁在跑、归谁登记」，
+#: 不是「登记者就是那个 Linux 用户」——账户与 Linux 用户本来就相互独立。
+OWNERSHIP_RUNTIME_OBSERVED = "runtime_observed"
 
 OWNERSHIP_STATES = (
     OWNERSHIP_UNVERIFIED,
     OWNERSHIP_OPERATOR_VERIFIED,
     OWNERSHIP_UID_VERIFIED,
+    OWNERSHIP_RUNTIME_OBSERVED,
 )
 
 #: 哪些状态算「证明过」。刻意是一个显式集合，而不是 ``!= UNVERIFIED`` 之类的
 #: 取反 —— 以后新增状态时，取反会**默认放行**，枚举会默认拒绝。
-OWNERSHIP_VERIFIED_STATES = frozenset({OWNERSHIP_OPERATOR_VERIFIED, OWNERSHIP_UID_VERIFIED})
+OWNERSHIP_VERIFIED_STATES = frozenset(
+    {OWNERSHIP_OPERATOR_VERIFIED, OWNERSHIP_UID_VERIFIED, OWNERSHIP_RUNTIME_OBSERVED}
+)
 
 REASON_NO_OWNERSHIP_SOURCE = "no_ownership_source_in_this_deployment"
 REASON_OPERATOR_POLICY = "operator_policy_entry"
@@ -96,6 +103,8 @@ REASON_UNKNOWN_USER = "unknown_user"
 REASON_TARGET_NOT_LOOPBACK = "target_not_loopback"
 REASON_PROC_NET_UNREADABLE = "proc_net_unreadable"
 REASON_PROC_NET_UNPARSEABLE = "proc_net_unparseable"
+#: 目标已被另一个主体登记。由 Registry 判（它知道谁登记过什么），不是 prover。
+REASON_TARGET_TAKEN = "target_registered_by_another_account"
 
 #: 可选的 prover 种类（``RegistryConfig.ownership_prover_kind``）。
 OWNERSHIP_PROVER_NONE = "none"
@@ -132,6 +141,8 @@ class OwnershipProof:
     detail: str | None = None
     source: str | None = None
     reason: str | None = None
+    #: ``uid`` 在本机对应的用户名（只读 ``pwd`` 反查，查不到为 ``None``）。仅供展示。
+    linux_user: str | None = None
 
     def __post_init__(self) -> None:
         if self.state not in OWNERSHIP_STATES:
@@ -154,6 +165,7 @@ class OwnershipProof:
             "detail": self.detail,
             "source": self.source,
             "reason": self.reason,
+            "linux_user": self.linux_user,
         }
 
 
@@ -201,6 +213,9 @@ class NoOwnershipProver:
             raise InvalidRequest("target must be a NormalizedTarget")
         return unverified_proof(REASON_NO_OWNERSHIP_SOURCE)
 
+    def observe(self, target: NormalizedTarget) -> OwnershipProof:
+        return self.prove(target)
+
 
 class StaticOwnershipProver:
     """**测试替身**：按 (host, port) 预置证明。
@@ -226,6 +241,18 @@ class StaticOwnershipProver:
             return unverified_proof(REASON_TEST_DOUBLE, detail="no static verdict for this target")
         return OwnershipProof(
             state=OWNERSHIP_UID_VERIFIED,
+            method=REASON_TEST_DOUBLE,
+            uid=uid,
+            detail="injected fixture verdict",
+            source=self.name,
+        )
+
+    def observe(self, target: NormalizedTarget) -> OwnershipProof:
+        uid = self._verdicts.get((target.host, target.port))
+        if uid is None:
+            return unverified_proof(REASON_TEST_DOUBLE, detail="no static verdict for this target")
+        return OwnershipProof(
+            state=OWNERSHIP_RUNTIME_OBSERVED,
             method=REASON_TEST_DOUBLE,
             uid=uid,
             detail="injected fixture verdict",
@@ -430,6 +457,16 @@ def listeners_serving(
     return matched
 
 
+def linux_user_for_uid(uid: int) -> str | None:
+    """uid -> 用户名，只用于展示；查不到（或非 Linux）返回 ``None``，从不抛错。"""
+    try:
+        import pwd  # noqa: PLC0415
+
+        return str(pwd.getpwuid(int(uid)).pw_name)
+    except (ImportError, KeyError, ValueError, OverflowError, TypeError):
+        return None
+
+
 def resolve_linux_uid(username: str) -> int:
     """缺省的用户名 -> uid 解析：``pwd.getpwnam``。不存在抛 ``KeyError``。"""
     import pwd  # noqa: PLC0415 - 只在 Linux 上真正用到；延迟导入让模块在别处也能被 import
@@ -469,9 +506,11 @@ class ProcNetOwnershipProver:
         *,
         table: ProcNetListenerTable | None = None,
         user_resolver: Callable[[str], int] | None = None,
+        uid_namer: Callable[[int], str | None] | None = None,
     ) -> None:
         self._table = table if table is not None else ProcNetListenerTable()
         self._resolve_uid = user_resolver if user_resolver is not None else resolve_linux_uid
+        self._name_uid = uid_namer if uid_namer is not None else linux_user_for_uid
 
     def _fail(self, reason: str, detail: str) -> OwnershipProof:
         return OwnershipProof(
@@ -502,6 +541,54 @@ class ProcNetOwnershipProver:
                 f"linux user {owner_linux_user!r} does not exist on this host",
             )
 
+        observed = self._single_listener_uid(target)
+        if isinstance(observed, OwnershipProof):
+            return observed
+        uid, bindings = observed
+        if uid != expected_uid:
+            return self._fail(
+                f"{REASON_OWNER_MISMATCH}:{uid}",
+                f"expected uid {expected_uid} ({owner_linux_user}); observed {bindings}",
+            )
+        return OwnershipProof(
+            state=OWNERSHIP_UID_VERIFIED,
+            method=METHOD_PROC_NET,
+            uid=expected_uid,
+            detail=f"{owner_linux_user} owns {bindings}",
+            source=self._table.source,
+            reason=None,
+            linux_user=owner_linux_user,
+        )
+
+    def observe(self, target: NormalizedTarget) -> OwnershipProof:
+        """不比对用户，只回答「这个回环端口由哪一个 uid 在监听」。
+
+        平台账户（未被限定 Linux 用户）登记时用它：结论是
+        ``runtime_observed`` + 观测到的 uid；没人监听、多个 uid、表读不到时与
+        :meth:`prove` 给同样的失败原因。
+        """
+        if not isinstance(target, NormalizedTarget):
+            raise InvalidRequest("target must be a NormalizedTarget")
+        if not is_loopback_host(target.host):
+            return self._fail(
+                REASON_TARGET_NOT_LOOPBACK, f"refusing to reason about {target.host!r}"
+            )
+        observed = self._single_listener_uid(target)
+        if isinstance(observed, OwnershipProof):
+            return observed
+        uid, bindings = observed
+        return OwnershipProof(
+            state=OWNERSHIP_RUNTIME_OBSERVED,
+            method=METHOD_PROC_NET,
+            uid=uid,
+            detail=f"observed {bindings}",
+            source=self._table.source,
+            reason=None,
+            linux_user=self._name_uid(uid),
+        )
+
+    def _single_listener_uid(self, target: NormalizedTarget) -> tuple[int, str] | OwnershipProof:
+        """``(uid, bindings)``，或一个说明为什么说不出来的失败证明。"""
         try:
             sockets = self._table.listeners()
         except ProcNetUnavailable as exc:
@@ -522,20 +609,7 @@ class ProcNetOwnershipProver:
             return self._fail(
                 REASON_AMBIGUOUS, f"listeners with different uids {uids}: {bindings}"
             )
-        observed = uids[0]
-        if observed != expected_uid:
-            return self._fail(
-                f"{REASON_OWNER_MISMATCH}:{observed}",
-                f"expected uid {expected_uid} ({owner_linux_user}); observed {bindings}",
-            )
-        return OwnershipProof(
-            state=OWNERSHIP_UID_VERIFIED,
-            method=METHOD_PROC_NET,
-            uid=expected_uid,
-            detail=f"{owner_linux_user} owns {bindings}",
-            source=self._table.source,
-            reason=None,
-        )
+        return uids[0], bindings
 
 
 def build_ownership_prover(kind: str) -> object:

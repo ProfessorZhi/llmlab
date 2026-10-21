@@ -59,32 +59,62 @@ function metricValue(ops, name) {
   return item.value;
 }
 
-/** 模型服务列表（管理员看全部，成员看自己的与共享给自己的）。 */
+const ENGINE_STATUS = Object.freeze({
+  verified: { tone: 'ok', text: '运行中' },
+  unavailable: { tone: 'bad', text: '无法访问' },
+  registered: { tone: 'off', text: '未验证' },
+});
+
+/** 推理服务列表：已登记的推理引擎在前，其上的模型部署在后（管理员看全部，成员看自己的与共享给自己的）。 */
 export function servicesFromOps(ops) {
   const reg = ops?.registry;
   if (!reg || reg.adapter_attached === false) return null;
-  const rows = (reg.all && reg.all.length ? reg.all : [...(reg.owned ?? [])]);
-  const seen = new Set(rows.map((r) => r.deployment_id));
-  const list = rows.map((r) => ({
-    id: r.deployment_id,
-    label: r.model_label ?? r.model_id ?? r.deployment_id,
-    engine: r.engine_type ?? null,
-    owner: r.owner_uid ?? null,
-    self: r.owner_is_self === true,
-    runtime: RUNTIME_LABEL[r.runtime_status] ?? RUNTIME_LABEL.unknown,
-    health: HEALTH_LABEL[r.health] ?? HEALTH_LABEL.unknown,
-    share: SHARE_LABEL[r.share?.mode] ?? '—',
-    vramMiB: finite(r.resources?.vram_used_mib) ? r.resources.vram_used_mib : null,
-    updatedAt: r.updated_at ?? null,
+  const list = (reg.engines ?? []).map((e) => ({
+    id: e.engine_id,
+    kind: 'engine',
+    label: e.name,
+    engine: e.framework ?? e.protocol ?? null,
+    owner: e.owner_name ?? e.owner ?? null,
+    runAs: e.run_as_user ?? (Number.isInteger(e.run_as_uid) ? `uid ${e.run_as_uid}` : null),
+    port: e.port ?? null,
+    self: e.owner_is_self === true,
+    runtime: ENGINE_STATUS[e.status] ?? RUNTIME_LABEL.unknown,
+    health: e.status === 'verified' ? HEALTH_LABEL.healthy : e.status === 'unavailable' ? HEALTH_LABEL.unreachable : HEALTH_LABEL.unknown,
+    share: '—',
+    vramMiB: null,
+    updatedAt: e.last_seen_at ?? null,
     sharedToMe: false,
   }));
+  const rows = (reg.all && reg.all.length ? reg.all : [...(reg.owned ?? [])]);
+  const seen = new Set(rows.map((r) => r.deployment_id));
+  for (const r of rows) {
+    list.push({
+      id: r.deployment_id,
+      kind: 'deployment',
+      label: r.model_label ?? r.model_id ?? r.deployment_id,
+      engine: r.engine_type ?? null,
+      owner: r.owner_name ?? r.owner_uid ?? null,
+      runAs: null,
+      port: null,
+      self: r.owner_is_self === true,
+      runtime: RUNTIME_LABEL[r.runtime_status] ?? RUNTIME_LABEL.unknown,
+      health: HEALTH_LABEL[r.health] ?? HEALTH_LABEL.unknown,
+      share: SHARE_LABEL[r.share?.mode] ?? '—',
+      vramMiB: finite(r.resources?.vram_used_mib) ? r.resources.vram_used_mib : null,
+      updatedAt: r.updated_at ?? null,
+      sharedToMe: false,
+    });
+  }
   for (const e of reg.shared ?? []) {
     if (seen.has(e.endpoint_id)) continue;
     list.push({
       id: e.endpoint_id,
+      kind: 'endpoint',
       label: e.model ?? e.name,
       engine: e.protocol ?? null,
-      owner: e.owner_uid ?? null,
+      owner: e.owner_name ?? e.owner_uid ?? null,
+      runAs: null,
+      port: null,
       self: false,
       runtime: RUNTIME_LABEL.unknown,
       health: HEALTH_LABEL.unknown,
@@ -198,7 +228,7 @@ export function overviewModel({ ops = null, host = null, log = null, demo = null
   const vramTotal = hf?.vramTotalMiB ?? toMiB(metricValue(ops, 'device.gpu.memory.total_bytes'));
   const vramUsed = hf?.vramUsedMiB ?? toMiB(metricValue(ops, 'device.gpu.memory.used_bytes'));
   const window = ops?.metrics?.window === '24h' ? '近 24 小时' : null;
-  const online = services ? services.filter((x) => x.runtime === RUNTIME_LABEL.running).length : null;
+  const online = services ? services.filter((x) => x.runtime?.tone === 'ok').length : null;
 
   const modelNames = [
     ...(cf?.models ?? []).map((m) => m.id),
@@ -252,10 +282,12 @@ const PREFLIGHT_DETAIL = Object.freeze({
   connected: '端口已响应',
   connection_refused: '连接被拒绝，端口上没有服务在监听',
   timeout: '连接超时',
-  verified: '监听进程的运行账户与当前用户绑定的 Linux 账户一致',
+  verified: '监听进程由管理员为此账户指定的 Linux 用户运行',
+  runtime_observed: '已记录监听该端口的 Linux 用户',
+  target_registered_by_another_account: '该地址已被其他账户登记',
   not_listening: '该端口没有监听进程',
   ambiguous: '该端口存在多个不同账户的监听进程，无法确定归属',
-  unknown_user: '当前账户未绑定有效的 Linux 用户',
+  unknown_user: '管理员为此账户指定的 Linux 用户在本机不存在',
   target_not_loopback: '服务地址必须为 127.0.0.1',
   proc_net_unreadable: '无法读取本机端口表',
   proc_net_unparseable: '本机端口表格式无法识别',
@@ -266,11 +298,15 @@ const PREFLIGHT_DETAIL = Object.freeze({
   not_configured_in_this_deployment: '本部署未接入此项校验',
   no_ownership_source_in_this_deployment: '本部署未启用归属校验',
 });
-const PREFLIGHT_ORDER = [['port_reachable', '端口可达'], ['ownership', '进程归属'], ['openai_compat', '接口兼容性'], ['name_unique', '名称唯一性']];
+const PREFLIGHT_ORDER = [['port_reachable', '端口可达'], ['ownership', '运行用户'], ['openai_compat', '接口兼容性'], ['name_unique', '名称唯一性']];
 
-function preflightDetail(raw) {
+function preflightDetail(raw, evidence) {
   if (typeof raw !== 'string' || !raw) return '—';
-  if (raw.startsWith('owner_mismatch:')) return `监听进程属于其他账户（uid ${raw.slice('owner_mismatch:'.length)}）`;
+  if (raw.startsWith('owner_mismatch:')) return `监听进程不是由管理员为此账户指定的 Linux 用户运行（实际 uid ${raw.slice('owner_mismatch:'.length)}）`;
+  if (raw === 'runtime_observed') {
+    const who = evidence?.linux_user ?? (Number.isInteger(evidence?.uid) ? `uid ${evidence.uid}` : null);
+    return who ? `服务由 Linux 用户 ${who} 运行，已记录` : PREFLIGHT_DETAIL.runtime_observed;
+  }
   return PREFLIGHT_DETAIL[raw] ?? raw;
 }
 
@@ -280,7 +316,7 @@ export function preflightChecks(data) {
   const list = PREFLIGHT_ORDER.map(([key, title]) => {
     const c = checks[key];
     const ok = c?.ok === true ? true : c?.ok === false ? false : null;
-    return { key, title, ok, detail: c ? preflightDetail(c.detail) : '本部署未接入此项校验' };
+    return { key, title, ok, detail: c ? preflightDetail(c.detail, c.evidence) : '本部署未接入此项校验' };
   });
   return { list, allOk: data.all_ok === true, blocked: list.some((c) => c.ok === false) };
 }

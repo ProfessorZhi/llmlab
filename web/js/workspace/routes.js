@@ -38,6 +38,11 @@ export const BFF_ROUTES = Object.freeze([
   { name: 'ops.usage', method: 'GET', path: '/api/v2/ops/usage', auth: 'session', kind: 'read', scope: 'observability:self:read', owner: 'Data#47', ui: '监控与日志' },
   { name: 'ops.engines', method: 'GET', path: '/api/v2/ops/engines', auth: 'session', kind: 'read', scope: 'observability:self:read', owner: 'Data#47', ui: '算力中心 · 引擎' },
   { name: 'ops.share', method: 'PUT', path: '/api/v2/ops/deployments/{deployment_id}/share', auth: 'session', kind: 'write', scope: 'portal:endpoints:share', owner: 'Integration#49', ui: '模型与对话 · 共享' },
+  // Web registration of an inference service (2026-10-21). Owner is the session
+  // principal (platform account or Linux principal); the Registry records the
+  // Linux user it observes serving the port. Used by the console's 登记推理服务 flow.
+  { name: 'registry.engines.preflight', method: 'POST', path: '/api/v2/registry/engines/preflight', auth: 'session', kind: 'write', scope: 'registry:write', owner: 'Integration#49', ui: '推理服务 · 登记预检' },
+  { name: 'registry.engines.register', method: 'POST', path: '/api/v2/registry/engines', auth: 'session', kind: 'write', scope: 'registry:write', owner: 'Integration#49', ui: '推理服务 · 登记' },
   // SEAM-1 (#115). A declared write boundary, not a button: the authority is
   // Registry's `RegistryService.invoke` (row ACL, readiness, payload bound,
   // audit-before-forward). No control is wired to this path in this build, and

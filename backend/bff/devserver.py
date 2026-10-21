@@ -32,10 +32,12 @@ from ..observability import engines as obs_engines
 from ..observability import identity as obs_identity
 from ..registry.gateway import DetachedGatewayAdapter, MockGatewayAdapter
 from ..registry.identity import Principal, PrincipalDirectory, TokenDirectory
-from ..registry.health import StaticProber
+from ..registry.health import LoopbackHttpProber, LoopbackProtocolProber, StaticProber
+from ..registry.ownership import ProcNetOwnershipProver
 from ..registry.registry import RegistryConfig, RegistryService
 from ..registry.store import Store
 from . import origin as bff_origin
+from .account_directory import AccountAwareDirectory
 from . import stacks as bff_stacks
 from .app import RESERVED_BIND_PORTS, OpsApplication
 from .evaluation_adapter import ModuleEvaluationAdapter
@@ -90,6 +92,7 @@ def build_application(
     accounts: object | None = None,
     allowed_logins: tuple[str, ...] | None = None,
     trusted_authorities: tuple[str, ...] = (),
+    observe_local_engines: bool = False,
 ) -> OpsApplication:
     """把三块拼起来。**只建对象，不开端口。**
 
@@ -103,28 +106,43 @@ def build_application(
     authority_policy = bff_origin.AuthorityPolicy.build(trusted_authorities)
     accounts = accounts if accounts is not None else linux_accounts.SystemPwdSource()
 
-    principals = PrincipalDirectory(
-        [
-            Principal(linux_user_id(host_id, uid), name, uid, display_name=name)
-            for name, uid in HOST_USERS
-        ]
+    auth_app = AuthApplication(_local_config(state_dir))
+    # 建表 / 迁移；否则第一个请求会以 500 收场。
+    auth_app.initialize()
+
+    # 静态的合成 Linux 主体 + 管理员随时创建的平台账户（每次查询都读账户库）。
+    principals = AccountAwareDirectory(
+        PrincipalDirectory(
+            [
+                Principal(linux_user_id(host_id, uid), name, uid, display_name=name)
+                for name, uid in HOST_USERS
+            ]
+        ),
+        auth_app.service.accounts,
     )
 
+    local = {}
+    if observe_local_engines:
+        # 只读本机事实：回环 HTTP 探测、/v1/models、/proc/net/tcp 的监听 uid。
+        local = {
+            "prober": prober if prober is not None else LoopbackHttpProber(),
+            "protocol_prober": LoopbackProtocolProber(),
+            "ownership_prover": ProcNetOwnershipProver(),
+        }
     service = RegistryService(
         store=Store(database),
         tokens=TokenDirectory(()),
         principals=principals,
         config=RegistryConfig(mode="synthetic"),
-        prober=prober,
+        prober=local.get("prober", prober),
+        protocol_prober=local.get("protocol_prober"),
+        ownership_prover=local.get("ownership_prover"),
         gateway=MockGatewayAdapter() if mock_gateway else DetachedGatewayAdapter(),
     )
 
     observability = build_observability_adapter(service=service, accounts=accounts)
     evaluation = build_evaluation_adapter(service=service)
 
-    auth_app = AuthApplication(_local_config(state_dir))
-    # 建表 / 迁移；否则第一个请求会以 500 收场。
-    auth_app.initialize()
     linux_service = build_linux_service(
         host_id=host_id,
         admin_names=admin_names,
@@ -341,6 +359,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="attach a test-double prober so endpoints can become verified",
     )
     parser.add_argument(
+        "--observe-local-engines",
+        action="store_true",
+        help=(
+            "probe registered loopback engines for real (HTTP, /v1/models) and read "
+            "/proc/net/tcp to record which Linux user runs them; read-only"
+        ),
+    )
+    parser.add_argument(
         "--synthetic-logins",
         action="store_true",
         help="print the synthetic identities (no passwords, no tokens)",
@@ -374,6 +400,7 @@ def main(argv: list[str] | None = None) -> int:
         mock_gateway=True,
         prober=StaticProber() if args.with_static_prober else None,
         trusted_authorities=tuple(args.trusted_authority),
+        observe_local_engines=args.observe_local_engines,
     )
 
     if args.synthetic_logins:

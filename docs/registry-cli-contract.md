@@ -939,8 +939,33 @@ helper（预检能过的目标，登记的目标校验也能过）。请求：
 `not_configured_in_this_deployment` 或 `no_ownership_source_in_this_deployment`）。
 `all_ok` 只有四个都是 `true` 才为真。`port_reachable` 只在挂了传输 prober 的部署
 （`--probe-loopback`）才真的做回环 TCP connect；`openai_compat` 用协议 prober
-（只读 `GET /v1/models`）。BFF（`/api/v2/ops/*`）**没有**镜像这条路由：那需要改
-`route_map`、能力目录与 CSRF 接线，属于 Integration Lane。
+（只读 `GET /v1/models`）。BFF 以会话身份镜像了这条路由与登记本身：
+`POST /api/v2/registry/engines/preflight` 与 `POST /api/v2/registry/engines`
+（`route_map` 的 `registry.engines.{preflight,register}`，CSRF + 同源，owner 只来自会话）。
+
+#### 18.3.2 平台账户作为 owner（2026-10-21，Owner 选定方案 A）
+
+平台账户（`backend.auth.accounts`，主体 id `account:<hex>`）与 Linux 账户相互独立：
+一个人在自己常用的 Linux 用户下启动引擎，再用管理员创建的平台账户登记。于是对
+`account:` 主体，所有权的含义变成「这个服务由谁在跑、归谁登记」：
+
+| 情形 | 判定 | `ownership.state` |
+|---|---|---|
+| 该回环目标已被**另一个**主体登记 | 拒绝；预检 `ok=false`，登记 `409` | `ownership_unverified`，`reason=target_registered_by_another_account` |
+| 管理员为该账户设了 `run_as`（用户页「限定 Linux 用户」） | 监听 uid 必须是那个 Linux 用户（同 §18.3 的 prove） | `uid_verified` 或失败原因 |
+| 未设 `run_as` | 只观测：能服务该目标的 socket 恰好一个 uid 即可，记下 uid 与用户名 | `runtime_observed` |
+
+* `runtime_observed` 属于 `OWNERSHIP_VERIFIED_STATES`；预检的 `detail` 为
+  `runtime_observed`，`evidence.uid` / `evidence.linux_user` 是观测到的运行用户；
+* account 名下 engine 的 `owner_uid` 写观测到的运行 uid（账户本身没有 uid；其余对象写
+  `UID_UNMAPPED = -1`）；
+* `PrincipalDirectory` 中 `kind="account"` 的主体：`linux_user` 是账户用户名（展示 /
+  路由标签，不是主机账户），`uid=None`，`run_as` 可选；BFF 的
+  `AccountAwareDirectory` 每次查询都读账户库，停用的账户即为 `suspended`；
+* Linux 主体（`linux:<host>:<uid>`）的行为**不变**。
+
+同一个目标只归一个主体这条门目前只对 `account:` owner 生效；Linux 主体本来就由 uid
+比对隔开。
 
 ### 18.4 强制档
 

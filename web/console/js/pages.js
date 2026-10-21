@@ -23,17 +23,20 @@ const panel = (cls, title, sub, ...body) => h('section', { class: `panel ${cls}`
 /* ============================== 概览 ============================== */
 // 平台的核心是资源监控与推理服务；API 调用统计是次要信息，没配置、没调用都属正常。
 const CALLS_EMPTY = { title: '暂无调用记录', body: '为推理服务创建 API 密钥并通过网关调用后，这里会显示调用统计。' };
-const SERVICES_EMPTY = { title: '还没有登记推理服务', body: '启动推理引擎后，在「推理服务」中登记，这里会显示它的运行状态与显存占用。' };
+const SERVICES_EMPTY = { title: '还没有登记推理服务', body: '在自己的 Linux 用户下启动推理引擎，再用平台账户登记，这里会显示它的运行状态与显存占用。' };
 
 function servicesTable(list, { compact = false } = {}) {
-  const cols = compact ? ['推理服务', '推理框架', '所有者', '显存', '状态'] : ['推理服务', '推理框架', '所有者', '访问范围', '显存', '健康', '状态'];
+  const cols = compact ? ['推理服务', '推理框架', '所有者', '运行用户', '显存', '状态'] : ['推理服务', '推理框架', '所有者', '运行用户', '访问范围', '显存', '健康', '状态'];
   const vramCol = cols.indexOf('显存');
   return h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
     h('thead', {}, h('tr', {}, cols.map((t, i) => h('th', { scope: 'col', class: i === vramCol ? 'num' : null }, t)))),
     h('tbody', {}, list.map((x) => h('tr', {},
-      h('td', {}, h('div', { style: { 'font-weight': 500 } }, x.label), x.sharedToMe ? h('div', { class: 'muted', style: { 'font-size': '12px' } }, '共享给我') : null),
+      h('td', {}, h('div', { style: { 'font-weight': 500 } }, x.label),
+        x.sharedToMe ? h('div', { class: 'muted', style: { 'font-size': '12px' } }, '共享给我')
+          : x.port ? h('div', { class: 'muted tnum', style: { 'font-size': '12px' } }, `端口 ${x.port}`) : null),
       h('td', {}, engineLabel(x.engine)),
-      h('td', { class: 'tnum' }, x.owner ?? '—', x.self ? h('span', { class: 'muted' }, '（我）') : null),
+      h('td', {}, x.owner ?? '—', x.self ? h('span', { class: 'muted' }, '（我）') : null),
+      h('td', { class: x.runAs ? 'tnum' : 'muted' }, x.runAs ?? '—'),
       compact ? null : h('td', {}, x.share),
       h('td', { class: 'num' }, x.vramMiB == null ? '—' : `${fmtGiB(x.vramMiB)} GB`),
       compact ? null : h('td', {}, statusBadge(x.health)),
@@ -118,7 +121,7 @@ export async function services(ctx) {
     ? (list.length ? servicesTable(list) : h('div', { class: 'group' }, quietEmpty('ready', SERVICES_EMPTY)))
     : emptyState(state);
   return h('div', { class: 'page' },
-    pageHead('推理服务', '实验室内已登记的推理引擎与模型。成员自行启动推理引擎后登记，系统校验监听进程后发布。',
+    pageHead('推理服务', '实验室内已登记的推理引擎与模型。服务归登记它的平台账户所有，「运行用户」是登记时检测到的监听进程所属 Linux 用户。',
       h('a', { class: 'btn primary', href: '#/services/register' }, '登记推理服务')),
     body);
 }
@@ -174,20 +177,21 @@ export async function register(ctx) {
       st.cli = `llmlab engines register --name ${st.name} --target-url ${target()} --tag framework:${st.framework}`;
       return '网页端注册尚未接入：注册接口目前只接受 Portal 签发的访问令牌。请先使用命令行注册。';
     }
-    if (r.state === 'not_configured') return '本部署尚未启用模型服务注册。';
+    if (r.state === 'not_configured') return '本部署尚未启用推理服务登记。';
     if (r.state === 'signed_out') return '会话已失效，请重新登录。';
-    if (r.state === 'denied') return '当前账户没有注册模型服务的权限。';
+    if (r.status === 409) return '该地址或服务名称已被登记。';
+    if (r.state === 'denied') return '当前账户没有登记推理服务的权限。';
     return r.message ?? `${verb}失败（${r.reason ?? r.status ?? '未知原因'}）`;
   }
 
   function draw() {
     while (root.firstChild) root.firstChild.remove();
-    const labels = ['服务配置', '归属校验', '发布'];
+    const labels = ['服务配置', '登记检查', '发布'];
     root.append(
       h('header', {},
         h('a', { class: 'crumb', href: '#/services' }, '推理服务'),
         h('h1', { class: 'page-title', style: { 'margin-top': '6px' } }, '登记推理服务'),
-        h('p', { class: 'page-sub' }, '请先使用本人的 Linux 账户启动推理服务。注册时，系统将校验该端口的监听进程是否归属于您的账户，校验通过后服务方可发布。')),
+        h('p', { class: 'page-sub' }, '先在你使用的 Linux 用户下启动推理服务，再在这里登记。系统会检测监听该端口的进程由哪个 Linux 用户运行并一并记录；同一个地址只能被一个账户登记。')),
       h('ol', { class: 'steps', 'aria-label': '注册步骤' }, labels.map((l, i) => {
         const n = i + 1;
         return h('li', { class: n < st.step ? 'done' : null, 'aria-current': n === st.step ? 'step' : null },
@@ -199,9 +203,9 @@ export async function register(ctx) {
       root.append(
         section('服务配置', h('div', { class: 'group' },
           field('推理框架', sel),
-          field('监听端口', h('input', { class: 'tnum', inputmode: 'numeric', placeholder: '18009', value: st.port, oninput: (e) => { st.port = e.target.value.trim(); } })),
+          field('监听端口', h('input', { class: 'tnum', inputmode: 'numeric', placeholder: '8000', value: st.port, oninput: (e) => { st.port = e.target.value.trim(); } })),
           field('服务名称', h('input', { placeholder: 'qwen2.5-7b-sft-v3', value: st.name, oninput: (e) => { st.name = e.target.value.trim(); }, style: { width: '260px' } }))),
-          '服务仅需监听 127.0.0.1，由网关在本机转发。服务名称即调用时的 model 参数，不能与您已有的服务重名。'),
+          '服务仅需监听 127.0.0.1，端口须在管理员允许的列表内（默认 8000、8001、8081、9000、9001）。服务名称即调用时的 model 参数，不能与你已有的服务重名。'),
         h('fieldset', { style: { border: 0, padding: 0, margin: 0 } },
           h('legend', { class: 'section-title', style: { 'margin-bottom': '8px' } }, '访问范围'),
           h('div', { class: 'group' }, [['private', '仅本人'], ['all', '全部成员'], ['selected', '指定成员']].map(([v, l]) =>
@@ -213,7 +217,7 @@ export async function register(ctx) {
     } else {
       root.append(
         h('div', { style: { display: 'flex', 'align-items': 'center', gap: '12px' } }, checkIcon(true, 28), h('h2', { style: { margin: 0, 'font-size': '22px', 'font-weight': 600 } }, '服务已发布')),
-        h('p', { class: 'muted', style: { margin: 0 } }, `${st.name} 当前访问范围为「${{ private: '仅本人', all: '全部成员', selected: '指定成员' }[st.scope]}」，可在「模型服务」中调整或停用。`),
+        h('p', { class: 'muted', style: { margin: 0 } }, `${st.name} 当前访问范围为「${{ private: '仅本人', all: '全部成员', selected: '指定成员' }[st.scope]}」，可在「推理服务」中查看运行状态。`),
         section('调用示例', h('div', { class: 'code' },
           `curl ${location.origin}/v1/chat/completions \\\n  -H "Authorization: Bearer $LLMLAB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model": "${st.name}", "messages": [{"role": "user", "content": "Hello"}]}'`)));
     }
@@ -227,7 +231,7 @@ export async function register(ctx) {
         : st.step === 2 ? h('button', { type: 'button', class: 'btn primary', disabled: blocked || st.busy, onclick: publish }, st.busy ? '正在发布…' : '发布')
           : h('a', { class: 'btn primary', href: '#/services' }, '完成')),
       h('p', { class: 'muted', style: { margin: 0, 'padding-top': '20px', 'border-top': '1px solid var(--hairline)', 'font-size': '13px' } },
-        '管理员可在「用户与权限」中为任意成员代为注册模型服务，归属校验规则保持一致。'));
+        '管理员可以在「用户与权限」中为某个账户指定 Linux 用户，指定后该账户只能登记由这个 Linux 用户运行的服务。'));
   }
   draw();
   return root;
@@ -330,7 +334,7 @@ export async function evaluation(ctx) {
 }
 
 /* ============================== 用户与权限 ============================== */
-const USERS_SUBTITLE = '平台账户独立于 Linux 账户，登录不依赖主机账户。可选填写对应的 Linux 用户名，用于核对模型服务的归属。';
+const USERS_SUBTITLE = '平台账户独立于 Linux 账户，登录不依赖主机账户。登记推理服务时会自动记录它由哪个 Linux 用户运行。';
 
 function copyButton(text) {
   const btn = h('button', { type: 'button', class: 'linkbtn', onclick: async () => {
@@ -369,7 +373,7 @@ export async function users(ctx) {
     if (st.msg) root.append(h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.msg));
 
     const table = h('div', { class: 'table-wrap', style: { flex: '999 1 560px', 'min-width': 0 } }, h('table', { class: 'data', style: { 'min-width': '560px' } },
-      h('thead', {}, h('tr', {}, ['用户', 'Linux 用户名', '角色', '状态', '最近登录'].map((t) => h('th', { scope: 'col' }, t)))),
+      h('thead', {}, h('tr', {}, ['用户', '限定 Linux 用户', '角色', '状态', '最近登录'].map((t) => h('th', { scope: 'col' }, t)))),
       h('tbody', {}, list.length === 0
         ? h('tr', {}, h('td', { colspan: 5, class: 'muted', style: { 'text-align': 'center', padding: '28px 12px' } }, '还没有平台账户。点击「添加用户」创建第一个账户。'))
         : list.map((u) => h('tr', {
@@ -378,7 +382,7 @@ export async function users(ctx) {
         onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); st.sel = u.id; st.temp = null; st.creating = false; draw(); } },
       },
       h('td', {}, h('div', { style: { 'font-weight': 500 } }, u.display_name || u.username), h('div', { class: 'muted', style: { 'font-size': '13px' } }, u.username)),
-      h('td', { class: 'tnum' }, u.linux_user ?? '—'),
+      h('td', { class: u.linux_user ? 'tnum' : 'muted' }, u.linux_user ?? '不限'),
       h('td', {}, u.role === 'admin' ? '管理员' : '成员'),
       h('td', {}, u.status === 'active' ? '正常' : '已停用'),
       h('td', { class: u.last_login_at ? null : 'muted' }, u.last_login_at ? relTime(u.last_login_at) : '尚未登录'))))));
@@ -392,7 +396,7 @@ export async function users(ctx) {
         section('账户', h('div', { class: 'group' },
           h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, '用户名'), inp('username', 'zhang')),
           h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, '显示名称'), inp('display_name', '张伟')),
-          h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, 'Linux 用户名（可选）'), inp('linux_user', 'zhang')),
+          h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, '限定 Linux 用户（可选）'), inp('linux_user', '不限')),
           h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, '管理员权限'), h('input', { type: 'checkbox', onchange: (e) => { form.role = e.target.checked ? 'admin' : 'member'; }, style: { width: '20px', height: '20px' } }))),
         '创建后系统将生成一次性临时密码，用户首次登录时须设置新密码。'),
         h('div', { class: 'actions' },
@@ -408,11 +412,11 @@ export async function users(ctx) {
           h('span', { class: 'avatar', style: { width: '48px', height: '48px', 'font-size': '18px' } }, (sel.display_name || sel.username).slice(0, 1)),
           h('div', {}, h('div', { style: { 'font-size': '19px', 'font-weight': 600 } }, sel.display_name || sel.username), h('div', { class: 'muted' }, sel.username))),
         section('账户', h('div', { class: 'group' },
-          h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, 'Linux 用户名'),
-            h('input', { class: 'tnum', value: sel.linux_user ?? '', placeholder: '未填写', style: { width: '140px' }, onchange: (e) => act(PATHS.userLinux, { user_id: sel.id, linux_user: e.target.value.trim() }, () => { if (ctx.demo) sel.linux_user = e.target.value.trim(); }) })),
+          h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, '限定 Linux 用户'),
+            h('input', { class: 'tnum', value: sel.linux_user ?? '', placeholder: '不限', style: { width: '140px' }, onchange: (e) => act(PATHS.userLinux, { user_id: sel.id, linux_user: e.target.value.trim() }, () => { if (ctx.demo) sel.linux_user = e.target.value.trim(); }) })),
           h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, '管理员权限'),
             h('input', { type: 'checkbox', checked: sel.role === 'admin', style: { width: '20px', height: '20px' }, onchange: (e) => act(PATHS.userRole, { user_id: sel.id, role: e.target.checked ? 'admin' : 'member' }, () => { if (ctx.demo) sel.role = e.target.checked ? 'admin' : 'member'; }) }))),
-        '管理员可添加用户、重置密码，并为任意成员代为注册模型服务。Linux 用户名只用于核对模型服务的归属，不影响平台登录；变更后，该用户名下的模型服务将重新进行归属校验。'),
+        '留空表示不限：该账户可以登记由任意 Linux 用户运行的服务，系统只做记录。填写后，只能登记由这个 Linux 用户运行的服务。这一项不影响平台登录。'),
         section('密码', h('div', { class: 'group' },
           h('button', { type: 'button', class: 'cell action', onclick: () => {
             if (!ctx.demo && !globalThis.confirm?.(`重置 ${sel.display_name || sel.username} 的密码？该用户的现有会话将全部注销。`)) return;

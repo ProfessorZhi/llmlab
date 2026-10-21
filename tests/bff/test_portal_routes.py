@@ -195,11 +195,16 @@ class HostSummaryTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.h.close()
 
-    def test_a_member_without_the_host_scope_is_refused_with_403(self):
-        """整机读数是共享量、有自己的一道门；一个普通成员看不到它。"""
+    def test_a_member_reads_it_and_gets_the_same_503_when_nothing_was_read(self):
+        """整机读数对成员开放；没读到时成员与管理员得到同一个 503。"""
         response = self.h.client("alice").run("GET", "/api/infra/summary")
-        self.assertEqual(response.status, 403)
-        self.assertEqual(response.error_code(), "observability.access_denied")
+        self.assertEqual(response.status, 503)
+        self.assertEqual(response.error_code(), "observability.source_unavailable")
+
+    def test_an_unauthenticated_caller_is_still_refused(self):
+        anonymous = S.WsgiClient(app=self.h.app, host="127.0.0.1:8790", scheme="http")
+        response = anonymous.run("GET", "/api/infra/summary")
+        self.assertEqual(response.status, 401)
 
     def test_an_elevated_session_reads_it_but_gets_503_when_nothing_was_read(self):
         """装配了、但这次没读到 ⇒ 503，**不是**一份全 UNKNOWN 的 200。
@@ -287,10 +292,12 @@ class HostSummaryWithProjectionTests(unittest.TestCase):
             [key for key, item in data["metrics"].items() if item["state"] == "live"], []
         )
 
-    def test_a_member_cannot_reach_the_projection_even_when_it_is_fresh(self):
-        """数据的可得性与权限无关：来源再新，没这道 scope 就是 403。"""
-        response = self.h_fresh.client("alice").run("GET", "/api/infra/summary")
-        self.assertEqual(response.status, 403)
+    def test_a_member_reads_the_fresh_projection(self):
+        """资源监控面向全体成员：来源新鲜时成员拿到与管理员同样的投影。"""
+        member = self.h_fresh.client("alice").run("GET", "/api/infra/summary")
+        admin = self.h_fresh.admin_client("carol").run("GET", "/api/infra/summary")
+        self.assertEqual(member.status, 200, member.json())
+        self.assertEqual(member.json()["data"], admin.json()["data"])
 
     def test_no_response_names_an_upstream_address_or_a_credential(self):
         """答复里不该出现任何内网地址、凭据或本机路径。"""
@@ -324,10 +331,10 @@ class PortalServicesTests(unittest.TestCase):
         for harness in (cls.h, cls.h_offline, cls.h_bad_shape):
             harness.close()
 
-    def test_a_member_is_refused_with_the_same_403_as_the_host_route(self):
+    def test_a_member_gets_the_same_answer_as_the_host_route(self):
         response = self.h.client("alice").run("GET", "/api/portal/services")
-        self.assertEqual(response.status, 403)
-        self.assertEqual(response.error_code(), "observability.access_denied")
+        self.assertEqual(response.status, 503)
+        self.assertEqual(response.error_code(), "observability.source_unavailable")
 
     def test_an_elevated_session_gets_503_when_nothing_was_read(self):
         response = self.h.admin_client("carol").run("GET", "/api/portal/services")
@@ -531,16 +538,16 @@ class CapabilitiesRouteTests(unittest.TestCase):
         self.assertEqual(response.status, 200, response.json())
         return response.json()["data"]
 
-    def test_a_member_sees_the_host_source_as_auth_required_not_missing(self):
-        """成员缺 ``observability:host:read``：那条来源是 ``auth_required``。
+    def test_a_member_sees_the_host_source_like_an_admin_does(self):
+        """成员也持有 ``observability:host:read``（2026-10-21 起，资源监控面向全体成员）。
 
-        它不是 ``not_configured`` —— 来源在，是这条会话没被授权。这两个答案会把
-        运维引向完全不同的两个方向。
+        于是成员看到的是与管理员同一个诚实结局：来源已装配、但从未采到样本 ⇒
+        ``stale`` / ``no_sample_yet``，而不是 ``auth_required``。
         """
         data = self._manifest(self.h.client("alice"))
         by_source = {item["source"]: item for item in data["sources"]}
-        self.assertEqual(by_source["host_summary"]["state"], "auth_required")
-        self.assertEqual(by_source["host_summary"]["reason"], "missing_required_scope")
+        self.assertEqual(by_source["host_summary"]["state"], "stale")
+        self.assertEqual(by_source["host_summary"]["reason"], "no_sample_yet")
         self.assertTrue(by_source["host_summary"]["attached"])
 
     def test_an_elevated_session_gets_the_host_source_as_stale_never_sampled(self):

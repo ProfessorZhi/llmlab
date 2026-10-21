@@ -26,7 +26,7 @@ from typing import Callable
 
 from .errors import InvalidRequest
 from .health import PROTOCOL_UNKNOWN, ProtocolObservation
-from .ownership import REASON_NO_OWNERSHIP_SOURCE, OwnershipProof
+from .ownership import OWNERSHIP_RUNTIME_OBSERVED, REASON_NO_OWNERSHIP_SOURCE, OwnershipProof
 from .urls import NormalizedTarget, is_loopback_host
 
 PREFLIGHT_SCHEMA = "registry-engine-preflight/1"
@@ -98,7 +98,9 @@ def ownership_check(proof: OwnershipProof) -> dict:
     """``ok=None`` 只给「本部署没有所有权来源」；其余未证明一律 ``False``。"""
     if not isinstance(proof, OwnershipProof):
         raise InvalidRequest("ownership must be an OwnershipProof")
-    if proof.verified:
+    if proof.state == OWNERSHIP_RUNTIME_OBSERVED:
+        check = _check(True, OWNERSHIP_RUNTIME_OBSERVED)
+    elif proof.verified:
         check = _check(True, DETAIL_OWNERSHIP_VERIFIED)
     else:
         reason = proof.reason or proof.method

@@ -55,9 +55,11 @@ npm run serve
 
 ```bash
 python3 -m backend.auth.bootstrap init --state-dir /tmp/llmlab-dev   # 交互式设置本机 admin 口令（不经命令行/环境变量）
-python3 -m backend.bff --state-dir /tmp/llmlab-dev --database /tmp/llmlab-dev/registry.db
+python3 -m backend.bff --state-dir /tmp/llmlab-dev --database /tmp/llmlab-dev/registry.db --observe-local-engines
 LLMLAB_DEV_API=http://127.0.0.1:8790 npm run serve
-# http://127.0.0.1:8123/console/ — 以 admin 登录后在「用户与权限」创建平台账户
+# http://127.0.0.1:8123/console/ — 以 admin 登录后在「用户与权限」创建平台账户；
+# 成员用自己的账户登录后，在「推理服务 → 登记推理服务」登记本机 127.0.0.1 上的推理引擎，
+# 系统会记录它由哪个 Linux 用户运行（--observe-local-engines 只读本机端口表与 /v1/models）。
 ```
 
 后端 CLI 入口：

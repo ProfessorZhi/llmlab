@@ -33,6 +33,7 @@ from typing import Callable, Iterable, Protocol
 
 from ..registry import dto as registry_dto
 from ..registry import health as registry_health
+from ..registry import models as registry_models
 from . import scopes as bff_scopes
 from .sharing import endpoint_share_block, narrowest_share
 
@@ -282,6 +283,43 @@ def deployment_record(
     }
 
 
+def principal_name(principals, principal: str) -> str:
+    """主体 id ⇒ 给人看的名字（平台账户是显示名，Linux 主体是登录名）。查不到原样返回。"""
+    record = principals.lookup(principal) if principals is not None else None
+    if record is None:
+        return principal
+    return record.display_name or record.linux_user or principal
+
+
+def engine_record(engine, *, subject: str, principals) -> dict:
+    """一个已登记的推理服务（Registry engine）⇒ 前端的一行。
+
+    ``run_as_user`` 是登记 / 重验时在本机观测到的监听进程用户（``/proc/net/tcp``
+    的 uid 反查）；它是事实记录，不是授权依据。没观测到就是 ``None``。
+    """
+    ownership = dict(engine.ownership or {})
+    framework = next(
+        (tag.split(":", 1)[1] for tag in (engine.tags or ()) if tag.startswith("framework:")),
+        None,
+    )
+    return {
+        "engine_id": engine.id,
+        "name": engine.name,
+        "protocol": engine.protocol,
+        "framework": framework,
+        "port": (engine.target or {}).get("port"),
+        "owner": engine.owner_principal,
+        "owner_name": principal_name(principals, engine.owner_principal),
+        "owner_is_self": engine.owner_principal == subject,
+        "status": engine.status,
+        "ownership_state": ownership.get("state"),
+        "ownership_verified": bool(ownership.get("verified")),
+        "run_as_user": ownership.get("linux_user"),
+        "run_as_uid": ownership.get("uid"),
+        "last_seen_at": registry_models.isoformat(engine.last_seen_at),
+    }
+
+
 def shared_endpoint_record(
     *,
     endpoint,
@@ -449,6 +487,14 @@ def build_ops(
         for item in mine
     ]
 
+    for row in owned:
+        row["owner_name"] = principal_name(service.principals, row["owner_uid"])
+
+    engines = [
+        engine_record(item, subject=subject, principals=service.principals)
+        for item in policy.visible_engines()
+    ]
+
     shared = []
     if visibility == VISIBILITY_SHARED_PORTAL:
         for item in endpoints:
@@ -478,6 +524,7 @@ def build_ops(
                     "model_id": item.model_id,
                     "model_label": model.name if model is not None else None,
                     "owner_uid": item.owner_principal,
+                    "owner_name": principal_name(service.principals, item.owner_principal),
                     "health": _health_columns(
                         registry_dto.render_deployment(item).get("health") or {}
                     )[0],
@@ -556,6 +603,7 @@ def build_ops(
             "owned": owned,
             "shared": shared,
             "all": all_rows,
+            "engines": engines,
         },
         "keys": keys,
         "playground": (

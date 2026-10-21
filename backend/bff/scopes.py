@@ -110,8 +110,12 @@ class RoleScopes:
 
 
 #: 成员：能读目录、能登记元数据、能共享自己的 Endpoint、能调用被授权的
-#: Endpoint、能读自己的调用日志、能看**自己**的用量与评测队列。**没有**任何
-#: admin 能力，也没有 ``observability:host:read``（整机/整卡读数不是个人数据）。
+#: Endpoint、能读自己的调用日志、能看**自己**的用量与评测队列，以及整机/整卡读数
+#: （``observability:host:read``）。**没有**任何 admin 能力。
+#:
+#: 整机读数原先只给管理员；平台的核心用途就是让共用这台 GPU 工作站的成员看到
+#: 资源占用（2026-10-21 由 Owner 确认），所以成员也能读。它仍是一个独立 scope，
+#: Grafana/Prometheus 原生界面等其它管理面不受影响。
 _MEMBER = RoleScopes(
     portal=frozenset(
         {
@@ -128,7 +132,9 @@ _MEMBER = RoleScopes(
             registry_identity.SCOPE_ENDPOINT_INVOKE,
         }
     ),
-    observability=frozenset({observability_identity.SCOPE_SELF_READ}),
+    observability=frozenset(
+        {observability_identity.SCOPE_SELF_READ, observability_identity.SCOPE_HOST_READ}
+    ),
     evaluation=frozenset(
         {
             evaluation_identity.SCOPE_EVAL_READ,
@@ -148,11 +154,7 @@ _ADMIN = RoleScopes(
     registry=_MEMBER.registry | {registry_identity.SCOPE_ADMIN_READ},
     # 整机/整卡读数与全局用量摘要同属管理面；host 读数单独一个 scope，因此这里
     # 显式写两条，而不是让 admin 顺带拿到它。
-    observability=_MEMBER.observability
-    | {
-        observability_identity.SCOPE_ADMIN_READ,
-        observability_identity.SCOPE_HOST_READ,
-    },
+    observability=_MEMBER.observability | {observability_identity.SCOPE_ADMIN_READ},
     evaluation=_MEMBER.evaluation | {evaluation_identity.SCOPE_EVAL_ADMIN_READ},
 )
 

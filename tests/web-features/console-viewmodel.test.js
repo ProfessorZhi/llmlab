@@ -86,16 +86,44 @@ test('overview from the real BFF payloads: unknown metrics stay null', () => {
   }
 });
 
-test('services: owned, all and shared rows map without inventing runtime state', () => {
+test('services: engines first, then owned/all/shared rows, without inventing runtime state', () => {
   const admin = servicesFromOps(PAYLOADS.admin_private);
-  assert.equal(admin.length, 1);
-  assert.equal(admin[0].label, 'model-alice');
-  assert.equal(admin[0].runtime.text, '状态未知');
-  assert.equal(admin[0].vramMiB, null);
+  assert.deepEqual(admin.map((x) => x.kind), ['engine', 'deployment']);
+  const [engine, deployment] = admin;
+  assert.equal(engine.label, 'engine-alice');
+  assert.equal(engine.owner, 'alice', 'owner is the readable name, not the principal id');
+  assert.equal(engine.runAs, null, 'no runtime user was observed, so none is shown');
+  assert.equal(engine.port, 8000);
+  assert.equal(engine.runtime.text, '运行中');
+  assert.equal(deployment.label, 'model-alice');
+  assert.equal(deployment.runtime.text, '状态未知');
+  assert.equal(deployment.vramMiB, null);
   const shared = servicesFromOps(PAYLOADS.grantee_shared);
-  assert.equal(shared.length, 1);
-  assert.equal(shared[0].sharedToMe, true);
+  assert.equal(shared.filter((x) => x.sharedToMe).length, 1);
   assert.equal(servicesFromOps({ registry: { adapter_attached: false } }), null);
+});
+
+test('services: a runtime Linux user observed at registration is shown as recorded', () => {
+  const list = servicesFromOps({ registry: { owned: [], shared: [], engines: [
+    { engine_id: 'e1', name: 'qwen', protocol: 'openai_compatible', framework: 'vllm', port: 8000, owner: 'account:aa', owner_name: '张伟', owner_is_self: true, status: 'registered', run_as_user: 'zhang', run_as_uid: 1001 },
+    { engine_id: 'e2', name: 'bge', protocol: 'openai_compatible', framework: null, port: 8001, owner: 'account:bb', owner_name: '李娜', owner_is_self: false, status: 'unavailable', run_as_user: null, run_as_uid: 1002 },
+  ] } });
+  assert.equal(list[0].runAs, 'zhang');
+  assert.equal(list[0].engine, 'vllm');
+  assert.equal(list[0].runtime.text, '未验证');
+  assert.equal(list[1].runAs, 'uid 1002', 'an unnamed uid is still shown, never hidden');
+  assert.equal(list[1].engine, 'openai_compatible');
+  assert.equal(list[1].runtime.text, '无法访问');
+});
+
+test('overview counts a verified engine as running', () => {
+  const ops = { registry: { owned: [], shared: [], engines: [
+    { engine_id: 'e1', name: 'qwen', protocol: 'openai_compatible', owner: 'account:aa', owner_is_self: true, status: 'verified' },
+    { engine_id: 'e2', name: 'bge', protocol: 'openai_compatible', owner: 'account:aa', owner_is_self: true, status: 'unavailable' },
+  ] } };
+  const m = overviewModel({ ops });
+  assert.equal(m.kpis.servicesOnline, 1);
+  assert.equal(m.kpis.servicesTotal, 2);
 });
 
 test('verified principal metrics feed the KPIs with their real names and units', () => {
@@ -159,7 +187,12 @@ test('preflight: three-state checks, missing source is not a failure', () => {
 
   const bad = preflightChecks({ all_ok: false, checks: { ownership: { ok: false, detail: 'owner_mismatch:1001' } } });
   assert.equal(bad.blocked, true);
-  assert.equal(bad.list[1].detail, '监听进程属于其他账户（uid 1001）');
+  assert.equal(bad.list[1].detail, '监听进程不是由管理员为此账户指定的 Linux 用户运行（实际 uid 1001）');
+  const observed = preflightChecks({ all_ok: true, checks: { ownership: { ok: true, detail: 'runtime_observed', evidence: { uid: 1001, linux_user: 'zhang' } } } });
+  assert.equal(observed.list[1].detail, '服务由 Linux 用户 zhang 运行，已记录');
+  const taken = preflightChecks({ all_ok: false, checks: { ownership: { ok: false, detail: 'target_registered_by_another_account' } } });
+  assert.equal(taken.blocked, true);
+  assert.equal(taken.list[1].detail, '该地址已被其他账户登记');
   assert.equal(bad.list[0].ok, null, 'an absent check reads as not available, never as passed');
   assert.equal(preflightChecks({}), null);
 });

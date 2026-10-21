@@ -112,26 +112,69 @@ PRINCIPAL_APPROVED = "approved"
 PRINCIPAL_SUSPENDED = "suspended"
 PRINCIPAL_STATES = (PRINCIPAL_APPROVED, PRINCIPAL_SUSPENDED)
 
+#: 主体种类。``linux`` 是历史上的「一个主机账户 = 一个主体」；``account`` 是
+#: 与 Linux 无关的平台账户（``backend.auth.accounts``，主体 id 为 ``account:<hex>``）。
+PRINCIPAL_KIND_LINUX = "linux"
+PRINCIPAL_KIND_ACCOUNT = "account"
+PRINCIPAL_KINDS = (PRINCIPAL_KIND_LINUX, PRINCIPAL_KIND_ACCOUNT)
+ACCOUNT_PRINCIPAL_PREFIX = "account:"
+
+#: 平台账户没有「自己的」uid。它名下的行在 ``owner_uid`` 列里写这个值；服务实际
+#: 以哪个 Linux 用户运行，记录在 engine 的 ``ownership.uid`` 里（登记时观测到的）。
+UID_UNMAPPED = -1
+
+
+def is_account_principal(principal: object) -> bool:
+    return isinstance(principal, str) and principal.startswith(ACCOUNT_PRINCIPAL_PREFIX)
+
 
 @dataclass(frozen=True)
 class Principal:
-    """一个平台主体的服务端事实：**owner 的最终依据**。"""
+    """一个平台主体的服务端事实：**owner 的最终依据**。
+
+    ``kind == "account"`` 时：``linux_user`` 是账户用户名（展示与路由标签，不是主机
+    账户），``uid`` 为 ``None``；``run_as`` 若非空，则这个账户只能登记以该 Linux
+    用户运行的服务（管理员设定的可选限制）。
+    """
 
     principal: str
     linux_user: str
-    uid: int
+    uid: int | None
     state: str = PRINCIPAL_APPROVED
     display_name: str | None = None
+    kind: str = PRINCIPAL_KIND_LINUX
+    run_as: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.principal, str) or not self.principal.strip():
             raise InvalidRequest("principal must be a non-empty string")
         if not isinstance(self.linux_user, str) or not self.linux_user.strip():
             raise InvalidRequest("linux_user must be a non-empty string")
-        if not isinstance(self.uid, int) or isinstance(self.uid, bool) or self.uid < 0:
-            raise InvalidRequest("uid must be a non-negative integer")
+        if self.kind not in PRINCIPAL_KINDS:
+            raise InvalidRequest(f"unknown principal kind: {self.kind!r}")
+        if self.kind == PRINCIPAL_KIND_ACCOUNT:
+            if not is_account_principal(self.principal):
+                raise InvalidRequest("account principals must be named account:<id>")
+            if self.uid is not None:
+                raise InvalidRequest("account principals carry no uid")
+        else:
+            if is_account_principal(self.principal):
+                raise InvalidRequest("account:<id> principals must be of kind 'account'")
+            if self.run_as is not None:
+                raise InvalidRequest("run_as only applies to account principals")
+            if not isinstance(self.uid, int) or isinstance(self.uid, bool) or self.uid < 0:
+                raise InvalidRequest("uid must be a non-negative integer")
         if self.state not in PRINCIPAL_STATES:
             raise InvalidRequest(f"unknown principal state: {self.state!r}")
+
+    @property
+    def is_account(self) -> bool:
+        return self.kind == PRINCIPAL_KIND_ACCOUNT
+
+    @property
+    def ownership_user(self) -> str | None:
+        """所有权校验要比对的 Linux 用户名；``None`` 表示「只观测、不比对」。"""
+        return self.run_as if self.is_account else self.linux_user
 
     @property
     def approved(self) -> bool:
@@ -145,6 +188,8 @@ class Principal:
             "state": self.state,
             "approved": self.approved,
             "display_name": self.display_name,
+            "kind": self.kind,
+            "run_as": self.run_as,
         }
 
 
@@ -206,13 +251,14 @@ class PrincipalDirectory:
                 raise InvalidRequest("directory entries must be Principal")
             if principal.principal in by_principal:
                 raise InvalidRequest(f"duplicate principal: {principal.principal!r}")
-            if principal.uid in seen_uids:
+            if principal.uid is not None and principal.uid in seen_uids:
                 # 一个 UID 只能属于一个主体：否则「owner 是谁」会有两个答案。
                 raise InvalidRequest(
                     f"uid {principal.uid} already bound to {seen_uids[principal.uid]!r}"
                 )
             by_principal[principal.principal] = principal
-            seen_uids[principal.uid] = principal.principal
+            if principal.uid is not None:
+                seen_uids[principal.uid] = principal.principal
         self._by_principal = by_principal
         self._approved = frozenset(
             p.principal for p in by_principal.values() if p.approved

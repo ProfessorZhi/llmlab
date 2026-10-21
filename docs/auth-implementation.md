@@ -195,7 +195,9 @@ CSRF token **只能**通过服务端接口同源获取，前端**不得**把它�
 - 登录与改口令各自限速（`account_login` 按 IP+用户名，`account_password` 按账户）。
 - 审计只记录 actor 与目标的主体 id，不记录口令或令牌。
 
-**尚未完成（后续）：** BFF 的 `resolve_principal` 目前只把 `linux_pam` 会话映射为 Registry 主体，所以平台账户登录后，Ops / 调用日志等数据路由仍返回 `403`，页面会如实显示“没有访问权限”。按 Issue #17，要把 `linux_user` 标签用作宿主机范围的归属映射，需要另行评审，不在本次范围内。
+**接入 BFF 与 Registry（2026-10-21）：** 平台账户会话经 `backend/bff/identity.py` 映射为 Registry 主体 `account:<hex>`（还在用一次性口令的会话得到 `403 password_change_required`）；`role=admin` 的账户直接持有管理员词表，不使用 Linux 会话那套共享口令提权。账户登记的推理服务归账户所有，登记时记录监听进程所属的 Linux 用户；`linux_user`（用户页「限定 Linux 用户」）留空即不限，填写后只能登记由该 Linux 用户运行的服务。细节见 `docs/registry-cli-contract.md` §18.3.2。整机 / GPU 读数（`observability:host:read`）对全体成员开放；Grafana / Prometheus 原生界面仍只给管理员。
+
+**仍未做：** 平台账户的 CLI scoped token（`principal_ref` 目前只为 Linux 主体给出 uid，Registry 的 token 自省会拒绝没有 uid 的回答）。
 
 ### 4.4 Cookie
 

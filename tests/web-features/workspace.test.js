@@ -335,6 +335,8 @@ const BFF_ROUTE_CONTRACT = [
   { name: 'ops.usage', method: 'GET', path: '/api/v2/ops/usage', auth: 'session', kind: 'read', scope: 'observability:self:read' },
   { name: 'ops.engines', method: 'GET', path: '/api/v2/ops/engines', auth: 'session', kind: 'read', scope: 'observability:self:read' },
   { name: 'ops.share', method: 'PUT', path: '/api/v2/ops/deployments/{deployment_id}/share', auth: 'session', kind: 'write', scope: 'portal:endpoints:share' },
+  { name: 'registry.engines.preflight', method: 'POST', path: '/api/v2/registry/engines/preflight', auth: 'session', kind: 'write', scope: 'registry:write' },
+  { name: 'registry.engines.register', method: 'POST', path: '/api/v2/registry/engines', auth: 'session', kind: 'write', scope: 'registry:write' },
   { name: 'ops.invoke', method: 'POST', path: '/api/v2/ops/endpoints/{endpoint_id}/invoke', auth: 'session', kind: 'write', scope: 'registry:endpoint:invoke' },
   { name: 'portal.infra_summary', method: 'GET', path: '/api/infra/summary', auth: 'session', kind: 'read', scope: 'observability:host:read' },
   { name: 'atlas.calls', method: 'GET', path: '/api/atlas/calls', auth: 'session', kind: 'read', scope: 'atlas:calls:self:read' },
@@ -365,16 +367,17 @@ test('the admin route matrix mirrors backend/bff/route_map.py exactly', () => {
   }));
   assert.ok(specs.length >= 10, 'parser found the route table');
 
-  // The mirror is pinned to the single BFF route-map contract (20 routes: the
+  // The mirror is pinned to the single BFF route-map contract (22 routes: the
   // 17 from PR #85 @ 6062ed39, `evaluation.report_download` from #92/#91,
-  // `portal.events` from #110, and `ops.invoke` from SEAM-1 #115). A stacked
+  // `portal.events` from #110, `ops.invoke` from SEAM-1 #115, and the two
+  // web-registration routes `registry.engines.{preflight,register}`). A stacked
   // checkout can predate one of those BFF PRs and carry a shorter table. Two
   // rules keep that honest — neither is a skip, and together they fail on any
   // divergence in either direction:
   //   1. every row the local Python table declares must match the mirror exactly;
   //   2. the rows the mirror has and the local table does not must be EXACTLY
   //      the pending set. Any other unexplained row fails.
-  assert.equal(BFF_ROUTES.length, 20, 'the mirror is pinned to the 20-route contract');
+  assert.equal(BFF_ROUTES.length, 22, 'the mirror is pinned to the 22-route contract');
 
   // The independent pin: every row's method/path/session/read-write/scope must
   // match the recorded contract, including the rows a stacked checkout cannot

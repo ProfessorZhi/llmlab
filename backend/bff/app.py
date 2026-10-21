@@ -50,6 +50,7 @@ from typing import Any, Callable, Iterable, Mapping
 
 from ..atlas import errors as atlas_errors
 from ..auth import errors as auth_errors
+from ..auth import store as auth_store
 from ..auth.routes import REASON_PHRASES
 from ..auth.wsgi import build_request
 from ..auth_linux import errors as linux_errors
@@ -835,6 +836,31 @@ class OpsApplication:
 
     # --- PUT /api/v2/ops/deployments/{id}/share -----------------------------
 
+    # --- POST /api/v2/registry/engines[/preflight] --------------------------
+
+    def _registry_body(self, request):
+        self._reject_asserted_identity(request)
+        self._write_preflight(request)
+        principal = self._principal(request)
+        body = _json_body(request)
+        if body is None:
+            raise registry_errors.InvalidRequest("a JSON object body is required")
+        return principal, body
+
+    def _registry_preflight(self, request):
+        """网页登记前的只读预检。owner 只来自会话；Registry 不写库、不写审计。"""
+        principal, body = self._registry_body(request)
+        envelope = self.service.preflight_engine(principal.requester, body)
+        return _json_response(200, envelope)
+
+    def _registry_register(self, request):
+        """网页登记推理服务。与 CLI 登记走同一个 ``RegistryService.register_engine``。"""
+        principal, body = self._registry_body(request)
+        envelope, created = self.service.register_engine(
+            principal.requester, body, idempotency_key=request.header("idempotency-key")
+        )
+        return _json_response(201 if created else 200, envelope)
+
     def _share(self, request, deployment_id: str):
         self._reject_asserted_identity(request)
         self._write_preflight(request)
@@ -1014,15 +1040,20 @@ class OpsApplication:
 
         1. 拒绝自报身份的头（``X-Admin`` 之类出现即 400）；
         2. 复用既有 CSRF / 同源校验——提权是一个写操作；
-        3. ``_principal`` 把 cookie 解成**受信主体**，它只接受 ``linux_pam``
-           会话。没有登录、Feishu 会话、演示用的本地管理员，都在这一步拿不到
-           主体，因此根本走不到口令校验。第三个身份来源不是被"额外检查"掉的，
-           是没有可提权的会话；
+        3. ``_principal`` 把 cookie 解成**受信主体**；共享口令提权**只**适用于
+           ``linux_pam`` 会话。没有登录、Feishu 会话在这一步拿不到主体；平台账户
+           与本机 ``admin`` 拿得到主体，但它们的角色由账户管理决定、不需要也不
+           允许用共享口令提权，所以在这里明确拒绝，走不到口令校验；
         4. 只有到这里，才把主体 + 口令交给 ``AdminModeService``。
         """
         self._reject_asserted_identity(request)
         self._write_preflight(request)
         principal = self._principal(request)
+        if principal.user is None or principal.user.auth_source != auth_store.SOURCE_LINUX:
+            raise bff_identity.NotLinuxSession(
+                "shared-password admin mode applies to Linux sessions only; "
+                "platform accounts get their role from account management"
+            )
 
         body = _json_body(request)
         if body is None:

@@ -101,7 +101,7 @@ class SessionResolutionTests(unittest.TestCase):
 
 
 class NonLinuxSessionTests(unittest.TestCase):
-    """The baseline Feishu / local-admin channels stay, but map to no principal."""
+    """Feishu maps to no principal; the bootstrap local admin gets the admin view only."""
 
     def setUp(self):
         self.h = harness()
@@ -123,10 +123,22 @@ class NonLinuxSessionTests(unittest.TestCase):
         self.assertEqual(caught.exception.reason, "linux_auth_not_enabled")
         self.assertEqual(caught.exception.status, 403)
 
-    def test_the_local_admin_channel_gets_no_registry_principal_either(self):
+    def test_the_local_admin_channel_gets_an_admin_view_but_no_registry_identity(self):
+        # The bootstrap ``admin`` manages accounts; it reads the whole lab but is
+        # no Linux user and not in the principal directory, so nothing it
+        # registers could prove ownership.
         user = self.h.auth_app.service.db.ensure_local_user("demo-admin")
-        with self.assertRaises(bff_identity.NotLinuxSession):
-            self.h.app.resolve_session(self._session_for(user.id))
+        principal = self.h.app.resolve_session(self._session_for(user.id))
+        self.assertTrue(principal.elevated)
+        self.assertEqual(principal.uid, -1)
+        self.assertIsNone(self.h.app.service.principals.lookup(principal.principal))
+
+    def test_a_disabled_local_admin_is_still_refused(self):
+        user = self.h.auth_app.service.db.ensure_local_user("demo-admin")
+        session = self._session_for(user.id)
+        self.h.auth_app.service.db.set_user_status(user.id, "disabled")
+        with self.assertRaises(bff_identity.IdentityError):
+            self.h.app.resolve_session(session)
 
 
 class AssertedIdentityTests(unittest.TestCase):

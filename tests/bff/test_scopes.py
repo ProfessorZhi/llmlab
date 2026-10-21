@@ -73,12 +73,13 @@ class VocabularyTests(unittest.TestCase):
             self.assertTrue(role.observability <= observability_identity.ALL_SCOPES)
             self.assertTrue(role.evaluation <= evaluation_identity.KNOWN_SCOPES)
 
-    def test_no_role_ever_gets_real_dispatch_or_the_host_readings(self):
-        """Two capabilities that must stay out of the role table.
+    def test_no_role_ever_gets_real_dispatch_and_everyone_gets_host_readings(self):
+        """Real dispatch stays out of the role table; host readings are for all.
 
         Real evaluation dispatch is closed by the admission policy *and* by an
         unwired adapter; withholding the scope is the third lock. Host-wide
-        readings are not personal data, so a member's role does not carry them.
+        GPU/host readings are the lab's shared resource view, so since
+        2026-10-21 (owner decision) members carry them too.
         """
         from backend.evaluation import identity as evaluation_identity
         from backend.observability import identity as observability_identity
@@ -90,8 +91,9 @@ class VocabularyTests(unittest.TestCase):
         self.assertNotIn(
             evaluation_identity.SCOPE_EVAL_ADMIN_MANAGE, admin.evaluation
         )
-        self.assertNotIn(observability_identity.SCOPE_HOST_READ, member.observability)
+        self.assertIn(observability_identity.SCOPE_HOST_READ, member.observability)
         self.assertIn(observability_identity.SCOPE_HOST_READ, admin.observability)
+        self.assertNotIn(observability_identity.SCOPE_ADMIN_READ, member.observability)
 
     def test_every_portal_implies_mapping_holds(self):
         for portal, registry in bff_scopes.PORTAL_IMPLIES_REGISTRY.items():
@@ -171,12 +173,14 @@ class ElevationIsTheOnlyPromotionTests(unittest.TestCase):
         self.assertFalse(bff_scopes.is_platform_admin(auth_store.ROLE_MEMBER))
         self.assertTrue(bff_scopes.is_platform_admin(elevated=True))
 
-    def test_a_member_session_never_gets_host_readings(self):
-        """Elevation adds them; being a member must not."""
+    def test_host_readings_are_shared_but_the_admin_view_is_not(self):
+        """Every session sees host readings; only elevation adds the admin view."""
         member = bff_scopes.session_scopes(elevated=False)
         elevated = bff_scopes.session_scopes(elevated=True)
-        self.assertNotIn(observability_identity.SCOPE_HOST_READ, member.observability)
+        self.assertIn(observability_identity.SCOPE_HOST_READ, member.observability)
         self.assertIn(observability_identity.SCOPE_HOST_READ, elevated.observability)
+        self.assertNotIn(observability_identity.SCOPE_ADMIN_READ, member.observability)
+        self.assertIn(observability_identity.SCOPE_ADMIN_READ, elevated.observability)
 
     def test_the_effective_role_is_derived_from_elevation_alone(self):
         self.assertEqual(
