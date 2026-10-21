@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 import { sunburstLayout, dotGridLayout, barsLayout, fmtInt, fmtGiB } from '../../web/console/js/charts.js';
 import {
-  percentile, servicesFromOps, hourlyFromOps, callsFacts, overviewModel, preflightChecks,
+  percentile, servicesFromOps, modelsFromOps, hourlyFromOps, callsFacts, overviewModel, preflightChecks,
 } from '../../web/console/js/viewmodel.js';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -195,4 +195,13 @@ test('preflight: three-state checks, missing source is not a failure', () => {
   assert.equal(taken.list[1].detail, '该地址已被其他账户登记');
   assert.equal(bad.list[0].ok, null, 'an absent check reads as not available, never as passed');
   assert.equal(preflightChecks({}), null);
+});
+
+test('models: owner name and weight path come straight from the payload', () => {
+  const list = modelsFromOps({ registry: { owned: [], shared: [], models: [
+    { model_id: 'm1', name: 'qwen', format: 'hf', owner: 'account:a', owner_name: '张伟', owner_is_self: true, weight_path: '/data/qwen' },
+    { model_id: 'm2', name: 'bge', format: null, owner: 'account:b', owner_name: '李娜', owner_is_self: false, weight_path: null },
+  ] } });
+  assert.deepEqual(list.map((m) => [m.name, m.owner, m.self, m.weightPath]), [['qwen', '张伟', true, '/data/qwen'], ['bge', '李娜', false, null]]);
+  assert.equal(modelsFromOps({ registry: { adapter_attached: false } }), null);
 });

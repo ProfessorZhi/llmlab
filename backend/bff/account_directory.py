@@ -37,10 +37,15 @@ def account_principal(account) -> Principal:
     )
 
 
-class AccountAwareDirectory:
-    """静态目录 + 平台账户库。与 :class:`PrincipalDirectory` 同一个形状。"""
+class AccountAwareDirectory(PrincipalDirectory):
+    """静态目录 + 平台账户库。
+
+    是 :class:`PrincipalDirectory` 的子类：Registry 的 ``resolve_requester``
+    （token 通道）只认这个类型，所以平台账户的 CLI 令牌也走同一道判定。
+    """
 
     def __init__(self, static: PrincipalDirectory, accounts) -> None:
+        super().__init__(())
         self._static = static
         self._accounts = accounts
 

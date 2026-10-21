@@ -1,6 +1,6 @@
 /*! web/console/js/main.js — 控制台入口：会话、边栏导航与路由。 */
 import { h, clear } from './dom.js';
-import { PATHS, loadMe, login, send, rememberCsrf } from './data.js';
+import { PATHS, loadMe, loadIntegrations, login, safeJumpUrl, send, rememberCsrf } from './data.js';
 import { DEMO_ME } from './demo.js';
 import { navIcon, brandMark, emptyState } from './ui.js';
 import * as pages from './pages.js';
@@ -14,6 +14,7 @@ const NAV = [
   { group: null, items: [
     { route: '#/overview', label: '概览', icon: 'overview', color: '#007AFF', page: pages.overview },
     { route: '#/usage', label: '资源监控', icon: 'usage', color: '#30B0C7', page: pages.usage },
+    { route: '#/models', label: '模型库', icon: 'models', color: '#34C759', page: pages.models },
     { route: '#/services', label: '推理服务', icon: 'services', color: '#5856D6', page: pages.services },
     { route: '#/evaluation', label: '模型评测', icon: 'evaluation', color: '#FF2D55', page: pages.evaluation },
     { route: '#/plugins', label: '插件', icon: 'extensions', color: '#636366', page: pages.extensions },
@@ -28,7 +29,7 @@ const NAV = [
 ];
 const EXTRA_ROUTES = { '#/services/register': { parent: '#/services', page: pages.register, label: '登记推理服务' } };
 
-const ctx = { demo: DEMO, me: null, navigate: (r) => { location.hash = r; }, isAdmin: () => isAdmin() };
+const ctx = { demo: DEMO, me: null, navigate: (r) => { location.hash = r; }, isAdmin: () => isAdmin(), invalidateLaunch: () => { launchLinks = null; }, rerender: () => render() };
 const root = document.getElementById('app');
 
 function isAdmin() {
@@ -45,11 +46,43 @@ function sidebar(active) {
       g.items.map((it) => h('a', { class: 'nav-item', href: it.route, 'aria-current': it.route === active ? 'page' : null },
         navIcon(it.icon, it.color), it.label)),
     ]),
+    quickLaunch(),
     h('div', { class: 'sidebar-foot' },
       h('span', { class: 'avatar', 'aria-hidden': 'true' }, name.slice(0, 1)),
       h('div', { class: 'who' }, h('div', { style: { 'font-weight': 500 } }, name),
         h('div', {}, [ctx.me?.username ?? ctx.me?.linux_user, isAdmin() ? '管理员' : '成员'].filter(Boolean).join(' · ')),
         h('button', { type: 'button', class: 'linkbtn', onclick: logout }, '退出登录'))));
+}
+
+/* 快捷入口：自带网页界面的插件（管理员在「插件」页填好的跳转地址），点开即在新标签页打开。 */
+let launchLinks = null;
+let launchOpen = true;
+try { launchOpen = localStorage.getItem('llmlab.launch.open') !== '0'; } catch { /* 无存储时默认展开 */ }
+
+async function loadLaunchLinks() {
+  if (DEMO) {
+    launchLinks = [{ key: 'strata', name: 'Strata 控制台', ui_url: '/strata/' }, { key: 'grafana', name: 'Grafana', ui_url: '/grafana/' }, { key: 'evalscope', name: 'EvalScope 报告', ui_url: '/evalscope/' }];
+    return;
+  }
+  const r = await loadIntegrations();
+  launchLinks = r.state === 'ready' ? r.value.filter((row) => safeJumpUrl(row.ui_url)) : [];
+}
+
+function quickLaunch() {
+  if (!launchLinks || !launchLinks.length) return null;
+  const list = h('div', { hidden: !launchOpen }, launchLinks.map((row) => h('a', {
+    class: 'nav-item', href: safeJumpUrl(row.ui_url), target: '_blank', rel: 'noopener noreferrer',
+    'aria-label': `打开 ${row.name}（新标签页）`,
+  }, navIcon('launch', '#8E8E93'), row.name, h('span', { class: 'ext-mark', 'aria-hidden': 'true' }, '↗'))));
+  const toggle = h('button', {
+    type: 'button', class: 'nav-group launch-toggle', 'aria-expanded': String(launchOpen),
+    onclick: () => {
+      launchOpen = !launchOpen;
+      try { localStorage.setItem('llmlab.launch.open', launchOpen ? '1' : '0'); } catch { /* 忽略 */ }
+      toggle.setAttribute('aria-expanded', String(launchOpen)); list.hidden = !launchOpen;
+    },
+  }, h('span', { style: { display: 'flex', 'align-items': 'center' } }, '快捷入口', h('span', { class: 'chev', 'aria-hidden': 'true' }, '›')));
+  return [toggle, list];
 }
 
 function findRoute(hash) {
@@ -62,6 +95,7 @@ async function render() {
   const hash = location.hash || '#/overview';
   if (!DEMO && (!ctx.me || hash === '#/login')) { renderLogin(); return; }
   if (ctx.me?.must_change_password) { renderChangePassword(); return; }
+  if (launchLinks === null) await loadLaunchLinks();
   const route = findRoute(hash) ?? findRoute('#/overview');
   const active = route.parent ?? route.route;
   const main = h('main', { class: 'main', id: 'main', tabindex: -1 }, h('div', { class: 'page' }, h('p', { class: 'muted' }, '正在加载…')));
@@ -142,6 +176,7 @@ function renderChangePassword() {
 async function logout() {
   if (!DEMO) await send(PATHS.logout, {});
   rememberCsrf(null);
+  launchLinks = null;
   ctx.me = null;
   location.hash = '#/login';
   render();

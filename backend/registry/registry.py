@@ -278,9 +278,13 @@ class RegistryService:
         ownership_prover: object | None = None,
         router: object | None = None,
         port_checker: Callable[[NormalizedTarget], tuple[bool, str]] | None = None,
+        discovery: object | None = None,
         clock: Clock = utc_now,
     ) -> None:
         self.store = store
+        #: 本机发现器（``local_discovery.LocalDiscovery``）。``None`` = 本部署没开发现：
+        #: ``discover`` 如实回答 ``configured: false``，而不是一份空清单。
+        self.discovery = discovery
         self.tokens = tokens
         self.principals = principals
         self.config = config or RegistryConfig()
@@ -890,6 +894,50 @@ class RegistryService:
                 "只读预检：不登记、不写审计；ok=null 表示本部署没有这条来源，不是失败。",
                 "所有权的用户名来自受信目录；请求里的 uid/owner 字段一律被拒绝。",
             ],
+        )
+
+    def discover(self, requester: RequesterContext) -> dict:
+        """本机候选：正在监听的推理服务与授权目录里的模型。**只读**，不登记任何东西。
+
+        候选只是清单；登记仍走 ``register_engine`` / ``register_model``，所有权与
+        「一个地址只归一个主体」的判定都在那里。
+        """
+        policy = self.policy(requester)
+        policy.require_read_scope()
+        if self.discovery is None:
+            return self._envelope(
+                {"configured": False, "engines": [], "models": [], "problems": ["discovery_not_configured"]},
+                requester,
+                notes=["本部署没有开启本机发现；仍可手动登记。"],
+            )
+        registered_targets: dict[tuple[str, int], bool] = {}
+        for engine in self.store.list_engines():
+            target = engine.target or {}
+            key = (target.get("host"), target.get("port"))
+            registered_targets[key] = registered_targets.get(key, False) or (
+                engine.owner_principal == requester.principal
+            )
+        registered_paths: dict[str, bool] = {}
+        for model in self.store.list_models():
+            if model.weight_path:
+                registered_paths[model.weight_path] = registered_paths.get(model.weight_path, False) or (
+                    model.owner_principal == requester.principal
+                )
+        engines, engine_problem = self.discovery.engines(registered_targets=registered_targets)
+        models, missing_roots = self.discovery.models(registered_paths=registered_paths)
+        problems = [engine_problem] if engine_problem else []
+        problems += [f"model_root_unavailable:{root}" for root in missing_roots]
+        return self._envelope(
+            {
+                "configured": True,
+                "engines": [item.to_dict() for item in engines],
+                "models": [item.to_dict() for item in models],
+                "model_roots": list(self.discovery.model_roots),
+                "allowed_ports": sorted(self.discovery.allowed_ports),
+                "problems": problems,
+            },
+            requester,
+            notes=["候选只是清单：登记走与手动登记相同的接口与校验。"],
         )
 
     def _engine_view(

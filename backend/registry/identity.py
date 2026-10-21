@@ -286,7 +286,7 @@ class RequesterContext:
     """一次请求的受信身份。**只能**由凭据 + 受信目录构造。"""
 
     principal: str
-    uid: int
+    uid: int | None
     linux_user: str
     scopes: frozenset[str]
     roles: frozenset[str] = frozenset()
@@ -481,7 +481,11 @@ class TrustedTokenIntrospector:
         linux_user = mapping.get("linux_user")
         if not isinstance(principal, str) or not principal.strip():
             return None
-        if not isinstance(uid, int) or isinstance(uid, bool) or uid < 0:
+        if is_account_principal(principal):
+            # 平台账户没有 uid：回答里必须**没有**，有了反而说明签发方搞混了主体。
+            if uid is not None:
+                return None
+        elif not isinstance(uid, int) or isinstance(uid, bool) or uid < 0:
             return None
         if not isinstance(linux_user, str) or not linux_user.strip():
             return None
@@ -581,7 +585,7 @@ def resolve_requester(
 
         return RequesterContext(
             principal=principal.principal,
-            uid=principal.uid,
+            uid=principal.uid if principal.uid is not None else UID_UNMAPPED,
             linux_user=principal.linux_user,
             scopes=frozenset(binding.scopes),
             roles=frozenset(binding.roles),
@@ -607,7 +611,7 @@ def resolve_requester(
             )
         return RequesterContext(
             principal=principal.principal,
-            uid=principal.uid,
+            uid=principal.uid if principal.uid is not None else UID_UNMAPPED,
             linux_user=principal.linux_user,
             scopes=answer.scopes,
             roles=answer.roles,

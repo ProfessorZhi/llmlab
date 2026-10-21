@@ -589,6 +589,28 @@
     },
     {
       "method": "GET",
+      "path": "/api/v2/registry/discovery",
+      "provider": "portal_bff",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session",
+      "required_scope": "registry:read",
+      "priority": 1,
+      "notes": "read-only local candidates: loopback listeners on allowed ports (/proc/net/tcp + read-only /v1/models) and model directories under admin-configured roots (config.json and file names/sizes only). Nothing is registered; configured=false when the deployment does not attach discovery"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/registry/models",
+      "provider": "portal_bff",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session",
+      "required_scope": "registry:write",
+      "priority": 1,
+      "notes": "web registration of a model; owner from the session; the weight path is a reference the Registry never opens"
+    },
+    {
+      "method": "GET",
       "path": "/api/portal/events",
       "provider": "os_structured_events",
       "implementation_status": "bff_declared",

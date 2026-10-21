@@ -43,6 +43,8 @@ export const BFF_ROUTES = Object.freeze([
   // Linux user it observes serving the port. Used by the console's 登记推理服务 flow.
   { name: 'registry.engines.preflight', method: 'POST', path: '/api/v2/registry/engines/preflight', auth: 'session', kind: 'write', scope: 'registry:write', owner: 'Integration#49', ui: '推理服务 · 登记预检' },
   { name: 'registry.engines.register', method: 'POST', path: '/api/v2/registry/engines', auth: 'session', kind: 'write', scope: 'registry:write', owner: 'Integration#49', ui: '推理服务 · 登记' },
+  { name: 'registry.discovery', method: 'GET', path: '/api/v2/registry/discovery', auth: 'session', kind: 'read', scope: 'registry:read', owner: 'Integration#49', ui: '推理服务 / 模型库 · 本机发现' },
+  { name: 'registry.models.register', method: 'POST', path: '/api/v2/registry/models', auth: 'session', kind: 'write', scope: 'registry:write', owner: 'Integration#49', ui: '模型库 · 登记模型' },
   // SEAM-1 (#115). A declared write boundary, not a button: the authority is
   // Registry's `RegistryService.invoke` (row ACL, readiness, payload bound,
   // audit-before-forward). No control is wired to this path in this build, and

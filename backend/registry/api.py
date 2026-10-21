@@ -178,6 +178,7 @@ ROUTES: tuple[tuple[str, re.Pattern[str], str], ...] = (
     ("GET", re.compile(rf"^{PREFIX}/audit$"), "_route_audit"),
     ("GET", re.compile(rf"^{PREFIX}/routing-config$"), "_route_routing_config"),
     ("GET", re.compile(rf"^{PREFIX}/routing-snapshot$"), "_route_routing_snapshot"),
+    ("GET", re.compile(rf"^{PREFIX}/discovery$"), "_route_discovery"),
     ("GET", re.compile(rf"^{PREFIX}/engines$"), "_route_engines_list"),
     ("POST", re.compile(rf"^{PREFIX}/engines$"), "_route_engines_create"),
     # 只读预检（登记表单用）：必须排在 ``engines/{id}`` 之前，否则 ``preflight``
@@ -338,6 +339,9 @@ class RegistryApplication:
             return self.service.routing_config(requester)
         if handler == "_route_routing_snapshot":
             return self.service.routing_snapshot(requester)
+
+        if handler == "_route_discovery":
+            return self.service.discover(requester)
 
         if handler == "_route_engines_list":
             return self.service.list_engines(requester)

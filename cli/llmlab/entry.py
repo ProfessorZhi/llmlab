@@ -42,6 +42,7 @@ HANDLERS = {
     "invoke": commands.cmd_invoke,
     "routing": commands.cmd_routing,
     "status": commands.cmd_status,
+    "discover": commands.cmd_discover,
 }
 
 
@@ -90,11 +91,26 @@ def build_parser() -> argparse.ArgumentParser:
         "--target-url", required=True, help="同主机 loopback 地址，例如 http://127.0.0.1:8000/v1"
     )
     register_engine.add_argument("--protocol", help="openai_compatible / http_json")
+    register_engine.add_argument("--framework", help="推理框架，例如 vllm / sglang / strata（记为 framework:<name> 标签）")
     register_engine.add_argument("--description")
     register_engine.add_argument("--tag", action="append", help="可重复")
     register_engine.add_argument("--idempotency-key", help="重试时给同一个键即可安全重放")
+    preflight_engine = engines_sub.add_parser(
+        "preflight", parents=[common], help="登记前只读检查：端口、运行用户、接口兼容、名称"
+    )
+    preflight_engine.add_argument("--name", required=True)
+    preflight_engine.add_argument("--target-url", required=True)
     engines_sub.add_parser("get", parents=[common], help="查看一个 engine").add_argument("object_id")
     engines_sub.add_parser("verify", parents=[common], help="触发一次验证").add_argument("object_id")
+
+    discover = subparsers.add_parser(
+        "discover",
+        parents=[common],
+        help="列出本机候选：正在监听的推理服务与授权目录里的模型（只读）；可选直接登记其中一个",
+    )
+    discover.add_argument("--register", type=int, metavar="PORT", help="把这个端口上的候选推理服务登记到自己名下")
+    discover.add_argument("--register-model", metavar="PATH", help="把这个路径上的候选模型登记到自己名下")
+    discover.add_argument("--name", help="登记时使用的名称（缺省用建议名）")
 
     models = subparsers.add_parser("models", parents=[common], help="Model 的登记")
     models_sub = models.add_subparsers(dest="models_command")

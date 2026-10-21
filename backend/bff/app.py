@@ -202,6 +202,7 @@ class OpsApplication:
         authority_policy=None,
         token_source=None,
         integrations=None,
+        registry_api=None,
     ) -> None:
         self.auth_app = auth_app
         self.cfg = auth_app.cfg
@@ -231,6 +232,10 @@ class OpsApplication:
         self.authority_policy = authority_policy or bff_origin.AuthorityPolicy()
         #: 插件跳转地址的存储。``None`` = 本部署没接：两条路由以 503 收场。
         self.integrations = integrations
+        #: Registry 的 token API（CLI / Agent 用）。挂上之后，带 ``Authorization``
+        #: 的 ``/api/v2/registry/*`` 请求原样交给它；浏览器（cookie）请求仍走本层的
+        #: 会话路由。``None`` = 本进程不提供 CLI 入口。
+        self.registry_api = registry_api
         #: scoped CLI token 通道。``None`` 时建一条**关闭**的：它仍然负责带
         #: ``Authorization`` 头的请求，只是对它们一律答 401。token 的签发/撤销/审计
         #: 归 IAM Lane；在它落地之前，把通道开着就是一条没有审计的旁路。
@@ -252,6 +257,8 @@ class OpsApplication:
     # --- WSGI ---------------------------------------------------------------
 
     def __call__(self, environ: Mapping[str, Any], start_response: Callable) -> Iterable[bytes]:
+        if self._is_registry_token_request(environ):
+            return self._serve_registry_api(environ, start_response)
         request = build_request(environ, max_body=self.cfg.max_request_bytes)
         response = self.handle(
             request,
@@ -261,6 +268,37 @@ class OpsApplication:
         reason = REASON_PHRASES.get(response.status, DEFAULT_REASON)
         start_response(f"{response.status} {reason}", list(response.headers))
         return [response.body]
+
+    def _is_registry_token_request(self, environ) -> bool:
+        path = environ.get("PATH_INFO") or ""
+        return (
+            self.registry_api is not None
+            and path.startswith(REGISTRY_API_PREFIX)
+            and bool(environ.get("HTTP_AUTHORIZATION"))
+        )
+
+    def _serve_registry_api(self, environ, start_response):
+        """CLI / Agent 通道：``Bearer`` 令牌 → Registry 自己的 API（自己判身份）。
+
+        同一个 ``Host`` 权威守卫先跑；同时带会话 cookie 的请求按凭据混淆拒绝——
+        任何一侧优先都是一次隐式降级（见 :meth:`_invoke_preflight`）。
+        """
+        refusal = self.check_authority(
+            host_header=environ.get("HTTP_HOST"), server_port=environ.get("SERVER_PORT")
+        )
+        if refusal is None and self.cfg.cookie_name in _cookie_names(environ.get("HTTP_COOKIE")):
+            refusal = _error_response(
+                400,
+                bff_identity.REASON_CREDENTIAL_CONFUSION,
+                "send either a session cookie or an Authorization header, not both",
+            )
+        if refusal is not None:
+            start_response(
+                f"{refusal.status} {REASON_PHRASES.get(refusal.status, DEFAULT_REASON)}",
+                list(refusal.headers),
+            )
+            return [refusal.body]
+        return self.registry_api(environ, start_response)
 
     def check_authority(self, *, host_header: object, server_port: object):
         """``Host`` 权威守卫。不通过就给出 421，且**在任何 cookie/CSRF 之前**。
@@ -896,6 +934,20 @@ class OpsApplication:
         envelope = self.service.preflight_engine(principal.requester, body)
         return _json_response(200, envelope)
 
+    def _registry_discovery(self, request):
+        """本机候选（只读）。"""
+        self._reject_asserted_identity(request)
+        principal = self._principal(request)
+        return _json_response(200, self.service.discover(principal.requester))
+
+    def _registry_model_register(self, request):
+        """网页登记模型。与 CLI 的 ``models register`` 走同一个 ``register_model``。"""
+        principal, body = self._registry_body(request)
+        envelope, created = self.service.register_model(
+            principal.requester, body, idempotency_key=request.header("idempotency-key")
+        )
+        return _json_response(201 if created else 200, envelope)
+
     def _registry_register(self, request):
         """网页登记推理服务。与 CLI 登记走同一个 ``RegistryService.register_engine``。"""
         principal, body = self._registry_body(request)
@@ -1341,6 +1393,16 @@ def _body_field_names(request) -> tuple[str, ...]:
 
 class _IntegrationsNotAttached(Exception):
     pass
+
+
+#: CLI / Agent 的 Registry API 前缀（与 ``backend.registry.api.PREFIX`` 相同）。
+REGISTRY_API_PREFIX = "/api/v2/registry/"
+
+
+def _cookie_names(raw: object) -> set[str]:
+    if not isinstance(raw, str) or not raw:
+        return set()
+    return {part.split("=", 1)[0].strip() for part in raw.split(";") if part.strip()}
 
 
 def _json_body(request) -> dict | None:

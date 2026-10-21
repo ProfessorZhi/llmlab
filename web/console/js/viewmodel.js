@@ -127,6 +127,23 @@ export function servicesFromOps(ops) {
   return list;
 }
 
+/** 已登记的模型（模型库）。权重路径只有 owner 才拿得到。 */
+export function modelsFromOps(ops) {
+  const reg = ops?.registry;
+  if (!reg || reg.adapter_attached === false) return null;
+  return (reg.models ?? []).map((m) => ({
+    id: m.model_id,
+    name: m.name,
+    format: m.format ?? null,
+    params: m.parameter_count ?? null,
+    description: m.description ?? null,
+    owner: m.owner_name ?? m.owner ?? null,
+    self: m.owner_is_self === true,
+    weightPath: m.weight_path ?? null,
+    createdAt: m.created_at ?? null,
+  }));
+}
+
 export function keysFromOps(ops) {
   return (ops?.keys ?? []).map((k) => ({
     id: k.key_id,

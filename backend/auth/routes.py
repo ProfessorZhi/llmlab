@@ -627,6 +627,10 @@ class Application:
             scopes = wanted
 
         principal, uid, linux_user = principal_ref(session.user)
+        account = self.service.accounts.account_for(session.user)
+        if account is not None:
+            # 平台账户：没有 uid；Registry 目录里这个主体的 ``linux_user`` 是账户用户名。
+            uid, linux_user = None, account.username
         issued = tokens.issue(
             principal=principal,
             uid=uid,

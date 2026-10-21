@@ -36,6 +36,7 @@ from dataclasses import dataclass
 from ..atlas.identity import SCOPE_CALLS_SELF_READ as atlas_calls_scope
 from ..evaluation.identity import SCOPE_EVAL_READ as eval_read_scope
 from ..registry.identity import SCOPE_ENDPOINT_INVOKE as registry_invoke_scope
+from ..registry.identity import SCOPE_REGISTRY_READ as registry_read_scope
 from ..registry.identity import SCOPE_REGISTRY_WRITE as registry_write_scope
 from ..observability import identity as observability_identity
 from . import scopes as bff_scopes
@@ -232,6 +233,32 @@ ROUTES: tuple[RouteSpec, ...] = (
         handler="_registry_register",
         scope=registry_write_scope,
         note="网页登记推理服务。owner 是会话主体（平台账户或 Linux 主体），不来自请求体。",
+    ),
+    RouteSpec(
+        name="registry.discovery",
+        methods=("GET",),
+        path="/api/v2/registry/discovery",
+        auth=AUTH_SESSION,
+        kind=KIND_READ,
+        csrf=False,
+        source=SOURCE_REGISTRY,
+        owner=LANE_INTEGRATION,
+        handler="_registry_discovery",
+        scope=registry_read_scope,
+        note="本机候选：回环上监听的推理服务（/proc/net/tcp + 只读 /v1/models）与授权目录里的模型。只读。",
+    ),
+    RouteSpec(
+        name="registry.models.register",
+        methods=("POST",),
+        path="/api/v2/registry/models",
+        auth=AUTH_SESSION,
+        kind=KIND_WRITE,
+        csrf=True,
+        source=SOURCE_REGISTRY,
+        owner=LANE_INTEGRATION,
+        handler="_registry_model_register",
+        scope=registry_write_scope,
+        note="网页登记模型。owner 只来自会话；权重路径只是登记引用，Registry 不打开它。",
     ),
     RouteSpec(
         name="ops.invoke",

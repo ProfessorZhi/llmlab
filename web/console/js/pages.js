@@ -3,10 +3,10 @@
 import { h } from './dom.js';
 import { fmtInt, fmtGiB } from './charts.js';
 import {
-  PATHS, loadOps, loadHost, loadCalls, loadUsers, loadIntegrations, safeJumpUrl, send,
+  PATHS, loadOps, loadHost, loadCalls, loadUsers, loadIntegrations, loadDiscovery, loadTokens, safeJumpUrl, send,
 } from './data.js';
 import {
-  overviewModel, servicesFromOps, keysFromOps, callsFacts, hostFacts, engineLabel, modelColorMap, preflightChecks,
+  overviewModel, servicesFromOps, modelsFromOps, keysFromOps, callsFacts, hostFacts, engineLabel, modelColorMap, preflightChecks,
 } from './viewmodel.js';
 import {
   demoOverview, demoServices, demoKeys, demoCalls, demoEvaluation, DEMO_USERS,
@@ -121,9 +121,168 @@ export async function services(ctx) {
     ? (list.length ? servicesTable(list) : h('div', { class: 'group' }, quietEmpty('ready', SERVICES_EMPTY)))
     : emptyState(state);
   return h('div', { class: 'page' },
-    pageHead('推理服务', '实验室内已登记的推理引擎与模型。服务归登记它的平台账户所有，「运行用户」是登记时检测到的监听进程所属 Linux 用户。',
-      h('a', { class: 'btn primary', href: '#/services/register' }, '登记推理服务')),
-    body);
+    pageHead('推理服务', '实验室内已登记的推理引擎。服务归登记它的平台账户所有，「运行用户」是登记时检测到的监听进程所属 Linux 用户。',
+      h('a', { class: 'btn primary', href: '#/services/register' }, '手动登记')),
+    body,
+    discoveryPanel(ctx, 'engines'));
+}
+
+/* ---------- 本机发现：推理服务与模型共用 ---------- */
+const fmtBytes = (n) => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : `${Math.max(1, Math.round(n / 1024 ** 2))} MB`);
+
+const scannedKinds = new Set();
+
+function discoveryPanel(ctx, kind) {
+  const holder = h('div', {});
+  const st = { data: null, state: null, busy: false, msg: null, done: new Set() };
+  const title = kind === 'engines' ? '本机发现 · 推理服务' : '本机发现 · 模型目录';
+  const intro = kind === 'engines'
+    ? '列出本机回环地址上正在监听、端口在允许列表内的服务，并读取它的模型清单与运行用户。只读；点「登记」才会加入资源池。'
+    : '在管理员授权的模型目录里查找 Hugging Face 模型目录与 GGUF 文件。只读取 config.json 与文件名、大小，不打开权重。';
+
+  async function scan() {
+    scannedKinds.add(kind);
+    st.busy = true; st.msg = null; draw();
+    if (ctx.demo) {
+      st.data = { configured: true, problems: [], engines: [
+        { port: 8001, target_url: 'http://127.0.0.1:8001', run_as_user: 'li', framework: 'vllm', models: ['Qwen2.5-14B-Instruct'], openai_compatible: true, registered: false, registered_by_me: false, suggested_name: 'Qwen2.5-14B-Instruct' },
+        { port: 8000, target_url: 'http://127.0.0.1:8000', run_as_user: 'zhang', framework: 'strata', models: ['Qwen2.5-32B-Instruct'], openai_compatible: true, registered: true, registered_by_me: true, suggested_name: 'Qwen2.5-32B-Instruct' },
+      ], models: [
+        { path: '/data/models/Qwen2.5-14B-Instruct', format: 'hf', size_bytes: 29.5 * 1024 ** 3, architecture: 'Qwen2ForCausalLM', registered: false, suggested_name: 'Qwen2.5-14B-Instruct' },
+        { path: '/data/models/gguf/llama-3-8b.Q4_K_M.gguf', format: 'gguf', size_bytes: 4.9 * 1024 ** 3, architecture: null, registered: true, suggested_name: 'llama-3-8b.Q4_K_M' },
+      ] };
+      st.state = 'ready';
+    } else {
+      const r = await loadDiscovery();
+      st.state = r.state; st.data = r.state === 'ready' ? r.value : null;
+    }
+    st.busy = false; draw();
+  }
+
+  async function register(item) {
+    const key = item.port ?? item.path;
+    if (ctx.demo) { st.done.add(key); draw(); return; }
+    const body = kind === 'engines'
+      ? { name: item.suggested_name, target_url: item.target_url, protocol: 'openai_compatible', ...(item.framework ? { tags: [`framework:${item.framework}`] } : {}) }
+      : { name: item.suggested_name, weight_path: item.path, format: item.format };
+    const r = await send(kind === 'engines' ? PATHS.registryEngines : PATHS.registryModels, body);
+    if (!r.ok) {
+      st.msg = r.status === 409 ? '已被登记（地址或名称冲突）。' : (r.message ?? `登记失败（${r.reason}）`);
+      draw(); return;
+    }
+    st.done.add(key); st.msg = null;
+    // 登记后整页重绘：上方的已登记列表与这里的候选状态一起刷新。
+    if (ctx.rerender) { ctx.rerender(); return; }
+    await scan();
+  }
+
+  function rows() {
+    const items = st.data?.[kind] ?? [];
+    if (!items.length) return quietEmpty('ready', kind === 'engines'
+      ? { title: '没有发现正在监听的推理服务', body: `允许的端口：${(st.data?.allowed_ports ?? []).join('、') || '—'}。启动服务后再扫描一次。` }
+      : { title: '没有发现模型', body: (st.data?.model_roots ?? []).length ? `已查找：${st.data.model_roots.join('、')}` : '管理员尚未配置可查找的模型目录。' });
+    const head = kind === 'engines' ? ['端口', '运行用户', '推理框架', '模型', ''] : ['路径', '格式', '架构', '大小', ''];
+    return h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
+      h('thead', {}, h('tr', {}, head.map((t) => h('th', { scope: 'col' }, t)))),
+      h('tbody', {}, items.map((item) => {
+        const key = item.port ?? item.path;
+        const registered = item.registered || st.done.has(key);
+        const action = registered
+          ? h('span', { class: 'muted' }, item.registered_by_me || st.done.has(key) ? '已登记（我）' : '已被登记')
+          : (kind === 'engines' && !item.openai_compatible)
+            ? h('span', { class: 'muted' }, '不是 OpenAI 兼容接口')
+            : h('button', { type: 'button', class: 'btn', onclick: () => register(item) }, '登记');
+        const cells = kind === 'engines'
+          ? [h('td', { class: 'tnum' }, String(item.port)), h('td', { class: 'tnum' }, item.run_as_user ?? (item.run_as_uid != null ? `uid ${item.run_as_uid}` : '—')),
+            h('td', {}, engineLabel(item.framework)), h('td', {}, (item.models ?? []).join('、') || '—')]
+          : [h('td', { class: 'mono', style: { 'font-size': '12px', 'word-break': 'break-all' } }, item.path), h('td', {}, item.format === 'hf' ? 'Hugging Face' : 'GGUF'),
+            h('td', {}, item.architecture ?? '—'), h('td', { class: 'tnum' }, fmtBytes(item.size_bytes ?? 0))];
+        return h('tr', {}, ...cells, h('td', { style: { 'text-align': 'right' } }, action));
+      }))));
+  }
+
+  function draw() {
+    while (holder.firstChild) holder.firstChild.remove();
+    let content;
+    if (st.busy) content = h('p', { class: 'muted' }, '正在扫描…');
+    else if (!st.data && st.state) content = emptyState(st.state);
+    else if (!st.data) content = h('p', { class: 'muted', style: { margin: 0 } }, intro);
+    else if (!st.data.configured) content = quietEmpty('ready', { title: '本部署未开启本机发现', body: '仍可手动登记，或请管理员在启动时开启发现。' });
+    else content = rows();
+    holder.append(panel('', title, st.data ? intro : null,
+      h('div', { style: { display: 'flex', 'flex-direction': 'column', gap: '12px' } },
+        h('div', {}, h('button', { type: 'button', class: 'btn', disabled: st.busy, onclick: scan }, st.data ? '重新扫描' : '扫描本机')),
+        st.msg ? h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left', margin: 0 } }, st.msg) : null,
+        content,
+        (st.data?.problems ?? []).length ? h('p', { class: 'muted', style: { margin: 0, 'font-size': '12px' } }, `提示：${st.data.problems.join('；')}`) : null)));
+  }
+  draw();
+  // 这次会话里扫过一次，重绘（例如登记之后）就直接重新扫，不让结果凭空消失。
+  if (scannedKinds.has(kind)) scan();
+  return holder;
+}
+
+/* ============================== 模型库 ============================== */
+export async function models(ctx) {
+  let list; let state = 'ready';
+  if (ctx.demo) list = [
+    { id: 'm1', name: 'Qwen2.5-32B-Instruct', format: 'hf', params: '32B', owner: '张伟', self: true, weightPath: '/data/models/Qwen2.5-32B-Instruct', description: '对话' },
+    { id: 'm2', name: 'bge-m3', format: 'hf', params: '568M', owner: '陈静', self: false, weightPath: null, description: '向量化' },
+  ];
+  else { const r = await loadOps(); state = r.state; list = r.state === 'ready' ? modelsFromOps(r.value) : null; }
+  const root = h('div', { class: 'page' });
+  const st = { open: false, msg: null, form: { name: '', weight_path: '', format: 'hf', parameter_count: '', description: '' } };
+
+  async function submit() {
+    const f = st.form;
+    if (!f.name) { st.msg = '请填写模型名称。'; draw(); return; }
+    if (ctx.demo) { list.push({ id: `m${list.length + 1}`, name: f.name, format: f.format, params: f.parameter_count || null, owner: '我', self: true, weightPath: f.weight_path || null, description: f.description || null }); st.open = false; draw(); return; }
+    const body = Object.fromEntries(Object.entries(f).filter(([, v]) => v));
+    const r = await send(PATHS.registryModels, body);
+    if (!r.ok) { st.msg = r.status === 409 ? '你已有同名模型。' : (r.message ?? `登记失败（${r.reason}）`); draw(); return; }
+    const fresh = await loadOps();
+    if (fresh.state === 'ready') list = modelsFromOps(fresh.value);
+    st.open = false; st.msg = null; st.form = { name: '', weight_path: '', format: 'hf', parameter_count: '', description: '' };
+    draw();
+  }
+
+  function form() {
+    const inp = (key, ph, width = '260px') => h('input', { value: st.form[key], placeholder: ph, style: { width, 'min-width': 0 }, oninput: (e) => { st.form[key] = e.target.value.trim(); } });
+    return section('登记模型', h('div', { class: 'group' },
+      h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, '名称'), inp('name', 'qwen2.5-7b-sft-v3')),
+      h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, '权重位置'), inp('weight_path', '/data/models/qwen2.5-7b-sft-v3', '100%')),
+      h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, '格式'),
+        h('select', { onchange: (e) => { st.form.format = e.target.value; } }, [['hf', 'Hugging Face'], ['gguf', 'GGUF'], ['other', '其他']].map(([v, l]) => h('option', { value: v, selected: st.form.format === v }, l)))),
+      h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, '参数量'), inp('parameter_count', '7B', '120px')),
+      h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, '说明'), inp('description', '对话 / 向量化 / 重排…', '100%')),
+      h('div', { class: 'cell', style: { gap: '10px', 'justify-content': 'flex-end' } },
+        h('button', { type: 'button', class: 'btn', onclick: () => { st.open = false; st.msg = null; draw(); } }, '取消'),
+        h('button', { type: 'button', class: 'btn primary', onclick: submit }, '登记'))),
+    '权重位置只是登记引用：平台不移动、不复制、不打开权重文件，其他成员也看不到这个路径。');
+  }
+
+  function draw() {
+    while (root.firstChild) root.firstChild.remove();
+    root.append(pageHead('模型库', '实验室登记的模型。模型和推理服务都是资源池里的资源：模型说明「是什么」，推理服务负责「运行它」。',
+      h('button', { type: 'button', class: 'btn primary', onclick: () => { st.open = true; draw(); } }, '登记模型')));
+    if (st.msg) root.append(h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.msg));
+    if (st.open) root.append(form());
+    root.append(list
+      ? (list.length
+        ? h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
+          h('thead', {}, h('tr', {}, ['模型', '格式', '参数量', '所有者', '权重位置'].map((t) => h('th', { scope: 'col' }, t)))),
+          h('tbody', {}, list.map((m) => h('tr', {},
+            h('td', {}, h('div', { style: { 'font-weight': 500 } }, m.name), m.description ? h('div', { class: 'muted', style: { 'font-size': '12px' } }, m.description) : null),
+            h('td', {}, m.format === 'hf' ? 'Hugging Face' : m.format === 'gguf' ? 'GGUF' : (m.format ?? '—')),
+            h('td', { class: 'tnum' }, m.params ?? '—'),
+            h('td', {}, m.owner ?? '—', m.self ? h('span', { class: 'muted' }, '（我）') : null),
+            h('td', { class: m.weightPath ? 'mono' : 'muted', style: { 'font-size': '12px', 'word-break': 'break-all' } }, m.weightPath ?? (m.self ? '—' : '仅所有者可见')))))))
+        : h('div', { class: 'group' }, quietEmpty('ready', { title: '还没有登记模型', body: '点击「登记模型」手动添加，或用下方的本机发现从授权目录里挑选。' })))
+      : emptyState(state));
+    root.append(discoveryPanel(ctx, 'models'));
+  }
+  draw();
+  return root;
 }
 
 /* ============================== 注册模型服务 ============================== */
@@ -249,15 +408,65 @@ export async function keys(ctx) {
         h('span', { class: 'muted', style: { 'font-size': '13px' } }, k.active ? `最近使用 ${relTime(k.lastUsedAt)}` : '已撤销')))
         : h('div', { class: 'cell' }, h('div', { class: 'grow sub' }, '暂无密钥。'))),
     '密钥只显示前缀，完整内容仅在创建时显示一次。')
-    : h('div', { class: 'group' }, quietEmpty(state, { title: '暂无 API 密钥', body: '需要通过网关调用推理服务时，再用 llmlab keys 命令创建密钥。' }));
+    : h('div', { class: 'group' }, quietEmpty(state, { title: '暂无 API 密钥', body: '网关密钥接入后，这里会列出调用推理服务用的密钥。' }));
   return h('div', { class: 'page narrow' },
-    pageHead('API 密钥', '调用模型服务时使用的凭据。'),
+    pageHead('API 密钥', '调用模型服务时使用的凭据，以及给命令行和 Agent 用的令牌。'),
     body,
+    await agentTokens(ctx),
     section('接入', h('div', { class: 'group' },
       h('div', { class: 'cell' }, h('span', { class: 'grow' }, '接入端点'), h('span', { class: 'mono' }, `${location.origin}/v1`)),
       h('div', { class: 'cell' }, h('span', { class: 'grow' }, '接口协议'), h('span', {}, 'OpenAI 兼容')),
       h('div', { class: 'cell' }, h('span', { class: 'grow' }, '命令行工具'), h('span', { class: 'mono' }, 'llmlab --help'))),
-    '在命令行中执行 llmlab keys 系列命令可创建、轮换或撤销密钥。'));
+    '用上面创建的令牌配置 llmlab 后，可以执行 llmlab discover、engines、models、endpoints 等命令；加 --json 输出给 Agent 解析。'));
+}
+
+/* ---------- CLI / Agent 令牌 ---------- */
+const TTL_CHOICES = [['7 天', 7], ['30 天', 30], ['90 天', 90], ['365 天', 365]];
+const epochIso = (sec) => (typeof sec === 'number' ? new Date(sec * 1000).toISOString() : null);
+
+async function agentTokens(ctx) {
+  const holder = h('div', {});
+  let list = []; let state = 'ready';
+  if (ctx.demo) list = [{ token_id: 't1', label: 'claude-code', scopes: ['registry:read', 'registry:write', 'registry:endpoint:invoke', 'registry:endpoint:share'], created_at: Date.now() / 1000 - 86400, expires_at: Date.now() / 1000 + 29 * 86400, last_used_at: Date.now() / 1000 - 600, revoked: false }];
+  else { const r = await loadTokens(); state = r.state; list = r.state === 'ready' ? r.value : null; }
+  const st = { label: 'my-agent', days: 30, issued: null, msg: null };
+
+  async function refresh() { if (ctx.demo) return; const r = await loadTokens(); if (r.state === 'ready') list = r.value; }
+  async function mint() {
+    if (ctx.demo) { st.issued = { token: 'llt_demo_xxxxxxxxxxxxxxxxxxxx', label: st.label }; draw(); return; }
+    const r = await send(PATHS.tokens, { label: st.label || null, ttl_seconds: st.days * 86400 });
+    if (!r.ok) { st.msg = r.message ?? `创建失败（${r.reason}）`; draw(); return; }
+    st.issued = r.data; st.msg = null; await refresh(); draw();
+  }
+  async function revoke(id) {
+    if (!globalThis.confirm?.('撤销后，使用这个令牌的命令行和 Agent 会立即失去访问权限。确定撤销？')) return;
+    if (!ctx.demo) { const r = await send(PATHS.tokenRevoke, { token_id: id }); if (!r.ok) { st.msg = r.message ?? `撤销失败（${r.reason}）`; draw(); return; } await refresh(); }
+    else list = list.map((t) => (t.token_id === id ? { ...t, revoked: true } : t));
+    draw();
+  }
+
+  function draw() {
+    while (holder.firstChild) holder.firstChild.remove();
+    if (!list) { holder.append(section('命令行 / Agent 令牌', h('div', { class: 'group' }, quietEmpty(state, { title: '令牌服务未开启', body: '本部署尚未开启命令行令牌。' })))); return; }
+    const live = list.filter((t) => !t.revoked);
+    holder.append(section('命令行 / Agent 令牌', h('div', { class: 'group' },
+      live.length ? live.map((t) => h('div', { class: 'cell' },
+        h('div', { class: 'grow' }, h('div', { class: 'title' }, t.label ?? '未命名'),
+          h('div', { class: 'sub' }, `${relTime(epochIso(t.last_used_at)) === '—' ? '尚未使用' : `最近使用 ${relTime(epochIso(t.last_used_at))}`} · ${new Date(t.expires_at * 1000).toLocaleDateString()} 到期`)),
+        h('button', { type: 'button', class: 'linkbtn danger', onclick: () => revoke(t.token_id) }, '撤销')))
+        : h('div', { class: 'cell' }, h('div', { class: 'grow sub' }, '还没有令牌。')),
+      h('div', { class: 'cell', style: { gap: '10px', 'flex-wrap': 'wrap' } },
+        h('input', { value: st.label, placeholder: '用途，例如 claude-code', style: { flex: '1 1 160px', 'min-width': 0 }, oninput: (e) => { st.label = e.target.value.trim(); } }),
+        h('select', { onchange: (e) => { st.days = Number(e.target.value); } }, TTL_CHOICES.map(([l, d]) => h('option', { value: d, selected: d === st.days }, l))),
+        h('button', { type: 'button', class: 'btn primary', onclick: mint }, '创建令牌')),
+      st.issued ? h('div', { class: 'cell', style: { 'flex-direction': 'column', 'align-items': 'stretch', gap: '8px' } },
+        h('div', { class: 'muted', style: { 'font-size': '13px' } }, '令牌只显示这一次。交给你的 Agent 后，它就能像你一样在命令行里发现、登记和使用资源：'),
+        h('div', { class: 'code' }, `export LLMLAB_API_BASE=${location.origin}\nexport LLMLAB_TOKEN=${st.issued.token}\nllmlab whoami\nllmlab discover\nllmlab discover --register 8000`)) : null),
+    '令牌拥有与你的账户相同的资源权限（管理员账户的令牌也能查看全实验室），账户停用或令牌撤销后立即失效。'));
+    if (st.msg) holder.append(h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.msg));
+  }
+  draw();
+  return holder;
 }
 
 /* ============================== 请求日志 ============================== */
@@ -483,6 +692,7 @@ export async function extensions(ctx) {
     const r = await send(`${PATHS.integrations}/${encodeURIComponent(key)}`, { ui_url: url, visibility }, { method: 'PUT' });
     if (!r.ok) { st.msg = r.message ?? `保存失败（${r.reason}）`; draw(); return; }
     st.msg = null; st.editing = null;
+    ctx.invalidateLaunch?.();
     const rows = r.data?.integrations;
     if (Array.isArray(rows)) links = new Map(rows.map((row) => [row.key, row]));
     draw();

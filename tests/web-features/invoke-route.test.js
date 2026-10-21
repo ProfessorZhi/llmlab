@@ -61,6 +61,7 @@ const SCOPE_SYMBOLS = Object.freeze({
   eval_read_scope: 'evaluation:read',
   registry_invoke_scope: 'registry:endpoint:invoke',
   registry_write_scope: 'registry:write',
+  registry_read_scope: 'registry:read',
 });
 
 /** Parse the Python `ROUTES` table into the fields both sides must agree on. */
@@ -148,11 +149,11 @@ test('the mirror and the local table agree under both stacked and union SHAs', (
   const local = localRoutes();
   const localNames = new Set(local.map((row) => row.name));
 
-  // Two known checkouts: 23 rows (#115 not merged) and 24 (union with
+  // Two known checkouts: 25 rows (#115 not merged) and 26 (union with
   // #115/#120); both include the web-registration and plugin-address routes. Any other count
   // is a table this test cannot reason about, and guessing would be worse than failing.
-  assert.ok([23, 24].includes(local.length),
-    `local route table has ${local.length} rows; expected 23 (pre-#115) or 24 (union)`);
+  assert.ok([25, 26].includes(local.length),
+    `local route table has ${local.length} rows; expected 25 (pre-#115) or 26 (union)`);
 
   // The dependency is the REAL difference, measured — not a literal that goes
   // stale the moment the BFF branch is merged.
@@ -165,7 +166,7 @@ test('the mirror and the local table agree under both stacked and union SHAs', (
     'the real difference between the mirror and the local table equals the declared pending set');
 
   // Both directions are asserted explicitly, so neither state can rot.
-  if (local.length === 24) {
+  if (local.length === 26) {
     assert.deepEqual(pending, [], 'a union checkout has no pending route');
     assert.ok(localNames.has('ops.invoke'), 'the union carries the SEAM-1 route');
   } else {
@@ -181,7 +182,7 @@ test('the mirror and the local table agree under both stacked and union SHAs', (
 });
 
 test('every locally-declared row agrees with the mirror on method, session, CSRF and scope', () => {
-  // Runs on both SHAs: under the union all 24 rows are checked; stacked, 23 are.
+  // Runs on both SHAs: under the union all 26 rows are checked; stacked, 25 are.
   const mirrorByName = new Map(BFF_ROUTES.map((row) => [row.name, row]));
   for (const spec of localRoutes()) {
     const row = mirrorByName.get(spec.name);

@@ -31,6 +31,8 @@ export const PATHS = Object.freeze({
   preflight: '/api/v2/registry/engines/preflight',
   registryEngines: '/api/v2/registry/engines',
   integrations: '/api/portal/integrations',
+  discovery: '/api/v2/registry/discovery',
+  registryModels: '/api/v2/registry/models',
 });
 
 const NOT_CONFIGURED = new Set([404, 501, 503]);
@@ -143,6 +145,20 @@ export async function loadUsers(opts) {
   if (r.state !== 'ready') return r;
   const users = r.value?.data?.users ?? r.value?.users;
   return Array.isArray(users) ? { ...r, value: users } : { ...r, state: 'error', value: null, reason: 'bad-shape' };
+}
+
+export async function loadDiscovery(opts) {
+  const r = await getJSON(PATHS.discovery, { timeoutMs: 20000, ...opts });
+  if (r.state !== 'ready') return r;
+  const data = r.value?.data;
+  return data && typeof data === 'object' ? { ...r, value: data } : { ...r, state: 'error', value: null, reason: 'bad-shape' };
+}
+
+export async function loadTokens(opts) {
+  const r = await getJSON(PATHS.tokens, opts);
+  if (r.state !== 'ready') return r;
+  const list = r.value?.data?.tokens;
+  return Array.isArray(list) ? { ...r, value: list } : { ...r, state: 'error', value: null, reason: 'bad-shape' };
 }
 
 export async function loadIntegrations(opts) {

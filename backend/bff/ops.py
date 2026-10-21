@@ -320,6 +320,24 @@ def engine_record(engine, *, subject: str, principals) -> dict:
     }
 
 
+def model_record(model, *, subject: str, principals) -> dict:
+    """一个已登记的模型 ⇒ 前端的一行。权重路径只给 owner 看（它可能暴露家目录结构）。"""
+    mine = model.owner_principal == subject
+    return {
+        "model_id": model.id,
+        "name": model.name,
+        "format": model.format,
+        "parameter_count": model.parameter_count,
+        "description": model.description,
+        "owner": model.owner_principal,
+        "owner_name": principal_name(principals, model.owner_principal),
+        "owner_is_self": mine,
+        "status": model.status,
+        "weight_path": model.weight_path if mine else None,
+        "created_at": registry_models.isoformat(model.created_at),
+    }
+
+
 def shared_endpoint_record(
     *,
     endpoint,
@@ -494,6 +512,10 @@ def build_ops(
         engine_record(item, subject=subject, principals=service.principals)
         for item in policy.visible_engines()
     ]
+    models = [
+        model_record(item, subject=subject, principals=service.principals)
+        for item in policy.visible_models()
+    ]
 
     shared = []
     if visibility == VISIBILITY_SHARED_PORTAL:
@@ -604,6 +626,7 @@ def build_ops(
             "shared": shared,
             "all": all_rows,
             "engines": engines,
+            "models": models,
         },
         "keys": keys,
         "playground": (

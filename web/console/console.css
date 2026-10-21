@@ -113,6 +113,11 @@ button, input, select { font: inherit; color: inherit; }
 .sidebar-foot .who { font-size: 13px; line-height: 1.35; min-width: 0; }
 .sidebar-foot .who div:last-child { color: var(--secondary); }
 .linkbtn { border: 0; background: none; color: var(--link); padding: 0; cursor: pointer; font-size: 13px; }
+.linkbtn.danger { color: var(--red-text, #d70015); }
+.launch-toggle { width: 100%; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.launch-toggle .chev { margin-left: auto; color: var(--secondary); transition: transform .15s; }
+.launch-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.nav-item .ext-mark { margin-left: auto; color: var(--secondary); font-size: 12px; }
 
 .main { flex: 999 1 640px; min-width: 0; padding: 40px 48px 72px; }
 .page { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 32px; }

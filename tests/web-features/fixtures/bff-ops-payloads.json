@@ -409,6 +409,21 @@
           "status": "verified"
         }
       ],
+      "models": [
+        {
+          "created_at": "2026-10-15T12:00:00Z",
+          "description": null,
+          "format": null,
+          "model_id": "mdl_id002",
+          "name": "model-alice",
+          "owner": "linux:dell-test-01:4001",
+          "owner_is_self": false,
+          "owner_name": "alice",
+          "parameter_count": null,
+          "status": "registered",
+          "weight_path": null
+        }
+      ],
       "owned": [],
       "reason": null,
       "shared": []
@@ -774,6 +789,21 @@
           "status": "verified"
         }
       ],
+      "models": [
+        {
+          "created_at": "2026-10-15T12:00:00Z",
+          "description": null,
+          "format": null,
+          "model_id": "mdl_id002",
+          "name": "model-alice",
+          "owner": "linux:dell-test-01:4001",
+          "owner_is_self": false,
+          "owner_name": "alice",
+          "parameter_count": null,
+          "status": "registered",
+          "weight_path": null
+        }
+      ],
       "owned": [],
       "reason": null,
       "shared": [
@@ -1107,6 +1137,21 @@
           "run_as_uid": null,
           "run_as_user": null,
           "status": "verified"
+        }
+      ],
+      "models": [
+        {
+          "created_at": "2026-10-15T12:00:00Z",
+          "description": null,
+          "format": null,
+          "model_id": "mdl_id002",
+          "name": "model-alice",
+          "owner": "linux:dell-test-01:4001",
+          "owner_is_self": true,
+          "owner_name": "alice",
+          "parameter_count": null,
+          "status": "registered",
+          "weight_path": null
         }
       ],
       "owned": [

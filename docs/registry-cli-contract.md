@@ -967,6 +967,15 @@ helper（预检能过的目标，登记的目标校验也能过）。请求：
 同一个目标只归一个主体这条门目前只对 `account:` owner 生效；Linux 主体本来就由 uid
 比对隔开。
 
+#### 18.3.3 本机发现：`GET /discovery`
+
+只读候选清单（`backend/registry/local_discovery.py`），CLI `llmlab discover` 与网页「推理服务 / 模型库 → 本机发现」共用。需要 `registry:read`。
+
+* **推理服务**：`/proc/net/tcp(6)` 中在回环或通配地址上 LISTEN、且端口在 `allowed_ports` 内的 socket；每个端口只读 GET `/v1/models`（模型 id）与框架指纹（`/version` 带 `version` ⇒ vllm，`/get_server_info` 带 `tp_size`+`model_path` ⇒ sglang）。监听 uid 反查用户名作为 `run_as_user`。
+* **模型**：只在部署配置的 `model_roots` 里找；深度 ≤ 4、条目 ≤ 20000、候选 ≤ 200；不跟随软链出根；识别 `config.json`+权重文件的 HF 目录与 `.gguf` 文件；只读 `config.json`（≤ 256 KiB），权重只看名字与大小。
+* 每个候选带 `registered` / `registered_by_me`；**没有写入路径**。登记仍走 `POST /engines` / `POST /models`（`llmlab discover --register PORT` / `--register-model PATH` 只是把候选填进这两个调用）。
+* 本部署未装配发现器时返回 `configured: false`（不是空清单，也不是错误）。
+
 ### 18.4 强制档
 
 `RegistryConfig.ownership_policy`：

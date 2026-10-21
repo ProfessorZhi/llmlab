@@ -197,7 +197,7 @@ CSRF token **只能**通过服务端接口同源获取，前端**不得**把它�
 
 **接入 BFF 与 Registry（2026-10-21）：** 平台账户会话经 `backend/bff/identity.py` 映射为 Registry 主体 `account:<hex>`（还在用一次性口令的会话得到 `403 password_change_required`）；`role=admin` 的账户直接持有管理员词表，不使用 Linux 会话那套共享口令提权。账户登记的推理服务归账户所有，登记时记录监听进程所属的 Linux 用户；`linux_user`（用户页「限定 Linux 用户」）留空即不限，填写后只能登记由该 Linux 用户运行的服务。细节见 `docs/registry-cli-contract.md` §18.3.2。整机 / GPU 读数（`observability:host:read`）对全体成员开放；Grafana / Prometheus 原生界面仍只给管理员。
 
-**仍未做：** 平台账户的 CLI scoped token（`principal_ref` 目前只为 Linux 主体给出 uid，Registry 的 token 自省会拒绝没有 uid 的回答）。
+**CLI / Agent 令牌（2026-10-21）：** 平台账户可以在「API 密钥」页或 `POST /auth/tokens` 创建令牌（明文只返回一次）。令牌的 Registry scope 与该账户在网页上的能力一致（`devserver._token_scope_policy`：管理员账户另带 `registry:admin:read`），令牌里没有 uid、`linux_user` 是账户用户名；Registry 的 token 自省对 `account:` 主体要求**不带** uid。令牌在账户停用、令牌撤销或到期后立即失效（每次自省都现查用户表）。BFF 把带 `Authorization: Bearer` 的 `/api/v2/registry/*` 请求原样交给 Registry API，同时带会话 cookie 的请求以 `400 credential_confusion_rejected` 拒绝。
 
 ### 4.4 Cookie
 
