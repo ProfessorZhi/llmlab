@@ -1,6 +1,6 @@
 /*! web/console/js/main.js — 控制台入口：会话、边栏导航与路由。 */
 import { h, clear } from './dom.js';
-import { PATHS, loadMe, send, rememberCsrf } from './data.js';
+import { PATHS, loadMe, login, send, rememberCsrf } from './data.js';
 import { DEMO_ME } from './demo.js';
 import { navIcon, brandMark, emptyState } from './ui.js';
 import * as pages from './pages.js';
@@ -31,7 +31,10 @@ const EXTRA_ROUTES = { '#/services/register': { parent: '#/services', page: page
 const ctx = { demo: DEMO, me: null, navigate: (r) => { location.hash = r; } };
 const root = document.getElementById('app');
 
-function isAdmin() { return ctx.me?.role === 'admin' || (ctx.me?.roles ?? []).includes('admin'); }
+function isAdmin() {
+  const me = ctx.me;
+  return me?.is_platform_admin === true || me?.role === 'admin' || me?.role === 'platform_admin' || (me?.roles ?? []).includes('admin');
+}
 
 function sidebar(active) {
   const name = ctx.me?.display_name || ctx.me?.username || ctx.me?.subject || '—';
@@ -45,7 +48,7 @@ function sidebar(active) {
     h('div', { class: 'sidebar-foot' },
       h('span', { class: 'avatar', 'aria-hidden': 'true' }, name.slice(0, 1)),
       h('div', { class: 'who' }, h('div', { style: { 'font-weight': 500 } }, name),
-        h('div', {}, `${ctx.me?.linux_user ?? ctx.me?.username ?? ''}${isAdmin() ? ' · 管理员' : ' · 成员'}`),
+        h('div', {}, [ctx.me?.username ?? ctx.me?.linux_user, isAdmin() ? '管理员' : '成员'].filter(Boolean).join(' · ')),
         h('button', { type: 'button', class: 'linkbtn', onclick: logout }, '退出登录'))));
 }
 
@@ -85,7 +88,7 @@ function renderLogin(message = null) {
     e.preventDefault();
     if (!st.username || !st.password) { err.textContent = '请输入用户名和密码。'; return; }
     btn.disabled = true; btn.textContent = '正在登录…';
-    const r = await send(PATHS.login, { username: st.username, password: st.password });
+    const r = await login(st.username, st.password);
     btn.disabled = false; btn.textContent = '登录';
     if (!r.ok) {
       err.textContent = r.status === 401 || r.status === 400 ? '用户名或密码不正确。'
@@ -121,7 +124,8 @@ function renderChangePassword() {
     if (st.next !== st.confirm) { err.textContent = '两次输入的新密码不一致。'; return; }
     const r = await send(PATHS.changePassword, { current_password: st.current, new_password: st.next });
     if (!r.ok) { err.textContent = r.status === 401 || r.status === 400 ? '当前密码不正确，或新密码不符合要求。' : '修改失败，请稍后再试。'; return; }
-    ctx.me = { ...ctx.me, must_change_password: false };
+    // 改密后服务端注销了全部旧会话并签发新会话；以返回的身份为准。
+    ctx.me = r.data?.user ?? { ...ctx.me, must_change_password: false };
     location.hash = '#/overview';
     render();
   };
@@ -137,6 +141,7 @@ function renderChangePassword() {
 
 async function logout() {
   if (!DEMO) await send(PATHS.logout, {});
+  rememberCsrf(null);
   ctx.me = null;
   location.hash = '#/login';
   render();

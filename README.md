@@ -51,6 +51,15 @@ npm run serve
 # http://127.0.0.1:8123/index.html
 ```
 
+新控制台（`web/console/`）连同真实后端一起跑：BFF devserver 只提供 API，静态服务器通过**仅限环回**的 `LLMLAB_DEV_API` 把同源 `/auth/*`、`/api/*` 转给它（见 `web/tools/dev-api-proxy.mjs`）：
+
+```bash
+python3 -m backend.auth.bootstrap init --state-dir /tmp/llmlab-dev   # 交互式设置本机 admin 口令（不经命令行/环境变量）
+python3 -m backend.bff --state-dir /tmp/llmlab-dev --database /tmp/llmlab-dev/registry.db
+LLMLAB_DEV_API=http://127.0.0.1:8790 npm run serve
+# http://127.0.0.1:8123/console/ — 以 admin 登录后在「用户与权限」创建平台账户
+```
+
 后端 CLI 入口：
 
 ```bash

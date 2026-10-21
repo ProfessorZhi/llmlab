@@ -8,7 +8,10 @@
  *    - binds 127.0.0.1 only; never 0.0.0.0
  *    - path traversal outside the web root is refused
  *    - no directory listing, no writes, no directory writes
- *    - no network egress of its own; it never proxies anywhere
+ *    - no network egress of its own. The one exception is opt-in and
+ *      loopback-only: with LLMLAB_DEV_API=http://127.0.0.1:<port> it forwards
+ *      same-origin /auth/* and /api/* to a local BFF devserver
+ *      (see dev-api-proxy.mjs). Without that variable nothing is proxied.
  */
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
@@ -16,6 +19,7 @@ import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { INFRA_PATH, infraEnabled, collectInfraSummary, offlineSummary } from './verified-infra.mjs';
+import { devApiTarget, isProxiedPath, proxyRequest } from './dev-api-proxy.mjs';
 
 export const WEB_ROOT = resolve(fileURLToPath(new URL('../', import.meta.url)));
 
@@ -59,6 +63,8 @@ export function createStaticServer({
   env = process.env,
   infraFetch = globalThis.fetch,
 } = {}) {
+  // Validated up front so a bad target fails at start, not on the first request.
+  const apiTarget = devApiTarget(env);
   return createServer(async (req, res) => {
     // The one non-static route. It is dark unless the operator turned it on, and
     // even then it is GET-only, query-less and same-origin: the browser cannot
@@ -96,6 +102,11 @@ export function createStaticServer({
         'x-content-type-options': 'nosniff',
       });
       res.end(body);
+      return;
+    }
+
+    if (apiTarget && isProxiedPath(pathname)) {
+      proxyRequest(req, res, apiTarget);
       return;
     }
 
@@ -165,6 +176,9 @@ if (invokedDirectly) {
   const s = await startServer({ port });
   // eslint-disable-next-line no-console
   console.log(`llm-lab portal web → ${s.origin}/index.html  (root: ${WEB_ROOT})`);
+  const api = devApiTarget(process.env);
+  // eslint-disable-next-line no-console
+  if (api) console.log(`  /auth/* and /api/* → ${api.origin}  (console: ${s.origin}/console/)`);
   for (const sig of ['SIGINT', 'SIGTERM']) {
     process.on(sig, () => { s.close().then(() => process.exit(0)); });
   }

@@ -545,9 +545,14 @@ class PrivilegeTests(HttpTestCase):
         self.assertTrue(self.app.authorize(session, require_admin=True).user.is_admin)
 
     def test_no_route_can_grant_a_role_or_a_project(self):
+        # Role changes exist only under the admin-session account routes
+        # (Issue #17); tests/auth/test_accounts.py proves each of those refuses
+        # anonymous and member sessions. Nothing anywhere grants a project.
         for method, path in routes.ROUTES:
             with self.subTest(route=f"{method} {path}"):
                 self.assertNotIn("grant", path)
+                if path.startswith("/auth/admin/users"):
+                    continue
                 self.assertNotIn("admin", path)
                 self.assertNotIn("role", path)
 
@@ -569,6 +574,15 @@ class PrivilegeTests(HttpTestCase):
                 ("POST", "/auth/tokens/revoke"),
                 ("POST", "/auth/tokens/rotate"),
                 ("POST", "/auth/tokens/revoke-all"),
+                # Platform accounts independent of Linux (Issue #17).
+                ("POST", "/auth/account/login"),
+                ("POST", "/auth/account/password"),
+                ("GET", "/auth/admin/users"),
+                ("POST", "/auth/admin/users"),
+                ("POST", "/auth/admin/users/reset-password"),
+                ("POST", "/auth/admin/users/role"),
+                ("POST", "/auth/admin/users/linux"),
+                ("POST", "/auth/admin/users/status"),
             },
         )
 

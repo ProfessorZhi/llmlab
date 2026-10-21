@@ -28,6 +28,7 @@ import time
 from typing import Callable
 
 from . import errors, feishu, ratelimit, store
+from .accounts import AccountService
 from .config import AuthConfig, is_local_path
 from .feishu import FeishuProvider
 from .local_admin import AdminCredentialStore
@@ -97,9 +98,11 @@ class AuthService:
         self.provider = (
             provider if provider is not None else feishu.provider_from_config(cfg, transport=transport)
         )
+        self.accounts = AccountService(self.db, self.sessions, self.limiter, clock=clock)
 
     def initialize(self) -> None:
         self.db.initialize()
+        self.accounts.initialize()
 
     # --- discovery -----------------------------------------------------------
 
@@ -278,14 +281,24 @@ class AuthService:
     # --- presentation --------------------------------------------------------
 
     def public_identity(self, user: User) -> dict[str, object]:
-        """The minimum a UI needs. No upstream identifiers, no credential material."""
-        return {
+        """The minimum a UI needs. No upstream identifiers, no credential material.
+
+        A platform account adds its username, its optional Linux label and
+        whether it still has to replace a one-time password.
+        """
+        identity: dict[str, object] = {
             "id": user.id,
             "display_name": user.display_name,
             "role": user.role,
             "auth_source": user.auth_source,
             "is_platform_admin": user.is_admin,
         }
+        account = self.accounts.account_for(user)
+        if account is not None:
+            identity["username"] = account.username
+            identity["linux_user"] = account.linux_user
+            identity["must_change_password"] = account.must_change_password
+        return identity
 
     def projects_for(self, user: User) -> list[dict[str, str]]:
         return [

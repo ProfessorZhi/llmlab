@@ -318,13 +318,22 @@ export async function evaluation(ctx) {
 }
 
 /* ============================== 用户与权限 ============================== */
+const USERS_SUBTITLE = '平台账户独立于 Linux 账户，登录不依赖主机账户。可选填写对应的 Linux 用户名，用于核对模型服务的归属。';
+
+function copyButton(text) {
+  const btn = h('button', { type: 'button', class: 'linkbtn', onclick: async () => {
+    try { await navigator.clipboard.writeText(text); btn.textContent = '已复制'; } catch { btn.textContent = '请手动复制'; }
+  } }, '复制');
+  return btn;
+}
+
 export async function users(ctx) {
   let list; let state = 'ready';
   if (ctx.demo) list = DEMO_USERS.map((u) => ({ ...u }));
   else { const r = await loadUsers(); state = r.state; list = r.state === 'ready' ? r.value : null; }
   const root = h('div', { class: 'page' });
   if (!list) {
-    root.append(pageHead('用户与权限', '每个用户绑定一个 Linux 账户，模型服务的归属以该账户为准。'), emptyState(state));
+    root.append(pageHead('用户与权限', USERS_SUBTITLE), emptyState(state));
     return root;
   }
   const st = { sel: list.find((u) => u.username !== ctx.me?.username)?.id ?? list[0]?.id, temp: null, creating: false, msg: null };
@@ -343,13 +352,15 @@ export async function users(ctx) {
   function draw() {
     while (root.firstChild) root.firstChild.remove();
     const sel = list.find((u) => u.id === st.sel) ?? list[0];
-    root.append(pageHead('用户与权限', '每个用户绑定一个 Linux 账户，模型服务的归属以该账户为准。',
+    root.append(pageHead('用户与权限', USERS_SUBTITLE,
       h('button', { type: 'button', class: 'btn primary', onclick: () => { st.creating = true; st.temp = null; draw(); } }, '添加用户')));
     if (st.msg) root.append(h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.msg));
 
     const table = h('div', { class: 'table-wrap', style: { flex: '999 1 560px', 'min-width': 0 } }, h('table', { class: 'data', style: { 'min-width': '560px' } },
-      h('thead', {}, h('tr', {}, ['用户', 'Linux 账户', '角色', '状态', '最近登录'].map((t) => h('th', { scope: 'col' }, t)))),
-      h('tbody', {}, list.map((u) => h('tr', {
+      h('thead', {}, h('tr', {}, ['用户', 'Linux 用户名', '角色', '状态', '最近登录'].map((t) => h('th', { scope: 'col' }, t)))),
+      h('tbody', {}, list.length === 0
+        ? h('tr', {}, h('td', { colspan: 5, class: 'muted', style: { 'text-align': 'center', padding: '28px 12px' } }, '还没有平台账户。点击「添加用户」创建第一个账户。'))
+        : list.map((u) => h('tr', {
         class: 'selectable', 'aria-selected': String(!st.creating && u.id === sel?.id), tabindex: 0,
         onclick: () => { st.sel = u.id; st.temp = null; st.creating = false; draw(); },
         onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); st.sel = u.id; st.temp = null; st.creating = false; draw(); } },
@@ -369,7 +380,7 @@ export async function users(ctx) {
         section('账户', h('div', { class: 'group' },
           h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, '用户名'), inp('username', 'zhang')),
           h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, '显示名称'), inp('display_name', '张伟')),
-          h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, 'Linux 账户'), inp('linux_user', 'zhang')),
+          h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, 'Linux 用户名（可选）'), inp('linux_user', 'zhang')),
           h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, '管理员权限'), h('input', { type: 'checkbox', onchange: (e) => { form.role = e.target.checked ? 'admin' : 'member'; }, style: { width: '20px', height: '20px' } }))),
         '创建后系统将生成一次性临时密码，用户首次登录时须设置新密码。'),
         h('div', { class: 'actions' },
@@ -385,19 +396,27 @@ export async function users(ctx) {
           h('span', { class: 'avatar', style: { width: '48px', height: '48px', 'font-size': '18px' } }, (sel.display_name || sel.username).slice(0, 1)),
           h('div', {}, h('div', { style: { 'font-size': '19px', 'font-weight': 600 } }, sel.display_name || sel.username), h('div', { class: 'muted' }, sel.username))),
         section('账户', h('div', { class: 'group' },
-          h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, 'Linux 账户'),
-            h('input', { class: 'tnum', value: sel.linux_user ?? '', style: { width: '140px' }, onchange: (e) => act(PATHS.userLinux, { user_id: sel.id, linux_user: e.target.value.trim() }, () => { if (ctx.demo) sel.linux_user = e.target.value.trim(); }) })),
+          h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, 'Linux 用户名'),
+            h('input', { class: 'tnum', value: sel.linux_user ?? '', placeholder: '未填写', style: { width: '140px' }, onchange: (e) => act(PATHS.userLinux, { user_id: sel.id, linux_user: e.target.value.trim() }, () => { if (ctx.demo) sel.linux_user = e.target.value.trim(); }) })),
           h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, '管理员权限'),
             h('input', { type: 'checkbox', checked: sel.role === 'admin', style: { width: '20px', height: '20px' }, onchange: (e) => act(PATHS.userRole, { user_id: sel.id, role: e.target.checked ? 'admin' : 'member' }, () => { if (ctx.demo) sel.role = e.target.checked ? 'admin' : 'member'; }) }))),
-        '管理员可添加用户、重置密码，并为任意成员代为注册模型服务。变更 Linux 账户后，该用户名下的模型服务将重新进行归属校验。'),
+        '管理员可添加用户、重置密码，并为任意成员代为注册模型服务。Linux 用户名只用于核对模型服务的归属，不影响平台登录；变更后，该用户名下的模型服务将重新进行归属校验。'),
         section('密码', h('div', { class: 'group' },
-          h('button', { type: 'button', class: 'cell action', onclick: () => act(PATHS.userReset, { user_id: sel.id }, (d) => { st.temp = d.temporary_password ?? null; }) }, '重置密码…'),
+          h('button', { type: 'button', class: 'cell action', onclick: () => {
+            if (!ctx.demo && !globalThis.confirm?.(`重置 ${sel.display_name || sel.username} 的密码？该用户的现有会话将全部注销。`)) return;
+            act(PATHS.userReset, { user_id: sel.id }, (d) => { st.temp = d.temporary_password ?? null; });
+          } }, '重置密码…'),
           st.temp ? h('div', { class: 'cell', style: { 'flex-direction': 'column', 'align-items': 'flex-start', gap: '4px' } },
             h('div', { class: 'muted', style: { 'font-size': '13px' } }, '临时密码'),
-            h('div', { class: 'mono', style: { 'font-size': '19px', 'font-weight': 600 } }, st.temp),
+            h('div', { style: { display: 'flex', 'align-items': 'baseline', gap: '12px' } },
+              h('div', { class: 'mono', style: { 'font-size': '19px', 'font-weight': 600 } }, st.temp), copyButton(st.temp)),
             h('div', { class: 'muted', style: { 'font-size': '12px' } }, '该密码仅显示一次。用户下次登录时须设置新密码，现有会话已全部注销。')) : null)),
         h('div', { class: 'group' },
-          h('button', { type: 'button', class: 'cell action danger', onclick: () => act(PATHS.userStatus, { user_id: sel.id, status: sel.status === 'active' ? 'disabled' : 'active' }, () => { if (ctx.demo) sel.status = sel.status === 'active' ? 'disabled' : 'active'; }) },
+          h('button', { type: 'button', class: 'cell action danger', onclick: () => {
+            const disabling = sel.status === 'active';
+            if (disabling && !ctx.demo && !globalThis.confirm?.(`停用 ${sel.display_name || sel.username}？该用户将立即退出登录，其 API 密钥一并失效。`)) return;
+            act(PATHS.userStatus, { user_id: sel.id, status: disabling ? 'disabled' : 'active' }, () => { if (ctx.demo) sel.status = disabling ? 'disabled' : 'active'; });
+          } },
             sel.status === 'active' ? '停用用户…' : '恢复用户')));
     }
     root.append(h('div', { class: 'row', style: { gap: '24px', 'align-items': 'flex-start' } }, table, side));

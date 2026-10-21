@@ -15,6 +15,7 @@ export const PATHS = Object.freeze({
   me: '/auth/me',
   csrf: '/auth/csrf',
   login: '/auth/account/login',
+  localLogin: '/auth/local/login',
   logout: '/auth/logout',
   changePassword: '/auth/account/password',
   ops: '/api/v2/ops',
@@ -86,13 +87,26 @@ export async function send(path, body, { method = 'POST', fetchImpl = globalThis
     let payload = null;
     try { payload = await res.json(); } catch { /* 空响应 */ }
     if (!res.ok) {
+      // 未登录时的 CSRF 令牌是一次性的，失败后已被服务端消耗；会话令牌也可能已随会话失效。
+      // 丢掉缓存，下一次写操作重新领取，否则重试登录会一直被拒。
+      rememberCsrf(null);
       return { ok: false, state: stateForStatus(res.status), status: res.status, data: null, reason: payload?.error?.code ?? `http-${res.status}`, message: payload?.error?.detail ?? payload?.error?.message ?? null };
     }
     if (payload?.data?.csrf_token) rememberCsrf(payload.data.csrf_token);
     return { ok: true, state: 'ready', status: res.status, data: payload?.data ?? payload, reason: null, message: null };
   } catch {
+    rememberCsrf(null);
     return { ok: false, state: 'error', status: 0, data: null, reason: 'network', message: null };
   }
+}
+
+/** 平台账户优先；账户登录拒绝时再试本机管理员（bootstrap 建立的 local admin）。 */
+export async function login(username, password, opts) {
+  const r = await send(PATHS.login, { username, password }, opts);
+  if (r.ok || r.status !== 401) return r;
+  const local = await send(PATHS.localLogin, { username, password }, opts);
+  // 本机管理员未配置（503）时，向用户报告的仍是账户登录的结果。
+  return local.ok || local.status === 401 || local.status === 429 ? local : r;
 }
 
 export async function loadMe(opts) {
