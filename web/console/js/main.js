@@ -70,7 +70,7 @@ async function loadLaunchLinks() {
 
 function quickLaunch() {
   if (!launchLinks || !launchLinks.length) return null;
-  const list = h('div', { hidden: !launchOpen }, launchLinks.map((row) => h('a', {
+  const list = h('div', { class: 'launch-list', hidden: !launchOpen }, launchLinks.map((row) => h('a', {
     class: 'nav-item', href: safeJumpUrl(row.ui_url), target: '_blank', rel: 'noopener noreferrer',
     'aria-label': `打开 ${row.name}（新标签页）`,
   }, navIcon('launch', '#8E8E93'), row.name, h('span', { class: 'ext-mark', 'aria-hidden': 'true' }, '↗'))));

@@ -59,7 +59,15 @@ export function kpiBar(k) {
   const vramPct = k.vramUsedMiB != null && k.vramTotalMiB ? Math.min(1, k.vramUsedMiB / k.vramTotalMiB) : null;
   const meter = (ratio, label) => h('div', { class: 'meter', role: 'img', 'aria-label': `${label} ${Math.round(ratio * 100)}%` },
     h('div', { style: { width: `${(ratio * 100).toFixed(1)}%` } }));
-  const cell = (label, value, note) => h('div', { class: 'kpi' }, h('div', { class: 'kpi-label' }, label), value, note);
+  const KPI_STYLE = {
+    '显存占用': ['#5856D6', 'memory'], 'GPU 利用率': ['#FF9500', 'usage'], '推理服务': ['#34C759', 'services'], '调用量': ['#007AFF', 'requests'],
+  };
+  const cell = (label, value, note) => {
+    const [tint, glyph] = KPI_STYLE[label] ?? ['#007AFF', 'overview'];
+    return h('div', { class: 'kpi', style: { '--tint': tint } },
+      h('div', { class: 'kpi-label' }, h('span', { class: 'kpi-glyph', 'aria-hidden': 'true' }, s('svg', { viewBox: '0 0 14 14' }, ICONS[glyph]())), label),
+      value, note);
+  };
   const gpuNote = [k.tempC != null ? `${Math.round(k.tempC)} °C` : null, k.powerW != null ? `${Math.round(k.powerW)} W` : null].filter(Boolean).join(' · ');
   return h('section', { class: 'kpis', 'aria-label': '关键指标' },
     cell('显存占用',
@@ -173,13 +181,14 @@ const ICONS = {
   usage: () => [s('path', { d: 'M2.5 11.5V8M5.5 11.5V5M8.5 11.5V7M11.5 11.5V2.5', stroke: '#fff', 'stroke-width': 1.6, 'stroke-linecap': 'round' })],
   evaluation: () => [s('path', { d: 'M3 7.3 5.8 10 11 4', fill: 'none', stroke: '#fff', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })],
   models: () => [s('ellipse', { cx: 7, cy: 3.6, rx: 4.6, ry: 1.8, fill: 'none', stroke: '#fff', 'stroke-width': 1.3 }), s('path', { d: 'M2.4 3.6V10.4C2.4 11.4 4.5 12.2 7 12.2S11.6 11.4 11.6 10.4V3.6M2.4 7C2.4 8 4.5 8.8 7 8.8S11.6 8 11.6 7', fill: 'none', stroke: '#fff', 'stroke-width': 1.3 })],
+  memory: () => [s('rect', { x: 2.5, y: 3.5, width: 9, height: 7, rx: 1.2, fill: 'none', stroke: '#fff', 'stroke-width': 1.3 }), s('path', { d: 'M4.5 1.8V3.5M7 1.8V3.5M9.5 1.8V3.5M4.5 10.5V12.2M7 10.5V12.2M9.5 10.5V12.2', stroke: '#fff', 'stroke-width': 1.2, 'stroke-linecap': 'round' })],
   launch: () => [s('path', { d: 'M5.5 3H3V11H11V8.5M8 2.5H11.5V6M11.5 2.5 6.5 7.5', fill: 'none', stroke: '#fff', 'stroke-width': 1.4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })],
   users: () => [s('circle', { cx: 7, cy: 4.8, r: 2.4, fill: 'none', stroke: '#fff', 'stroke-width': 1.4 }), s('path', { d: 'M2.5 12.2C3.2 9.8 5 8.8 7 8.8S10.8 9.8 11.5 12.2', fill: 'none', stroke: '#fff', 'stroke-width': 1.4, 'stroke-linecap': 'round' })],
   extensions: () => [s('path', { d: 'M5 2V5M9 2V5M3.5 5H10.5V7.5A3.5 3.5 0 0 1 3.5 7.5Z M7 11V12.5', fill: 'none', stroke: '#fff', 'stroke-width': 1.4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })],
 };
 
 export function navIcon(name, color) {
-  return h('span', { class: 'nav-icon', style: { background: color }, 'aria-hidden': 'true' },
+  return h('span', { class: 'nav-icon', style: { 'background-color': color }, 'aria-hidden': 'true' },
     s('svg', { viewBox: '0 0 14 14' }, ICONS[name]()));
 }
 
