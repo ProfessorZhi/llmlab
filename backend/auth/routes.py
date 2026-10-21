@@ -14,7 +14,18 @@ Contract (agreed with the parallel frontend/Atlas work):
 ``POST /auth/tokens/revoke``                     200 — revoke one of the caller's own tokens
 ``POST /auth/tokens/rotate``                     201 — replace a **live** token of the caller's; plaintext returned once
 ``POST /auth/tokens/revoke-all``                 200 — revoke every token the caller holds
+``POST /auth/account/login``                     200 — platform account login; same shape as local login
+``POST /auth/account/password``                  200 — change own password; all sessions revoked, new cookie
+``GET  /auth/admin/users``                       200 — platform accounts (admin only)
+``POST /auth/admin/users``                       201 — create an account; one-time password returned **once**
+``POST /auth/admin/users/reset-password``        200 — new one-time password, sessions revoked
+``POST /auth/admin/users/role``                  200 — ``admin`` / ``member``
+``POST /auth/admin/users/linux``                 200 — set or clear the optional Linux label
+``POST /auth/admin/users/status``                200 — ``active`` / ``disabled`` (disable revokes sessions)
 ===============================================  ==========================================
+
+Platform accounts (:mod:`backend.auth.accounts`) are independent of Linux:
+nothing on these routes consults PAM or the host user database.
 
 The five ``/auth/tokens`` routes are **fail-closed**: until the deploying
 application injects a :class:`~backend.auth.tokens.ScopedTokenService` they
@@ -153,6 +164,29 @@ ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/auth/tokens/revoke"): "tokens_revoke",
     ("POST", "/auth/tokens/rotate"): "tokens_rotate",
     ("POST", "/auth/tokens/revoke-all"): "tokens_revoke_all",
+    ("POST", "/auth/account/login"): "account_login",
+    ("POST", "/auth/account/password"): "account_password",
+    ("GET", "/auth/admin/users"): "users_list",
+    ("POST", "/auth/admin/users"): "users_create",
+    ("POST", "/auth/admin/users/reset-password"): "users_reset",
+    ("POST", "/auth/admin/users/role"): "users_role",
+    ("POST", "/auth/admin/users/linux"): "users_linux",
+    ("POST", "/auth/admin/users/status"): "users_status",
+}
+
+#: Body fields that would otherwise be refused as identity assertions but that,
+#: on these routes, name the **target** of an action rather than the caller:
+#: the credential being verified at login, or the account an administrator is
+#: changing. The caller's own identity still comes only from the session, the
+#: admin routes require an admin session, and query strings stay forbidden.
+TARGET_IDENTITY_FIELDS: dict[str, frozenset[str]] = {
+    "/auth/local/login": frozenset({"username"}),
+    "/auth/account/login": frozenset({"username"}),
+    "/auth/admin/users": frozenset({"username", "linux_user", "role"}),
+    "/auth/admin/users/reset-password": frozenset({"user_id"}),
+    "/auth/admin/users/role": frozenset({"user_id", "role"}),
+    "/auth/admin/users/linux": frozenset({"user_id", "linux_user"}),
+    "/auth/admin/users/status": frozenset({"user_id"}),
 }
 
 #: Paths whose field-level identity policy this application owns. The matrix
@@ -241,6 +275,9 @@ class Application:
         # than exist in a half-wired form.
         self.tokens = tokens
         self._token_scope_policy = token_scope_policy
+        if tokens is not None:
+            # Disabling an account must also kill the CLI credentials it minted.
+            self.service.accounts.revoke_tokens = tokens.revoke_all_for_principal
 
     # --- wiring --------------------------------------------------------------
 
@@ -260,9 +297,10 @@ class Application:
     def authorize(self, session, *, require_admin: bool = False):
         """Guard reused by every future protected route.
 
-        There is deliberately no route that grants a role or a project: role
-        assignment is an out-of-band administrative action, so authentication
-        can never be an escalation path.
+        No route grants a project, and logging in never changes a role. The
+        only role changes are the ``/auth/admin/users*`` routes, which demand
+        an active administrator session, so authentication itself can never
+        be an escalation path.
         """
         if not session.user.is_active:
             raise errors.AccountDisabled()
@@ -308,8 +346,9 @@ class Application:
         A forged field is refused whole rather than ignored: "read but not
         used" is one refactor, middleware or log processor away from used.
 
-        ``username`` is the credential identifier on ``/auth/local/login``, so
-        that one route may carry it in its body. It remains an assertion in a
+        ``username`` is the credential identifier on the login routes, and the
+        admin account routes name their target account; those body fields are
+        listed in :data:`TARGET_IDENTITY_FIELDS`. They remain assertions in a
         query string and on every other route.
         """
         if not self._identity_guard_owns(request.path):
@@ -325,8 +364,7 @@ class Application:
             if isinstance(payload, dict):
                 body_fields = {str(name).strip().lower() for name in payload}
 
-        if request.path == "/auth/local/login":
-            body_fields.discard("username")
+        body_fields -= TARGET_IDENTITY_FIELDS.get(request.path, frozenset())
 
         offending = sorted((query_fields | body_fields) & ASSERTED_IDENTITY_FIELDS)
         if offending:
@@ -520,9 +558,17 @@ class Application:
         ``session.user`` as the *only* source of principal. Nothing in the
         request body can name a different owner.
         """
-        return self.authorize(
+        session = self.authorize(
             self.service.current_session(request.cookies.get(self.cfg.cookie_name))
         )
+        self._require_password_current(session)
+        return session
+
+    def _require_password_current(self, session) -> None:
+        """A one-time password buys a session that can only replace itself."""
+        account = self.service.accounts.account_for(session.user)
+        if account is not None and account.must_change_password:
+            raise errors.PasswordChangeRequired()
 
     def _allowed_token_scopes(self, session) -> frozenset[str]:
         """The scopes this session may hand out, or a server fault.
@@ -581,6 +627,10 @@ class Application:
             scopes = wanted
 
         principal, uid, linux_user = principal_ref(session.user)
+        account = self.service.accounts.account_for(session.user)
+        if account is not None:
+            # 平台账户：没有 uid；Registry 目录里这个主体的 ``linux_user`` 是账户用户名。
+            uid, linux_user = None, account.username
         issued = tokens.issue(
             principal=principal,
             uid=uid,
@@ -641,6 +691,93 @@ class Application:
         if not isinstance(token_id, str) or not token_id.strip():
             raise errors.InvalidRequest(detail="token_id is required")
         return token_id.strip()
+
+    # --- platform accounts ---------------------------------------------------
+
+    def _account_session_response(self, account, issued, *, status: int = 200) -> Response:
+        return Response.json(
+            status,
+            {
+                "ok": True,
+                "data": {
+                    "user": self.service.public_identity(account.user),
+                    "csrf_token": issued.csrf_token,
+                    "session_expires_at": issued.absolute_expires_at,
+                },
+            },
+            headers=[("Set-Cookie", self._session_cookie(issued.session_id))],
+        )
+
+    def _route_account_login(self, request: Request) -> Response:
+        body = request.json_body()
+        account, issued = self.service.accounts.login(
+            body.get("username"), body.get("password"), client_key=request.client_ip
+        )
+        return self._account_session_response(account, issued)
+
+    def _route_account_password(self, request: Request) -> Response:
+        # Deliberately not ``_session``: this is the one route a session holding
+        # a one-time password may use.
+        session = self.authorize(
+            self.service.current_session(request.cookies.get(self.cfg.cookie_name))
+        )
+        body = request.json_body()
+        account, issued = self.service.accounts.change_password(
+            session.user, body.get("current_password"), body.get("new_password")
+        )
+        return self._account_session_response(account, issued)
+
+    def _admin_session(self, request: Request):
+        session = self._session(request)
+        return self.authorize(session, require_admin=True)
+
+    def _users_payload(self, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "users": [a.to_public_dict() for a in self.service.accounts.list_accounts()]
+        }
+        data.update(extra or {})
+        return {"ok": True, "data": data}
+
+    def _route_users_list(self, request: Request) -> Response:
+        self._admin_session(request)
+        return Response.json(200, self._users_payload())
+
+    def _route_users_create(self, request: Request) -> Response:
+        session = self._admin_session(request)
+        account, temporary = self.service.accounts.create(session.user, request.json_body())
+        return Response.json(
+            201,
+            self._users_payload({"user": account.to_public_dict(), "temporary_password": temporary}),
+        )
+
+    def _route_users_reset(self, request: Request) -> Response:
+        session = self._admin_session(request)
+        body = request.json_body()
+        account, temporary = self.service.accounts.reset_password(session.user, body.get("user_id"))
+        return Response.json(
+            200,
+            self._users_payload({"user": account.to_public_dict(), "temporary_password": temporary}),
+        )
+
+    def _route_users_role(self, request: Request) -> Response:
+        session = self._admin_session(request)
+        body = request.json_body()
+        account = self.service.accounts.set_role(session.user, body.get("user_id"), body.get("role"))
+        return Response.json(200, self._users_payload({"user": account.to_public_dict()}))
+
+    def _route_users_linux(self, request: Request) -> Response:
+        session = self._admin_session(request)
+        body = request.json_body()
+        account = self.service.accounts.set_linux_user(
+            session.user, body.get("user_id"), body.get("linux_user")
+        )
+        return Response.json(200, self._users_payload({"user": account.to_public_dict()}))
+
+    def _route_users_status(self, request: Request) -> Response:
+        session = self._admin_session(request)
+        body = request.json_body()
+        account = self.service.accounts.set_status(session.user, body.get("user_id"), body.get("status"))
+        return Response.json(200, self._users_payload({"user": account.to_public_dict()}))
 
     # --- helpers -------------------------------------------------------------
 
@@ -726,5 +863,6 @@ __all__ = [
     "ROUTES",
     "Request",
     "Response",
+    "TARGET_IDENTITY_FIELDS",
     "create_app",
 ]

@@ -380,6 +380,7 @@
           "health": "unknown",
           "model_id": "mdl_id002",
           "model_label": "model-alice",
+          "owner_name": "alice",
           "owner_uid": "linux:dell-test-01:4001",
           "share": {
             "mode": "selected",
@@ -388,6 +389,39 @@
             ],
             "revocable": true
           }
+        }
+      ],
+      "engines": [
+        {
+          "engine_id": "eng_id001",
+          "framework": null,
+          "last_seen_at": "2026-10-15T12:00:00Z",
+          "name": "engine-alice",
+          "owner": "linux:dell-test-01:4001",
+          "owner_is_self": false,
+          "owner_name": "alice",
+          "ownership_state": "ownership_unverified",
+          "ownership_verified": false,
+          "port": 8000,
+          "protocol": "openai_compatible",
+          "run_as_uid": null,
+          "run_as_user": null,
+          "status": "verified"
+        }
+      ],
+      "models": [
+        {
+          "created_at": "2026-10-15T12:00:00Z",
+          "description": null,
+          "format": null,
+          "model_id": "mdl_id002",
+          "name": "model-alice",
+          "owner": "linux:dell-test-01:4001",
+          "owner_is_self": false,
+          "owner_name": "alice",
+          "parameter_count": null,
+          "status": "registered",
+          "weight_path": null
         }
       ],
       "owned": [],
@@ -737,6 +771,39 @@
     "registry": {
       "adapter_attached": true,
       "all": [],
+      "engines": [
+        {
+          "engine_id": "eng_id001",
+          "framework": null,
+          "last_seen_at": "2026-10-15T12:00:00Z",
+          "name": "engine-alice",
+          "owner": "linux:dell-test-01:4001",
+          "owner_is_self": false,
+          "owner_name": "alice",
+          "ownership_state": "ownership_unverified",
+          "ownership_verified": false,
+          "port": 8000,
+          "protocol": "openai_compatible",
+          "run_as_uid": null,
+          "run_as_user": null,
+          "status": "verified"
+        }
+      ],
+      "models": [
+        {
+          "created_at": "2026-10-15T12:00:00Z",
+          "description": null,
+          "format": null,
+          "model_id": "mdl_id002",
+          "name": "model-alice",
+          "owner": "linux:dell-test-01:4001",
+          "owner_is_self": false,
+          "owner_name": "alice",
+          "parameter_count": null,
+          "status": "registered",
+          "weight_path": null
+        }
+      ],
       "owned": [],
       "reason": null,
       "shared": [
@@ -1054,6 +1121,39 @@
     "registry": {
       "adapter_attached": true,
       "all": [],
+      "engines": [
+        {
+          "engine_id": "eng_id001",
+          "framework": null,
+          "last_seen_at": "2026-10-15T12:00:00Z",
+          "name": "engine-alice",
+          "owner": "linux:dell-test-01:4001",
+          "owner_is_self": true,
+          "owner_name": "alice",
+          "ownership_state": "ownership_unverified",
+          "ownership_verified": false,
+          "port": 8000,
+          "protocol": "openai_compatible",
+          "run_as_uid": null,
+          "run_as_user": null,
+          "status": "verified"
+        }
+      ],
+      "models": [
+        {
+          "created_at": "2026-10-15T12:00:00Z",
+          "description": null,
+          "format": null,
+          "model_id": "mdl_id002",
+          "name": "model-alice",
+          "owner": "linux:dell-test-01:4001",
+          "owner_is_self": true,
+          "owner_name": "alice",
+          "parameter_count": null,
+          "status": "registered",
+          "weight_path": null
+        }
+      ],
       "owned": [
         {
           "deployment_id": "dep_id003",
@@ -1071,6 +1171,7 @@
           "model_id": "mdl_id002",
           "model_label": "model-alice",
           "owner_is_self": true,
+          "owner_name": "alice",
           "owner_uid": "linux:dell-test-01:4001",
           "registered": true,
           "resources": {

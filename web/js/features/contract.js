@@ -326,7 +326,7 @@ function checkForbidden(record, allowed, where, errors) {
 const DEPLOYMENT_FIELDS = Object.freeze([
   'deployment_id', 'model_id', 'model_label', 'engine_type', 'owner_uid', 'owner_is_self',
   'health', 'runtime_status', 'registered', 'resources', 'share', 'links', 'updated_at',
-  'health_reason', 'runtime_reason',
+  'health_reason', 'runtime_reason', 'owner_name',
 ]);
 
 function checkDeployment(dep, index, subject, errors) {
@@ -405,7 +405,7 @@ function checkSharedEndpoint(item, index, subject, errors) {
  *  constrained to the session subject here — that is the whole point of the
  *  admin view — but the scope check below is what keeps it admin-only. */
 const ALL_DEPLOYMENT_FIELDS = Object.freeze([
-  'deployment_id', 'model_id', 'model_label', 'owner_uid', 'health', 'share',
+  'deployment_id', 'model_id', 'model_label', 'owner_uid', 'owner_name', 'health', 'share',
 ]);
 
 function checkAllDeployment(row, index, errors) {
@@ -427,6 +427,61 @@ function checkAllDeployment(row, index, errors) {
     errors.push(`${where}.health is not supported: ${String(row.health)}`);
   }
   checkShare(row.share, where, errors);
+}
+
+/** A registered inference service (Registry engine). `run_as_user` is the
+ *  Linux user observed serving the port at registration — a recorded fact,
+ *  never an authorisation input — and may be null when nothing was observed. */
+const ENGINE_FIELDS = Object.freeze([
+  'engine_id', 'name', 'protocol', 'framework', 'port', 'owner', 'owner_name', 'owner_is_self',
+  'status', 'ownership_state', 'ownership_verified', 'run_as_user', 'run_as_uid', 'last_seen_at',
+]);
+const ENGINE_STATUSES = Object.freeze(['registered', 'verified', 'unavailable']);
+
+function checkEngine(row, index, subject, errors) {
+  const where = `registry.engines[${index}]`;
+  if (!isPlainObject(row)) {
+    errors.push(`${where} must be an object`);
+    return;
+  }
+  checkForbidden(row, ENGINE_FIELDS, where, errors);
+  for (const field of ['engine_id', 'name', 'owner']) {
+    if (!isNonEmptyString(row[field])) errors.push(`${where}.${field} must be a non-empty string`);
+  }
+  if (!ENGINE_STATUSES.includes(row.status)) {
+    errors.push(`${where}.status is not supported: ${String(row.status)}`);
+  }
+  if (subject !== null && (row.owner_is_self === true) !== (row.owner === subject)) {
+    errors.push(`${where}.owner_is_self disagrees with the session subject`);
+  }
+  if (row.run_as_user !== undefined && row.run_as_user !== null && !isNonEmptyString(row.run_as_user)) {
+    errors.push(`${where}.run_as_user must be a non-empty string or null`);
+  }
+}
+
+const MODEL_FIELDS = Object.freeze([
+  'model_id', 'name', 'format', 'parameter_count', 'description', 'owner', 'owner_name',
+  'owner_is_self', 'status', 'weight_path', 'created_at',
+]);
+
+function checkModel(row, index, subject, errors) {
+  const where = `registry.models[${index}]`;
+  if (!isPlainObject(row)) {
+    errors.push(`${where} must be an object`);
+    return;
+  }
+  checkForbidden(row, MODEL_FIELDS, where, errors);
+  for (const field of ['model_id', 'name', 'owner']) {
+    if (!isNonEmptyString(row[field])) errors.push(`${where}.${field} must be a non-empty string`);
+  }
+  const mine = subject !== null && row.owner === subject;
+  if (subject !== null && (row.owner_is_self === true) !== mine) {
+    errors.push(`${where}.owner_is_self disagrees with the session subject`);
+  }
+  if (!mine && row.weight_path !== undefined && row.weight_path !== null) {
+    // A weight path names the owner's directories; only the owner may see it.
+    errors.push(`${where} carries another principal's weight path`);
+  }
 }
 
 function checkRegistry(registry, subject, scopes, errors) {
@@ -456,6 +511,14 @@ function checkRegistry(registry, subject, scopes, errors) {
       }
       registry.all.forEach((row, index) => checkAllDeployment(row, index, errors));
     }
+  }
+  if (registry.models !== undefined && registry.models !== null) {
+    if (!Array.isArray(registry.models)) errors.push('registry.models must be a list');
+    else registry.models.forEach((row, index) => checkModel(row, index, subject, errors));
+  }
+  if (registry.engines !== undefined && registry.engines !== null) {
+    if (!Array.isArray(registry.engines)) errors.push('registry.engines must be a list');
+    else registry.engines.forEach((row, index) => checkEngine(row, index, subject, errors));
   }
   if (registry.adapter_attached !== undefined && typeof registry.adapter_attached !== 'boolean') {
     errors.push('registry.adapter_attached must be a boolean when present');
@@ -927,6 +990,8 @@ function normalise(raw) {
         share: share(item.share),
       })),
       all: (raw.registry.all ?? []).map((row) => ({ ...row, share: share(row.share) })),
+      engines: (raw.registry.engines ?? []).map((row) => ({ ...row })),
+      models: (raw.registry.models ?? []).map((row) => ({ ...row })),
     },
     links: [...(raw.links ?? [])],
     trends: raw.trends

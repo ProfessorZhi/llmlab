@@ -26,12 +26,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Iterable, Protocol
 
+from ..auth import accounts as auth_accounts
 from ..auth import errors as auth_errors
 from ..auth import store as auth_store
 from ..auth_linux import handoff as linux_handoff
 from ..registry.identity import (
     FORBIDDEN_IDENTITY_FIELDS,
     FORBIDDEN_IDENTITY_HEADERS,
+    UID_UNMAPPED,
     RequesterContext,
 )
 from . import scopes as bff_scopes
@@ -154,6 +156,13 @@ class NotLinuxSession(IdentityError):
 
     status = 403
     reason = REASON_NOT_LINUX
+
+
+class PasswordChangeRequired(IdentityError):
+    """平台账户还在用管理员发的一次性口令：在改口令之前不给任何数据。"""
+
+    status = 403
+    reason = "password_change_required"
 
 
 class AccountDisabled(IdentityError):
@@ -419,6 +428,11 @@ def resolve_principal(
     if not user.is_active:  # pragma: no cover - authenticate 已经拦下停用账号
         raise AccountDisabled("the account behind this session is disabled")
 
+    if user.auth_source == auth_accounts.SOURCE_PLATFORM:
+        return _account_principal(user, auth_service)
+    if user.auth_source == auth_store.SOURCE_LOCAL and user.is_admin:
+        return _local_admin_principal(user)
+
     if user.auth_source != linux_handoff.AUTH_SOURCE_LINUX:
         # 基线里的 Feishu / local-admin 会话是真的，但它们不是 Linux 身份；
         # 于是它们也拿不到 Registry 主体。诚实地说清楚是哪一条不满足。
@@ -455,6 +469,71 @@ def resolve_principal(
             scopes=granted.registry,
             # roles 只用于展示与审计，不参与任何判定 —— 与 Registry 的约定一致。
             # 因此这里写的是**有效角色**，不是用户表里那个。
+            roles=frozenset({role}),
+            token_label=None,
+        ),
+    )
+
+
+def _account_principal(user, auth_service) -> Principal:
+    """平台账户会话 ⇒ 主体。与 Linux 账户无关：不查 ``pwd``，不要求 uid。
+
+    * 角色由管理员在「用户与权限」里显式设定，所以 ``platform_admin`` 账户直接
+      拿管理员词表——它不是从 Linux 名或 PAM 推出来的，因而不需要再走一道共享
+      管理口令的提权；
+    * 主体 id 是 ``account:<hex>``；``uid`` 写 ``UID_UNMAPPED``，服务实际由哪个
+      Linux 用户运行记在各 engine 的所有权证明里。
+    """
+    accounts = getattr(auth_service, "accounts", None)
+    account = accounts.account_for(user) if accounts is not None else None
+    if account is None:
+        raise NoSession("the platform account behind this session no longer exists")
+    if account.must_change_password:
+        raise PasswordChangeRequired("set a new password before using the portal")
+    elevated = user.is_admin
+    role = bff_scopes.session_role(elevated=elevated)
+    granted = bff_scopes.session_scopes(elevated=elevated)
+    return Principal(
+        user=user,
+        principal=user.id,
+        uid=UID_UNMAPPED,
+        linux_user=account.username,
+        portal_scopes=tuple(sorted(granted.portal)),
+        elevated=elevated,
+        effective_role=role,
+        requester=RequesterContext(
+            principal=user.id,
+            uid=UID_UNMAPPED,
+            linux_user=account.username,
+            scopes=granted.registry,
+            roles=frozenset({role}),
+            token_label=None,
+        ),
+    )
+
+
+def _local_admin_principal(user) -> Principal:
+    """bootstrap 建立的本机 ``admin`` 会话 ⇒ 管理员视图主体。
+
+    它是用来管理账户的那一个身份：能看全实验室（管理员词表），但它不是任何
+    Linux 用户、也不在主体目录里，所以它名下登记不了服务——日常使用请用管理员
+    为自己创建的平台账户。
+    """
+    role = bff_scopes.session_role(elevated=True)
+    granted = bff_scopes.session_scopes(elevated=True)
+    return Principal(
+        user=user,
+        principal=user.id,
+        uid=UID_UNMAPPED,
+        linux_user=user.display_name,
+        portal_scopes=tuple(sorted(granted.portal)),
+        elevated=True,
+        effective_role=role,
+        requester=RequesterContext(
+            principal=user.id,
+            uid=UID_UNMAPPED,
+            linux_user=user.display_name,
+            scopes=granted.registry,
             roles=frozenset({role}),
             token_label=None,
         ),
@@ -762,6 +841,7 @@ __all__ = [
     "REASON_CREDENTIAL_CONFUSION",
     "REASON_IDENTITY_ASSERTED",
     "REASON_NOT_LINUX",
+    "PasswordChangeRequired",
     "REASON_PROXY_ASSERTED",
     "REASON_SOURCE_ASSERTED",
     "REASON_TOKEN_AUTH_NOT_ENABLED",

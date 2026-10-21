@@ -417,15 +417,18 @@ class ExternalUiTest(unittest.TestCase):
                 self.assertFalse(entry["visible"])
                 self.assertIsNone(entry["path"])
 
-    def test_a_host_scope_reader_sees_grafana_and_prometheus_but_not_evalscope(self) -> None:
+    def test_a_host_scope_reader_does_not_get_the_native_dashboards(self) -> None:
+        # Host readings are shared with every member (portal charts), but the
+        # native Grafana / Prometheus / EvalScope UIs stay admin-only.
         entries = {
             entry["id"]: entry
             for entry in _own(ALICE_ROWS, host_only_principal(UID_ALICE))["external_ui"][
                 "entries"
             ]
         }
-        self.assertTrue(entries["grafana"]["visible"])
-        self.assertTrue(entries["prometheus"]["visible"])
+        self.assertFalse(entries["grafana"]["visible"])
+        self.assertFalse(entries["prometheus"]["visible"])
+        self.assertEqual(entries["grafana"]["requires"], "observability:admin:read")
         self.assertFalse(entries["evalscope"]["visible"])
         self.assertEqual(entries["evalscope"]["requires"], "observability:admin:read")
 

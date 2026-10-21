@@ -50,6 +50,7 @@ from typing import Any, Callable, Iterable, Mapping
 
 from ..atlas import errors as atlas_errors
 from ..auth import errors as auth_errors
+from ..auth import store as auth_store
 from ..auth.routes import REASON_PHRASES
 from ..auth.wsgi import build_request
 from ..auth_linux import errors as linux_errors
@@ -67,6 +68,7 @@ from . import host_summary as bff_host_summary
 from . import identity as bff_identity
 from . import invoke as bff_invoke
 from . import ops as bff_ops
+from . import integrations as bff_integrations
 from . import origin as bff_origin
 from . import route_map as bff_route_map
 from . import scopes as bff_scopes
@@ -199,6 +201,8 @@ class OpsApplication:
         admin_mode=None,
         authority_policy=None,
         token_source=None,
+        integrations=None,
+        registry_api=None,
     ) -> None:
         self.auth_app = auth_app
         self.cfg = auth_app.cfg
@@ -226,6 +230,12 @@ class OpsApplication:
         #: 「反正没人配」而接受任何外部主机名。反代后面用真实主机名属于部署决策，
         #: 由运维显式传进来。
         self.authority_policy = authority_policy or bff_origin.AuthorityPolicy()
+        #: 插件跳转地址的存储。``None`` = 本部署没接：两条路由以 503 收场。
+        self.integrations = integrations
+        #: Registry 的 token API（CLI / Agent 用）。挂上之后，带 ``Authorization``
+        #: 的 ``/api/v2/registry/*`` 请求原样交给它；浏览器（cookie）请求仍走本层的
+        #: 会话路由。``None`` = 本进程不提供 CLI 入口。
+        self.registry_api = registry_api
         #: scoped CLI token 通道。``None`` 时建一条**关闭**的：它仍然负责带
         #: ``Authorization`` 头的请求，只是对它们一律答 401。token 的签发/撤销/审计
         #: 归 IAM Lane；在它落地之前，把通道开着就是一条没有审计的旁路。
@@ -247,6 +257,8 @@ class OpsApplication:
     # --- WSGI ---------------------------------------------------------------
 
     def __call__(self, environ: Mapping[str, Any], start_response: Callable) -> Iterable[bytes]:
+        if self._is_registry_token_request(environ):
+            return self._serve_registry_api(environ, start_response)
         request = build_request(environ, max_body=self.cfg.max_request_bytes)
         response = self.handle(
             request,
@@ -256,6 +268,37 @@ class OpsApplication:
         reason = REASON_PHRASES.get(response.status, DEFAULT_REASON)
         start_response(f"{response.status} {reason}", list(response.headers))
         return [response.body]
+
+    def _is_registry_token_request(self, environ) -> bool:
+        path = environ.get("PATH_INFO") or ""
+        return (
+            self.registry_api is not None
+            and path.startswith(REGISTRY_API_PREFIX)
+            and bool(environ.get("HTTP_AUTHORIZATION"))
+        )
+
+    def _serve_registry_api(self, environ, start_response):
+        """CLI / Agent 通道：``Bearer`` 令牌 → Registry 自己的 API（自己判身份）。
+
+        同一个 ``Host`` 权威守卫先跑；同时带会话 cookie 的请求按凭据混淆拒绝——
+        任何一侧优先都是一次隐式降级（见 :meth:`_invoke_preflight`）。
+        """
+        refusal = self.check_authority(
+            host_header=environ.get("HTTP_HOST"), server_port=environ.get("SERVER_PORT")
+        )
+        if refusal is None and self.cfg.cookie_name in _cookie_names(environ.get("HTTP_COOKIE")):
+            refusal = _error_response(
+                400,
+                bff_identity.REASON_CREDENTIAL_CONFUSION,
+                "send either a session cookie or an Authorization header, not both",
+            )
+        if refusal is not None:
+            start_response(
+                f"{refusal.status} {REASON_PHRASES.get(refusal.status, DEFAULT_REASON)}",
+                list(refusal.headers),
+            )
+            return [refusal.body]
+        return self.registry_api(environ, start_response)
 
     def check_authority(self, *, host_header: object, server_port: object):
         """``Host`` 权威守卫。不通过就给出 421，且**在任何 cookie/CSRF 之前**。
@@ -835,6 +878,84 @@ class OpsApplication:
 
     # --- PUT /api/v2/ops/deployments/{id}/share -----------------------------
 
+    # --- /api/portal/integrations ------------------------------------------
+
+    def _integration_store(self):
+        if self.integrations is None:
+            raise _IntegrationsNotAttached()
+        return self.integrations
+
+    def _integrations(self, request):
+        """插件目录 + 跳转地址。对看不到某个地址的会话，那一项的 ``ui_url`` 是 ``null``。"""
+        self._reject_asserted_identity(request)
+        principal = self._principal(request)
+        try:
+            store = self._integration_store()
+        except _IntegrationsNotAttached:
+            return _error_response(503, "bff.integrations_not_attached", "plugin settings are not attached")
+        is_admin = bff_scopes.PORTAL_ADMIN_READ in principal.portal_scopes
+        return _json_response(200, {"data": {"integrations": store.listing(is_admin=is_admin)}})
+
+    def _integration_update(self, request, key: str):
+        self._reject_asserted_identity(request)
+        self._write_preflight(request)
+        principal = self._principal(request)
+        if bff_scopes.PORTAL_ADMIN_READ not in principal.portal_scopes:
+            return _error_response(403, "bff.forbidden", "only administrators can change plugin settings")
+        try:
+            store = self._integration_store()
+        except _IntegrationsNotAttached:
+            return _error_response(503, "bff.integrations_not_attached", "plugin settings are not attached")
+        body = _json_body(request)
+        if body is None:
+            return _error_response(400, "bff.invalid_request", "a JSON object body is required")
+        try:
+            store.update(key, ui_url=body.get("ui_url"), visibility=body.get("visibility"))
+        except KeyError:
+            return _error_response(404, "bff.not_found", f"unknown plugin {key!r}")
+        except bff_integrations.InvalidIntegration as exc:
+            return _error_response(400, "bff.invalid_request", str(exc))
+        return _json_response(200, {"data": {"integrations": store.listing(is_admin=True)}})
+
+    # --- POST /api/v2/registry/engines[/preflight] --------------------------
+
+    def _registry_body(self, request):
+        self._reject_asserted_identity(request)
+        self._write_preflight(request)
+        principal = self._principal(request)
+        body = _json_body(request)
+        if body is None:
+            raise registry_errors.InvalidRequest("a JSON object body is required")
+        return principal, body
+
+    def _registry_preflight(self, request):
+        """网页登记前的只读预检。owner 只来自会话；Registry 不写库、不写审计。"""
+        principal, body = self._registry_body(request)
+        envelope = self.service.preflight_engine(principal.requester, body)
+        return _json_response(200, envelope)
+
+    def _registry_discovery(self, request):
+        """本机候选（只读）。"""
+        self._reject_asserted_identity(request)
+        principal = self._principal(request)
+        return _json_response(200, self.service.discover(principal.requester))
+
+    def _registry_model_register(self, request):
+        """网页登记模型。与 CLI 的 ``models register`` 走同一个 ``register_model``。"""
+        principal, body = self._registry_body(request)
+        envelope, created = self.service.register_model(
+            principal.requester, body, idempotency_key=request.header("idempotency-key")
+        )
+        return _json_response(201 if created else 200, envelope)
+
+    def _registry_register(self, request):
+        """网页登记推理服务。与 CLI 登记走同一个 ``RegistryService.register_engine``。"""
+        principal, body = self._registry_body(request)
+        envelope, created = self.service.register_engine(
+            principal.requester, body, idempotency_key=request.header("idempotency-key")
+        )
+        return _json_response(201 if created else 200, envelope)
+
     def _share(self, request, deployment_id: str):
         self._reject_asserted_identity(request)
         self._write_preflight(request)
@@ -1014,15 +1135,20 @@ class OpsApplication:
 
         1. 拒绝自报身份的头（``X-Admin`` 之类出现即 400）；
         2. 复用既有 CSRF / 同源校验——提权是一个写操作；
-        3. ``_principal`` 把 cookie 解成**受信主体**，它只接受 ``linux_pam``
-           会话。没有登录、Feishu 会话、演示用的本地管理员，都在这一步拿不到
-           主体，因此根本走不到口令校验。第三个身份来源不是被"额外检查"掉的，
-           是没有可提权的会话；
+        3. ``_principal`` 把 cookie 解成**受信主体**；共享口令提权**只**适用于
+           ``linux_pam`` 会话。没有登录、Feishu 会话在这一步拿不到主体；平台账户
+           与本机 ``admin`` 拿得到主体，但它们的角色由账户管理决定、不需要也不
+           允许用共享口令提权，所以在这里明确拒绝，走不到口令校验；
         4. 只有到这里，才把主体 + 口令交给 ``AdminModeService``。
         """
         self._reject_asserted_identity(request)
         self._write_preflight(request)
         principal = self._principal(request)
+        if principal.user is None or principal.user.auth_source != auth_store.SOURCE_LINUX:
+            raise bff_identity.NotLinuxSession(
+                "shared-password admin mode applies to Linux sessions only; "
+                "platform accounts get their role from account management"
+            )
 
         body = _json_body(request)
         if body is None:
@@ -1263,6 +1389,20 @@ def _body_field_names(request) -> tuple[str, ...]:
     if not isinstance(payload, dict):
         return ()
     return tuple(str(name) for name in payload)
+
+
+class _IntegrationsNotAttached(Exception):
+    pass
+
+
+#: CLI / Agent 的 Registry API 前缀（与 ``backend.registry.api.PREFIX`` 相同）。
+REGISTRY_API_PREFIX = "/api/v2/registry/"
+
+
+def _cookie_names(raw: object) -> set[str]:
+    if not isinstance(raw, str) or not raw:
+        return set()
+    return {part.split("=", 1)[0].strip() for part in raw.split(";") if part.strip()}
 
 
 def _json_body(request) -> dict | None:

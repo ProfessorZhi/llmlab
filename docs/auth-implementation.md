@@ -10,13 +10,14 @@
 
 | 身份 | 来源 | 角色 | 项目授权 |
 | --- | --- | --- | --- |
-| 本地账号 `admin` | `AdminCredentialStore` 中的口令哈希（唯一来源） | `platform_admin` | 无（超管不需要项目 grant） |
-| **其他所有人** | 飞书 Web OAuth 授权码 | `member` | **零**，需他人事后单独授予 |
+| 本地账号 `admin` | `AdminCredentialStore` 中的口令哈希（bootstrap 建立） | `platform_admin` | 无（超管不需要项目 grant） |
+| **平台账户**（Issue #17） | `platform_accounts` 表中的 scrypt 哈希；由管理员创建，见 §4.5 | 创建时指定 `member`/`admin`，此后只能经 `/auth/admin/users/role` 由管理员会话变更 | **零** |
+| 飞书用户 | 飞书 Web OAuth 授权码 | `member` | **零**，需他人事后单独授予 |
 
 三条硬约束，写在代码里而不是流程里：
 
 1. `store.upsert_feishu_user()` 的 `ON CONFLICT` 更新分支**故意不写 `role` 和 `status` 两列**。因此一个人的飞书**姓名、邮箱、Linux 登录名、`open_id`、`union_id` 长得再像管理员，重新登录也无法把自己变成管理员，也无法把自己从禁用状态里救回来**——这两个字段只能由运维侧直接改库（并留审计）来变更。
-2. 没有任何 HTTP 端点可以授予角色或项目。`Application.authorize(session, require_admin=True)` 是唯一的权限守卫，角色只能来自数据库。
+2. 没有任何 HTTP 端点可以授予项目；**登录本身永远不改变角色**。唯一能改角色的是 `/auth/admin/users*`，它们要求一个已改过一次性口令的**管理员会话**（`Application.authorize(session, require_admin=True)`），管理员不能撤销或停用自己。
 3. 飞书登录成功只产生一条 `member` 记录 + 一个会话。项目 grant 一律为空列表。
 
 ### 明确声明：Linux 用户登录 / Caddy BasicAuth **不能**替代业务管理员
@@ -170,6 +171,33 @@ CSRF token **只能**通过服务端接口同源获取，前端**不得**把它�
 在 IAM 拥有的 auth 路由（`/auth/local/login`、`/auth/tokens*` 等）以及 route map 归属 IAM 的 `/auth/linux/login` 上，query 或 JSON body 中出现 `uid`、`user_id`、`principal`、`owner`、`role`、`roles`、`linux_user`、`admin` 等身份字段时，整个请求以 `400 identity_assertion_rejected` 拒绝，而不是“读到但不用”。字段清单与 `backend.registry.identity.FORBIDDEN_IDENTITY_FIELDS` 由测试钉住，避免两处守卫漂移。
 
 `/auth/local/login` 的 `username` 是被验证的凭据标识，不是主体声明，因此该路由的 **body** 允许它；出现在 query 中仍然拒绝。BFF 自有的 `/auth/admin/*` 与 `/api/v2/ops/**` 保持自己的字段策略（例如 `/auth/admin/enter` 只读取 `password`），本层不改变它们；如需同样的字段级拒绝，由 BFF Owner 在各自路由接线，负向用例见 `tests/auth_linux/test_http_routes.py`。
+
+### 4.5 平台账户（与 Linux 账户相互独立）
+
+实现在 `backend/auth/accounts.py`，路由在 `backend/auth/routes.py`，测试在 `tests/auth/test_accounts.py`。平台账户与 Linux 账户**用户名可以相同，但互不依赖**：这里不读 PAM、`/etc/shadow`、`getpwnam`，也不做任何口令同步。
+
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| `POST` | `/auth/account/login` | 匿名 + 一次性 CSRF | `{username, password}` → 与 `/auth/local/login` 同形；失败一律 `401 invalid_credentials`（未知用户、错口令、已停用不可区分；未知用户同样执行一次 scrypt） |
+| `POST` | `/auth/account/password` | 本人会话 | `{current_password, new_password}`（≥10 字符且不同于旧口令）；**注销该用户全部会话**并下发新会话 Cookie |
+| `GET` | `/auth/admin/users` | 管理员 | `data.users[]`：`id, username, display_name, linux_user, role(admin/member), status, must_change_password, created_at, last_login_at` |
+| `POST` | `/auth/admin/users` | 管理员 | `{username, display_name?, linux_user?, role?}` → `201`，`data.temporary_password` **只返回这一次** |
+| `POST` | `/auth/admin/users/reset-password` | 管理员 | `{user_id}` → 新一次性口令，注销该用户全部会话 |
+| `POST` | `/auth/admin/users/role` | 管理员 | `{user_id, role}`；不能撤销自己的管理员 |
+| `POST` | `/auth/admin/users/linux` | 管理员 | `{user_id, linux_user}`；空串清除。仅为标签，不查 OS，不影响登录 |
+| `POST` | `/auth/admin/users/status` | 管理员 | `{user_id, status}`；停用即注销会话并（已接线时）吊销其 CLI token；不能停用自己 |
+
+不变量：
+
+- 主体 id 为 `account:<128 位随机 hex>`，**不由用户名派生**；用户名只是可读标识。
+- 一次性口令会话只能调用 `/auth/me`、`/auth/logout`、`/auth/account/password`；其余需要会话的路由返回 `403 password_change_required`。
+- 上表各路由的 body 中，`username` / `user_id` / `linux_user` / `role` 指的是**操作对象**，按路由白名单（`routes.TARGET_IDENTITY_FIELDS`）放行；query 中仍一律拒绝，其他路由也仍拒绝。
+- 登录与改口令各自限速（`account_login` 按 IP+用户名，`account_password` 按账户）。
+- 审计只记录 actor 与目标的主体 id，不记录口令或令牌。
+
+**接入 BFF 与 Registry（2026-10-21）：** 平台账户会话经 `backend/bff/identity.py` 映射为 Registry 主体 `account:<hex>`（还在用一次性口令的会话得到 `403 password_change_required`）；`role=admin` 的账户直接持有管理员词表，不使用 Linux 会话那套共享口令提权。账户登记的推理服务归账户所有，登记时记录监听进程所属的 Linux 用户；`linux_user`（用户页「限定 Linux 用户」）留空即不限，填写后只能登记由该 Linux 用户运行的服务。细节见 `docs/registry-cli-contract.md` §18.3.2。整机 / GPU 读数（`observability:host:read`）对全体成员开放；Grafana / Prometheus 原生界面仍只给管理员。
+
+**CLI / Agent 令牌（2026-10-21）：** 平台账户可以在「API 密钥」页或 `POST /auth/tokens` 创建令牌（明文只返回一次）。令牌的 Registry scope 与该账户在网页上的能力一致（`devserver._token_scope_policy`：管理员账户另带 `registry:admin:read`），令牌里没有 uid、`linux_user` 是账户用户名；Registry 的 token 自省对 `account:` 主体要求**不带** uid。令牌在账户停用、令牌撤销或到期后立即失效（每次自省都现查用户表）。BFF 把带 `Authorization: Bearer` 的 `/api/v2/registry/*` 请求原样交给 Registry API，同时带会话 cookie 的请求以 `400 credential_confusion_rejected` 拒绝。
 
 ### 4.4 Cookie
 

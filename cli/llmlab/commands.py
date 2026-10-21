@@ -134,8 +134,11 @@ def cmd_engines(client: ApiClient, args: argparse.Namespace, as_json: bool) -> i
             body["protocol"] = args.protocol
         if args.description:
             body["description"] = args.description
-        if args.tag:
-            body["tags"] = list(args.tag)
+        tags = list(args.tag or [])
+        if getattr(args, "framework", None):
+            tags.append(f"framework:{args.framework}")
+        if tags:
+            body["tags"] = tags
         envelope = client.post("/engines", body, idempotency_key=args.idempotency_key)
         data = envelope.get("data") or {}
         _print_envelope(
@@ -149,6 +152,22 @@ def cmd_engines(client: ApiClient, args: argparse.Namespace, as_json: bool) -> i
                 f"  replay   : {_fmt(payload.get('idempotent_replay'))}"
             ),
         )
+        return EXIT_OK
+
+    if args.engines_command == "preflight":
+        envelope = client.post("/engines/preflight", {"name": args.name, "target_url": args.target_url})
+
+        def render_preflight(data: dict) -> None:
+            for key, check in (data.get("checks") or {}).items():
+                mark = {True: "ok", False: "FAIL", None: "n/a"}.get(check.get("ok"), "?")
+                extra = ""
+                evidence = check.get("evidence") or {}
+                if evidence.get("linux_user") or evidence.get("uid") is not None:
+                    extra = f"  (run as {_fmt(evidence.get('linux_user'))}, uid {_fmt(evidence.get('uid'))})"
+                print(f"  {key:15s} {mark:5s} {_fmt(check.get('detail'))}{extra}")
+            print(f"all_ok: {_fmt(data.get('all_ok'))}")
+
+        _print_envelope(envelope, as_json, default_render=render_preflight)
         return EXIT_OK
 
     if args.engines_command == "get":
@@ -607,4 +626,87 @@ def cmd_status(client: ApiClient, args: argparse.Namespace, as_json: bool) -> in
             f"counts     : {json.dumps(data['counts'], ensure_ascii=False)}"
         ),
     )
+    return EXIT_OK
+
+
+def cmd_discover(client: ApiClient, args: argparse.Namespace, as_json: bool) -> int:
+    """``discover``：本机候选清单；``--register`` / ``--register-model`` 直接登记其中一个。
+
+    登记走与 ``engines register`` / ``models register`` 完全相同的接口：所有权、
+    运行用户记录与「一个地址只归一个账户」都由服务端判定。
+    """
+    envelope = client.get("/discovery")
+    data = envelope.get("data") or {}
+
+    if args.register is not None:
+        found = next((item for item in data.get("engines", []) if item.get("port") == args.register), None)
+        if found is None:
+            raise CliError(EXIT_USAGE, f"no candidate inference service on port {args.register}",
+                           hint="run `llmlab discover` to see what is listening")
+        name = args.name or found.get("suggested_name")
+        if not name:
+            raise CliError(EXIT_USAGE, "no suggested name for this service", hint="pass --name")
+        body: dict = {"name": name, "target_url": found["target_url"], "protocol": "openai_compatible"}
+        if found.get("framework"):
+            body["tags"] = [f"framework:{found['framework']}"]
+        created = client.post("/engines", body)
+        _print_envelope(
+            created,
+            as_json,
+            default_render=lambda payload: print(
+                f"registered engine {payload['id']} ({payload['name']}) on port {args.register}; "
+                f"run as {_fmt((payload.get('ownership') or {}).get('linux_user'))}"
+            ),
+        )
+        return EXIT_OK
+
+    if args.register_model is not None:
+        found = next((item for item in data.get("models", []) if item.get("path") == args.register_model), None)
+        if found is None:
+            raise CliError(EXIT_USAGE, f"no candidate model at {args.register_model}",
+                           hint="run `llmlab discover` to see the candidates under the configured roots")
+        body = {"name": args.name or found["suggested_name"], "weight_path": found["path"], "format": found["format"]}
+        created = client.post("/models", body)
+        _print_envelope(
+            created,
+            as_json,
+            default_render=lambda payload: print(f"registered model {payload['id']} ({payload['name']})"),
+        )
+        return EXIT_OK
+
+    def render(payload: dict) -> None:
+        if not payload.get("configured"):
+            print("discovery is not enabled on this deployment; register manually with `engines register` / `models register`")
+            return
+        engines = payload.get("engines") or []
+        rows = [
+            [
+                str(item["port"]),
+                _fmt(item.get("run_as_user") or item.get("run_as_uid")),
+                _fmt(item.get("framework")),
+                ", ".join(item.get("models") or []) or ("—" if item.get("openai_compatible") else "not OpenAI-compatible"),
+                "mine" if item.get("registered_by_me") else ("taken" if item.get("registered") else "available"),
+            ]
+            for item in engines
+        ]
+        print("inference services:")
+        _table(rows, ["PORT", "RUN AS", "FRAMEWORK", "MODELS", "STATE"])
+        models = payload.get("models") or []
+        rows = [
+            [
+                item["path"],
+                item["format"],
+                _fmt(item.get("architecture")),
+                f"{item.get('size_bytes', 0) / 1024**3:.1f} GiB",
+                "registered" if item.get("registered") else "available",
+            ]
+            for item in models
+        ]
+        print("models:")
+        _table(rows, ["PATH", "FORMAT", "ARCH", "SIZE", "STATE"])
+        for problem in payload.get("problems") or []:
+            print(f"note: {problem}")
+        print("register one with: llmlab discover --register PORT [--name NAME]  |  --register-model PATH")
+
+    _print_envelope(envelope, as_json, default_render=render)
     return EXIT_OK

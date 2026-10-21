@@ -51,6 +51,30 @@ npm run serve
 # http://127.0.0.1:8123/index.html
 ```
 
+新控制台（`web/console/`）连同真实后端一起跑：BFF devserver 只提供 API，静态服务器通过**仅限环回**的 `LLMLAB_DEV_API` 把同源 `/auth/*`、`/api/*` 转给它（见 `web/tools/dev-api-proxy.mjs`）：
+
+```bash
+python3 -m backend.auth.bootstrap init --state-dir /tmp/llmlab-dev   # 交互式设置本机 admin 口令（不经命令行/环境变量）
+python3 -m backend.bff --state-dir /tmp/llmlab-dev --database /tmp/llmlab-dev/registry.db --observe-local-engines
+LLMLAB_DEV_API=http://127.0.0.1:8790 npm run serve
+# http://127.0.0.1:8123/console/ — 以 admin 登录后在「用户与权限」创建平台账户；
+# 成员用自己的账户登录后，在「推理服务 → 登记推理服务」登记本机 127.0.0.1 上的推理引擎，
+# 系统会记录它由哪个 Linux 用户运行（--observe-local-engines 只读本机端口表与 /v1/models）。
+# 加 --model-root DIR（可重复）后，「模型库 → 本机发现」会在这些目录里找 HF 模型目录与 GGUF 文件。
+```
+
+CLI / Agent：在「API 密钥 → 命令行 / Agent 令牌」创建令牌（只显示一次），令牌拥有与该账户相同的资源权限：
+
+```bash
+export LLMLAB_API_BASE=http://127.0.0.1:8123 LLMLAB_TOKEN=<令牌>
+llmlab whoami
+llmlab discover                      # 本机候选：正在监听的推理服务 + 授权目录里的模型
+llmlab discover --register 8000      # 登记其中一个推理服务（归令牌所属账户）
+llmlab discover --register-model /data/models/Qwen2.5-7B-Instruct
+llmlab engines preflight --name x --target-url http://127.0.0.1:8001   # 只读检查
+llmlab --json engines list           # Agent 用 --json 解析
+```
+
 后端 CLI 入口：
 
 ```bash

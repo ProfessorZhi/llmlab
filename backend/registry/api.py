@@ -178,8 +178,12 @@ ROUTES: tuple[tuple[str, re.Pattern[str], str], ...] = (
     ("GET", re.compile(rf"^{PREFIX}/audit$"), "_route_audit"),
     ("GET", re.compile(rf"^{PREFIX}/routing-config$"), "_route_routing_config"),
     ("GET", re.compile(rf"^{PREFIX}/routing-snapshot$"), "_route_routing_snapshot"),
+    ("GET", re.compile(rf"^{PREFIX}/discovery$"), "_route_discovery"),
     ("GET", re.compile(rf"^{PREFIX}/engines$"), "_route_engines_list"),
     ("POST", re.compile(rf"^{PREFIX}/engines$"), "_route_engines_create"),
+    # 只读预检（登记表单用）：必须排在 ``engines/{id}`` 之前，否则 ``preflight``
+    # 会被当成一个 engine id。它是 POST 只因为要带一个 JSON 体；它不写任何东西。
+    ("POST", re.compile(rf"^{PREFIX}/engines/preflight$"), "_route_engines_preflight"),
     ("GET", re.compile(rf"^{PREFIX}/engines/{_ID}$"), "_route_engines_get"),
     ("POST", re.compile(rf"^{PREFIX}/engines/{_ID}/{_ACTION}$"), "_route_engines_action"),
     ("GET", re.compile(rf"^{PREFIX}/models$"), "_route_models_list"),
@@ -336,6 +340,9 @@ class RegistryApplication:
         if handler == "_route_routing_snapshot":
             return self.service.routing_snapshot(requester)
 
+        if handler == "_route_discovery":
+            return self.service.discover(requester)
+
         if handler == "_route_engines_list":
             return self.service.list_engines(requester)
         if handler == "_route_engines_create":
@@ -344,6 +351,8 @@ class RegistryApplication:
             )
             envelope["created"] = created
             return envelope
+        if handler == "_route_engines_preflight":
+            return self.service.preflight_engine(requester, _require_object(body))
         if handler == "_route_engines_get":
             return self.service.get_engine(requester, object_id)
         if handler == "_route_engines_action":

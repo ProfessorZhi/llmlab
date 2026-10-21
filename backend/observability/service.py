@@ -45,7 +45,6 @@ from .gateway import (
 )
 from .identity import (
     SCOPE_ADMIN_READ,
-    SCOPE_HOST_READ,
     KeyDirectory,
     ObserverScope,
     RequesterPrincipal,
@@ -409,8 +408,9 @@ def _external_ui(scope: ObserverScope) -> dict:
     「谁能看哪块看板」就退化成一条可分享的裸链接。
     """
     catalog = (
-        ("grafana", "Grafana", "/observability/ui/grafana/", SCOPE_HOST_READ),
-        ("prometheus", "Prometheus", "/observability/ui/prometheus/", SCOPE_HOST_READ),
+        # 原生看板是管理面：整机读数对成员开放（门户内图表），原生 UI 不随之开放。
+        ("grafana", "Grafana", "/observability/ui/grafana/", SCOPE_ADMIN_READ),
+        ("prometheus", "Prometheus", "/observability/ui/prometheus/", SCOPE_ADMIN_READ),
         ("evalscope", "EvalScope", "/observability/ui/evalscope/", SCOPE_ADMIN_READ),
     )
     entries = []

@@ -38,6 +38,13 @@ export const BFF_ROUTES = Object.freeze([
   { name: 'ops.usage', method: 'GET', path: '/api/v2/ops/usage', auth: 'session', kind: 'read', scope: 'observability:self:read', owner: 'Data#47', ui: '监控与日志' },
   { name: 'ops.engines', method: 'GET', path: '/api/v2/ops/engines', auth: 'session', kind: 'read', scope: 'observability:self:read', owner: 'Data#47', ui: '算力中心 · 引擎' },
   { name: 'ops.share', method: 'PUT', path: '/api/v2/ops/deployments/{deployment_id}/share', auth: 'session', kind: 'write', scope: 'portal:endpoints:share', owner: 'Integration#49', ui: '模型与对话 · 共享' },
+  // Web registration of an inference service (2026-10-21). Owner is the session
+  // principal (platform account or Linux principal); the Registry records the
+  // Linux user it observes serving the port. Used by the console's 登记推理服务 flow.
+  { name: 'registry.engines.preflight', method: 'POST', path: '/api/v2/registry/engines/preflight', auth: 'session', kind: 'write', scope: 'registry:write', owner: 'Integration#49', ui: '推理服务 · 登记预检' },
+  { name: 'registry.engines.register', method: 'POST', path: '/api/v2/registry/engines', auth: 'session', kind: 'write', scope: 'registry:write', owner: 'Integration#49', ui: '推理服务 · 登记' },
+  { name: 'registry.discovery', method: 'GET', path: '/api/v2/registry/discovery', auth: 'session', kind: 'read', scope: 'registry:read', owner: 'Integration#49', ui: '推理服务 / 模型库 · 本机发现' },
+  { name: 'registry.models.register', method: 'POST', path: '/api/v2/registry/models', auth: 'session', kind: 'write', scope: 'registry:write', owner: 'Integration#49', ui: '模型库 · 登记模型' },
   // SEAM-1 (#115). A declared write boundary, not a button: the authority is
   // Registry's `RegistryService.invoke` (row ACL, readiness, payload bound,
   // audit-before-forward). No control is wired to this path in this build, and
@@ -52,6 +59,9 @@ export const BFF_ROUTES = Object.freeze([
   { name: 'portal.services', method: 'GET', path: '/api/portal/services', auth: 'session', kind: 'read', scope: 'observability:host:read', owner: 'Data#47', ui: '概览 · 服务健康' },
   { name: 'portal.events', method: 'GET', path: '/api/portal/events', auth: 'session', kind: 'read', scope: 'portal:admin:read', owner: 'Integration#49', ui: '管理 · 审计时间线' },
   { name: 'portal.capabilities', method: 'GET', path: '/api/portal/capabilities', auth: 'session', kind: 'read', scope: null, owner: 'Integration#49', ui: '模块入口 · 能力状态' },
+  // Plugin page jump addresses (2026-10-21): each plugin may carry a native-UI URL; admins set it.
+  { name: 'portal.integrations', method: 'GET', path: '/api/portal/integrations', auth: 'session', kind: 'read', scope: null, owner: 'Integration#49', ui: '插件 · 跳转入口' },
+  { name: 'portal.integrations.update', method: 'PUT', path: '/api/portal/integrations/{key}', auth: 'session', kind: 'write', scope: 'portal:admin:read', owner: 'Integration#49', ui: '插件 · 设置跳转地址（管理员）' },
   { name: 'auth.linux.login', method: 'POST', path: '/auth/linux/login', auth: 'anonymous', kind: 'write', scope: null, owner: 'IAM#45', ui: '登录（PAM 未实现时 503）' },
   { name: 'auth.linux.status', method: 'GET', path: '/auth/linux/status', auth: 'anonymous', kind: 'read', scope: null, owner: 'IAM#45', ui: '登录入口状态' },
   { name: 'auth.admin.status', method: 'GET', path: '/auth/admin/status', auth: 'anonymous', kind: 'read', scope: null, owner: 'IAM#45', ui: '管理 · 管理员模式' },

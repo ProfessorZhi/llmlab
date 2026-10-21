@@ -36,6 +36,8 @@ from dataclasses import dataclass
 from ..atlas.identity import SCOPE_CALLS_SELF_READ as atlas_calls_scope
 from ..evaluation.identity import SCOPE_EVAL_READ as eval_read_scope
 from ..registry.identity import SCOPE_ENDPOINT_INVOKE as registry_invoke_scope
+from ..registry.identity import SCOPE_REGISTRY_READ as registry_read_scope
+from ..registry.identity import SCOPE_REGISTRY_WRITE as registry_write_scope
 from ..observability import identity as observability_identity
 from . import scopes as bff_scopes
 
@@ -204,6 +206,61 @@ ROUTES: tuple[RouteSpec, ...] = (
         note="共享范围变更；CSRF/同源复用既有 auth 应用的 _preflight。",
     ),
     RouteSpec(
+        name="registry.engines.preflight",
+        methods=("POST",),
+        path="/api/v2/registry/engines/preflight",
+        auth=AUTH_SESSION,
+        kind=KIND_WRITE,
+        csrf=True,
+        source=SOURCE_REGISTRY,
+        owner=LANE_INTEGRATION,
+        handler="_registry_preflight",
+        scope=registry_write_scope,
+        note=(
+            "网页登记的只读预检（不写库）。POST 只因为它带一份表单体；"
+            "身份只来自会话，所有权由 Registry 依据本机端口表判定。"
+        ),
+    ),
+    RouteSpec(
+        name="registry.engines.register",
+        methods=("POST",),
+        path="/api/v2/registry/engines",
+        auth=AUTH_SESSION,
+        kind=KIND_WRITE,
+        csrf=True,
+        source=SOURCE_REGISTRY,
+        owner=LANE_INTEGRATION,
+        handler="_registry_register",
+        scope=registry_write_scope,
+        note="网页登记推理服务。owner 是会话主体（平台账户或 Linux 主体），不来自请求体。",
+    ),
+    RouteSpec(
+        name="registry.discovery",
+        methods=("GET",),
+        path="/api/v2/registry/discovery",
+        auth=AUTH_SESSION,
+        kind=KIND_READ,
+        csrf=False,
+        source=SOURCE_REGISTRY,
+        owner=LANE_INTEGRATION,
+        handler="_registry_discovery",
+        scope=registry_read_scope,
+        note="本机候选：回环上监听的推理服务（/proc/net/tcp + 只读 /v1/models）与授权目录里的模型。只读。",
+    ),
+    RouteSpec(
+        name="registry.models.register",
+        methods=("POST",),
+        path="/api/v2/registry/models",
+        auth=AUTH_SESSION,
+        kind=KIND_WRITE,
+        csrf=True,
+        source=SOURCE_REGISTRY,
+        owner=LANE_INTEGRATION,
+        handler="_registry_model_register",
+        scope=registry_write_scope,
+        note="网页登记模型。owner 只来自会话；权重路径只是登记引用，Registry 不打开它。",
+    ),
+    RouteSpec(
         name="ops.invoke",
         methods=("POST",),
         path="/api/v2/ops/endpoints/{endpoint_id}/invoke",
@@ -363,6 +420,33 @@ ROUTES: tuple[RouteSpec, ...] = (
         # 存在的理由。
         scope=None,
         note="装配状态清单。它是**拟议路由**的落地实现，不是「已上线」的声明。",
+    ),
+    RouteSpec(
+        name="portal.integrations",
+        methods=("GET",),
+        path="/api/portal/integrations",
+        auth=AUTH_SESSION,
+        kind=KIND_READ,
+        csrf=False,
+        source=SOURCE_PORTAL,
+        owner=LANE_INTEGRATION,
+        handler="_integrations",
+        scope=None,
+        note="插件目录与各插件的原生界面跳转地址；看不到的地址下发 null。",
+    ),
+    RouteSpec(
+        name="portal.integrations.update",
+        methods=("PUT",),
+        path="/api/portal/integrations/{key}",
+        auth=AUTH_SESSION,
+        kind=KIND_WRITE,
+        csrf=True,
+        source=SOURCE_PORTAL,
+        owner=LANE_INTEGRATION,
+        handler="_integration_update",
+        scope=bff_scopes.PORTAL_ADMIN_READ,
+        pattern=("/api/portal/integrations/", ""),
+        note="管理员设置 / 清除某个插件的跳转地址与可见范围。",
     ),
     RouteSpec(
         name="auth.linux.login",

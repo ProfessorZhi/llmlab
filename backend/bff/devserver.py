@@ -16,6 +16,7 @@ token**：本进程没有任何真实凭据可用（PAM 后端未实现），打
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import socketserver
 import sys
 import wsgiref.simple_server
@@ -23,6 +24,9 @@ from dataclasses import replace
 
 from ..auth import config as auth_config
 from ..auth.routes import Application as AuthApplication
+from ..auth.service import AuthService
+from ..auth.store import SOURCE_LINUX
+from ..auth.tokens import AuthStorePrincipalState, build_token_service
 from ..auth_linux import accounts as linux_accounts
 from ..auth_linux import policy as linux_policy
 from ..auth_linux import service as linux_service_module
@@ -31,11 +35,17 @@ from ..evaluation import targets as eval_targets
 from ..observability import engines as obs_engines
 from ..observability import identity as obs_identity
 from ..registry.gateway import DetachedGatewayAdapter, MockGatewayAdapter
-from ..registry.identity import Principal, PrincipalDirectory, TokenDirectory
-from ..registry.health import StaticProber
+from ..registry.api import RegistryApplication
+from ..registry.identity import Principal, PrincipalDirectory, TrustedTokenIntrospector
+from ..registry.health import LoopbackHttpProber, LoopbackProtocolProber, StaticProber
+from ..registry.local_discovery import LocalDiscovery
+from ..registry.ownership import ProcNetOwnershipProver
 from ..registry.registry import RegistryConfig, RegistryService
 from ..registry.store import Store
 from . import origin as bff_origin
+from . import scopes as bff_scopes
+from .account_directory import AccountAwareDirectory
+from .integrations import IntegrationStore
 from . import stacks as bff_stacks
 from .app import RESERVED_BIND_PORTS, OpsApplication
 from .evaluation_adapter import ModuleEvaluationAdapter
@@ -90,6 +100,8 @@ def build_application(
     accounts: object | None = None,
     allowed_logins: tuple[str, ...] | None = None,
     trusted_authorities: tuple[str, ...] = (),
+    observe_local_engines: bool = False,
+    model_roots: tuple[str, ...] = (),
 ) -> OpsApplication:
     """把三块拼起来。**只建对象，不开端口。**
 
@@ -103,28 +115,61 @@ def build_application(
     authority_policy = bff_origin.AuthorityPolicy.build(trusted_authorities)
     accounts = accounts if accounts is not None else linux_accounts.SystemPwdSource()
 
-    principals = PrincipalDirectory(
-        [
-            Principal(linux_user_id(host_id, uid), name, uid, display_name=name)
-            for name, uid in HOST_USERS
-        ]
+    cfg = _local_config(state_dir)
+    auth_service = AuthService(cfg)
+    # CLI / Agent 令牌：存在状态目录里；「这个账户还有效吗」每次都现查用户表。
+    token_service = build_token_service(
+        state_dir, principal_state=AuthStorePrincipalState(auth_service.db)
+    )
+    auth_app = AuthApplication(
+        cfg,
+        service=auth_service,
+        tokens=token_service,
+        token_scope_policy=_token_scope_policy,
+    )
+    # 建表 / 迁移；否则第一个请求会以 500 收场。
+    auth_app.initialize()
+    token_service.initialize()
+
+    # 静态的合成 Linux 主体 + 管理员随时创建的平台账户（每次查询都读账户库）。
+    principals = AccountAwareDirectory(
+        PrincipalDirectory(
+            [
+                Principal(linux_user_id(host_id, uid), name, uid, display_name=name)
+                for name, uid in HOST_USERS
+            ]
+        ),
+        auth_app.service.accounts,
     )
 
+    config = RegistryConfig(mode="synthetic")
+    local = {}
+    if observe_local_engines:
+        # 只读本机事实：回环 HTTP 探测、/v1/models、/proc/net/tcp 的监听 uid。
+        local = {
+            "prober": prober if prober is not None else LoopbackHttpProber(),
+            "protocol_prober": LoopbackProtocolProber(),
+            "ownership_prover": ProcNetOwnershipProver(),
+            # 发现与登记共用同一份端口允许列表：发现不到登记不了的东西。
+            "discovery": LocalDiscovery(
+                allowed_ports=config.allowed_ports, model_roots=tuple(model_roots)
+            ),
+        }
     service = RegistryService(
         store=Store(database),
-        tokens=TokenDirectory(()),
+        tokens=TrustedTokenIntrospector(token_service, principals=principals),
         principals=principals,
-        config=RegistryConfig(mode="synthetic"),
-        prober=prober,
+        config=config,
+        prober=local.get("prober", prober),
+        protocol_prober=local.get("protocol_prober"),
+        ownership_prover=local.get("ownership_prover"),
+        discovery=local.get("discovery"),
         gateway=MockGatewayAdapter() if mock_gateway else DetachedGatewayAdapter(),
     )
 
     observability = build_observability_adapter(service=service, accounts=accounts)
     evaluation = build_evaluation_adapter(service=service)
 
-    auth_app = AuthApplication(_local_config(state_dir))
-    # 建表 / 迁移；否则第一个请求会以 500 收场。
-    auth_app.initialize()
     linux_service = build_linux_service(
         host_id=host_id,
         admin_names=admin_names,
@@ -145,6 +190,8 @@ def build_application(
             gateway_attached=mock_gateway,
         ),
         authority_policy=authority_policy,
+        integrations=IntegrationStore(Path(state_dir) / "integrations.json"),
+        registry_api=RegistryApplication(service),
     )
 
 
@@ -239,6 +286,17 @@ def build_evaluation_adapter(*, service):
         return deployment.model_id if deployment is not None else None
 
     return ModuleEvaluationAdapter(eval_stack, model_lookup=lookup)
+
+
+def _token_scope_policy(session) -> frozenset[str]:
+    """一张 CLI 令牌最多能带哪些 Registry scope：与这条会话在网页上能做的一致。
+
+    平台账户与本机 admin 的角色来自账户管理，所以管理员账户的令牌带管理员只读；
+    Linux 会话一律按成员签发（它的提权是会话级的共享口令模式，不随令牌带走）。
+    """
+    user = session.user
+    elevated = user.is_admin and user.auth_source != SOURCE_LINUX
+    return bff_scopes.session_scopes(elevated=elevated).registry
 
 
 def _local_config(state_dir: str):
@@ -341,6 +399,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="attach a test-double prober so endpoints can become verified",
     )
     parser.add_argument(
+        "--observe-local-engines",
+        action="store_true",
+        help=(
+            "probe registered loopback engines for real (HTTP, /v1/models) and read "
+            "/proc/net/tcp to record which Linux user runs them; read-only"
+        ),
+    )
+    parser.add_argument(
+        "--model-root",
+        action="append",
+        default=[],
+        metavar="DIR",
+        help=(
+            "a directory the model discovery may look in (repeatable; only with "
+            "--observe-local-engines). Only config.json and file names/sizes are read"
+        ),
+    )
+    parser.add_argument(
         "--synthetic-logins",
         action="store_true",
         help="print the synthetic identities (no passwords, no tokens)",
@@ -374,6 +450,8 @@ def main(argv: list[str] | None = None) -> int:
         mock_gateway=True,
         prober=StaticProber() if args.with_static_prober else None,
         trusted_authorities=tuple(args.trusted_authority),
+        observe_local_engines=args.observe_local_engines,
+        model_roots=tuple(args.model_root),
     )
 
     if args.synthetic_logins:

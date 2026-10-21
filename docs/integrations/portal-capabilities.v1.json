@@ -545,6 +545,72 @@
     },
     {
       "method": "GET",
+      "path": "/api/portal/integrations",
+      "provider": "portal_bff",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session",
+      "required_scope": null,
+      "priority": 1,
+      "notes": "plugin catalogue with an optional native-UI jump address per plugin (Strata console, Grafana, EvalScope reports...). Not a proxy: the portal only links out. A session that may not see an address receives ui_url null; unattached store answers 503"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/portal/integrations/{key}",
+      "provider": "portal_bff",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session",
+      "required_scope": "portal:admin:read",
+      "priority": 1,
+      "notes": "administrator sets or clears one plugin's jump address (http(s) URL or site path; no credentials, no javascript:) and its visibility (all | admin). CSRF + same-origin"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/registry/engines/preflight",
+      "provider": "portal_bff",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session",
+      "required_scope": "registry:write",
+      "priority": 1,
+      "notes": "read-only registration preflight for the web console; owner from the session (platform account or Linux principal); ownership from /proc/net/tcp when the deployment attaches that prover"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/registry/engines",
+      "provider": "portal_bff",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session",
+      "required_scope": "registry:write",
+      "priority": 1,
+      "notes": "web registration of an inference service; the account owns it and the observed runtime Linux user is recorded; one loopback address per principal"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/registry/discovery",
+      "provider": "portal_bff",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session",
+      "required_scope": "registry:read",
+      "priority": 1,
+      "notes": "read-only local candidates: loopback listeners on allowed ports (/proc/net/tcp + read-only /v1/models) and model directories under admin-configured roots (config.json and file names/sizes only). Nothing is registered; configured=false when the deployment does not attach discovery"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/registry/models",
+      "provider": "portal_bff",
+      "implementation_status": "bff_declared",
+      "host_runtime_verification": "not_run",
+      "required_auth": "session",
+      "required_scope": "registry:write",
+      "priority": 1,
+      "notes": "web registration of a model; owner from the session; the weight path is a reference the Registry never opens"
+    },
+    {
+      "method": "GET",
       "path": "/api/portal/events",
       "provider": "os_structured_events",
       "implementation_status": "bff_declared",

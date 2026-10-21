@@ -85,6 +85,11 @@ class AccountDisabled(Forbidden):
     oauth_error = "access_denied"
 
 
+class PasswordChangeRequired(Forbidden):
+    code = "password_change_required"
+    message = "Set a new password before continuing."
+
+
 class CsrfRejected(Forbidden):
     code = "csrf_rejected"
     message = "Request rejected."
@@ -184,6 +189,7 @@ __all__ = [
     "InvalidState",
     "NotAuthenticated",
     "NotConfigured",
+    "PasswordChangeRequired",
     "PayloadTooLarge",
     "ProviderUnavailable",
     "RateLimited",

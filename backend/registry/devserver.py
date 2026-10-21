@@ -45,7 +45,13 @@ from .identity import (
     TokenBinding,
     TokenDirectory,
 )
-from .ownership import EMPTY_POLICY, OperatorPolicy, load_operator_policy
+from .ownership import (
+    EMPTY_POLICY,
+    OWNERSHIP_PROVER_KINDS,
+    OWNERSHIP_PROVER_NONE,
+    OperatorPolicy,
+    load_operator_policy,
+)
 from .registry import RegistryConfig, RegistryService
 from .router import FileRouterAdapter
 from .store import Store
@@ -158,6 +164,7 @@ def build_service_from_env(
     router_snapshot: str | None = None,
     router_status: str | None = None,
     engine_secret_refs: dict | None = None,
+    ownership_prover_kind: str = OWNERSHIP_PROVER_NONE,
 ) -> RegistryService:
     identities = identities or build_synthetic_identities()
 
@@ -188,7 +195,7 @@ def build_service_from_env(
         else None
     )
 
-    extra: dict = {}
+    extra: dict = {"ownership_prover_kind": ownership_prover_kind}
     if engine_secret_refs:
         extra["engine_secret_refs"] = dict(engine_secret_refs)
     config = (
@@ -208,8 +215,9 @@ def build_service_from_env(
         prober=LoopbackHttpProber() if attach_loopback_prober else None,
         # 协议轴跟着传输轴一起挂：挂了真的 prober 才可能读到真的模型清单。
         protocol_prober=LoopbackProtocolProber() if attach_loopback_prober else None,
-        # 所有权**没有**真实 prover（见 ownership.py 的 BLOCKED 说明）：
-        # 这一层只能靠运维策略承认既有服务。
+        # 所有权 prover 由 ``RegistryConfig.ownership_prover_kind`` 选：缺省 ``none``
+        # （fail-closed，只能靠运维策略承认既有服务）；``proc_net`` 读全员可读的
+        # /proc/net/tcp(6) 的 uid 列（见 ownership.ProcNetOwnershipProver）。
         gateway=gateway,
         router=router,
     )
@@ -294,6 +302,13 @@ def main(argv: list[str] | None = None) -> int:
         help="运维策略文件（root/服务账号拥有的 JSON）：承认哪些既有服务可以被登记",
     )
     parser.add_argument(
+        "--ownership-prover",
+        choices=OWNERSHIP_PROVER_KINDS,
+        default=OWNERSHIP_PROVER_NONE,
+        help="所有权 prover：none（缺省，fail-closed）或 proc_net（读 /proc/net/tcp(6) "
+        "的 uid 列；只经 fixture 单测验证，真实主机验证待做）",
+    )
+    parser.add_argument(
         "--production-posture",
         action="store_true",
         help="打开所有权强制与协议验证（本地开发默认关闭）",
@@ -339,6 +354,7 @@ def main(argv: list[str] | None = None) -> int:
         router_snapshot=args.router_snapshot,
         router_status=args.router_status,
         engine_secret_refs=secret_refs,
+        ownership_prover_kind=args.ownership_prover,
     )
     application = create_app(service)
     print(identities.render(), file=sys.stderr)
@@ -349,6 +365,7 @@ def main(argv: list[str] | None = None) -> int:
         f"  router={getattr(service.router, 'name')}  "
         f"engine_secret_refs={len(service.config.engine_secret_refs)}\n"
         f"  ownership_policy={service.config.ownership_policy}  "
+        f"ownership_prover={getattr(service.ownership_prover, 'name', 'unknown')}  "
         f"require_protocol_verification={service.config.require_protocol_verification}\n"
         f"  operator_policy={service.operator_policy.provenance}\n"
         "  这是前台开发进程：Ctrl-C 结束，不要当作服务部署。",
