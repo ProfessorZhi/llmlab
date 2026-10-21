@@ -6,7 +6,7 @@ import {
   PATHS, loadOps, loadHost, loadCalls, loadUsers, send,
 } from './data.js';
 import {
-  overviewModel, servicesFromOps, keysFromOps, callsFacts, hostFacts, engineLabel, modelColorMap,
+  overviewModel, servicesFromOps, keysFromOps, callsFacts, hostFacts, engineLabel, modelColorMap, preflightChecks,
 } from './viewmodel.js';
 import {
   demoOverview, demoServices, demoKeys, demoCalls, demoEvaluation, DEMO_USERS,
@@ -122,46 +122,57 @@ export async function services(ctx) {
 const FRAMEWORKS = [['vllm', 'vLLM'], ['sglang', 'SGLang'], ['tei', 'Text Embeddings Inference'], ['ollama', 'Ollama'], ['llama.cpp', 'llama.cpp'], ['strata', 'Strata']];
 
 export async function register(ctx) {
-  const st = { step: 1, framework: 'vllm', port: '', name: '', scope: 'private', checks: null, error: null, busy: false };
+  const st = { step: 1, framework: 'vllm', port: '', name: '', scope: 'private', checks: null, error: null, cli: null, busy: false };
   const root = h('div', { class: 'page narrow' });
 
   const field = (label, input) => h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, label), input);
 
-  async function verifyAndRegister() {
-    st.busy = true; st.error = null; draw();
+  const target = () => `http://127.0.0.1:${Number(st.port)}`;
+
+  async function verify() {
+    st.busy = true; st.error = null; st.cli = null; draw();
     const port = Number(st.port);
     if (!Number.isInteger(port) || port < 1024 || port > 65535) { st.busy = false; st.error = '请输入 1024–65535 之间的端口号。'; draw(); return; }
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(st.name)) { st.busy = false; st.error = '服务名称只能包含字母、数字、点、下划线和连字符。'; draw(); return; }
     if (ctx.demo) {
-      st.checks = [
-        { ok: true, title: '端口可达', detail: `127.0.0.1:${port} 已响应，耗时 32 ms` },
-        { ok: true, title: '进程归属', detail: `监听该端口的进程运行账户为 ${ctx.me?.linux_user ?? '当前用户'}，与账户绑定一致` },
-        { ok: true, title: '接口兼容性', detail: `GET /v1/models 返回 ${st.name}` },
-        { ok: true, title: '名称唯一性', detail: '实验室内不存在同名服务' },
-      ];
+      st.checks = preflightChecks({ all_ok: true, checks: {
+        port_reachable: { ok: true, detail: 'connected' }, ownership: { ok: true, detail: 'verified' },
+        openai_compat: { ok: true, detail: 'model_list_verified' }, name_unique: { ok: true, detail: 'available' } } });
       st.step = 2; st.busy = false; draw(); return;
     }
+    // 只读预检：不登记、不写审计。
+    const r = await send(PATHS.preflight, { name: st.name, target_url: target() });
+    st.busy = false;
+    if (!r.ok) { st.error = failText(r, '校验'); draw(); return; }
+    st.checks = preflightChecks(r.data?.data ?? r.data);
+    if (!st.checks) { st.error = '校验结果格式无法识别。'; draw(); return; }
+    st.step = 2; draw();
+  }
+
+  async function publish() {
+    if (ctx.demo) { st.step = 3; draw(); return; }
+    st.busy = true; st.error = null; st.cli = null; draw();
     const r = await send(PATHS.registryEngines, {
       name: st.name,
       protocol: 'openai_compatible',
-      target_url: `http://127.0.0.1:${port}`,
+      target_url: target(),
       tags: [`framework:${st.framework}`, `scope:${st.scope}`],
     });
     st.busy = false;
-    if (!r.ok) {
-      st.error = r.state === 'not_configured' ? '本部署尚未启用注册接口。' : r.state === 'signed_out' ? '会话已失效，请重新登录。' : (r.message ?? `注册失败（${r.reason}）`);
-      draw(); return;
+    if (!r.ok) { st.error = failText(r, '发布'); draw(); return; }
+    st.step = 3; draw();
+  }
+
+  function failText(r, verb) {
+    // Registry 目前只接受 Portal 签发的 Bearer 令牌，网页会话尚未桥接；不要误报为会话失效。
+    if (r.reason === 'registry.unauthenticated') {
+      st.cli = `llmlab engines register --name ${st.name} --target-url ${target()} --tag framework:${st.framework}`;
+      return '网页端注册尚未接入：注册接口目前只接受 Portal 签发的访问令牌。请先使用命令行注册。';
     }
-    const eng = r.data?.engine ?? r.data ?? {};
-    const own = eng.ownership ?? {};
-    const ver = eng.verification ?? {};
-    const ownedOk = own.state === 'uid_verified' || own.state === 'operator_verified';
-    st.checks = [
-      { ok: eng.status !== 'unavailable', title: '端口可达', detail: eng.status === 'unavailable' ? '端口未响应或返回异常' : `127.0.0.1:${port} 已响应` },
-      { ok: ownedOk, title: '进程归属', detail: ownedOk ? '监听进程的运行账户与当前用户绑定的 Linux 账户一致' : `未能证明进程归属（${own.reason ?? own.state ?? '未校验'}）。服务已登记，但在证明归属前不能共享或被调用。` },
-      { ok: ver.verified === true, title: '接口兼容性', detail: ver.verified === true ? 'OpenAI 兼容接口校验通过' : '接口校验未通过' },
-    ];
-    st.step = 2; draw();
+    if (r.state === 'not_configured') return '本部署尚未启用模型服务注册。';
+    if (r.state === 'signed_out') return '会话已失效，请重新登录。';
+    if (r.state === 'denied') return '当前账户没有注册模型服务的权限。';
+    return r.message ?? `${verb}失败（${r.reason ?? r.status ?? '未知原因'}）`;
   }
 
   function draw() {
@@ -185,14 +196,14 @@ export async function register(ctx) {
           field('推理框架', sel),
           field('监听端口', h('input', { class: 'tnum', inputmode: 'numeric', placeholder: '18009', value: st.port, oninput: (e) => { st.port = e.target.value.trim(); } })),
           field('服务名称', h('input', { placeholder: 'qwen2.5-7b-sft-v3', value: st.name, oninput: (e) => { st.name = e.target.value.trim(); }, style: { width: '260px' } }))),
-          '服务仅需监听 127.0.0.1，由网关在本机转发。服务名称即调用时的 model 参数，须在全实验室范围内唯一。'),
+          '服务仅需监听 127.0.0.1，由网关在本机转发。服务名称即调用时的 model 参数，不能与您已有的服务重名。'),
         h('fieldset', { style: { border: 0, padding: 0, margin: 0 } },
           h('legend', { class: 'section-title', style: { 'margin-bottom': '8px' } }, '访问范围'),
           h('div', { class: 'group' }, [['private', '仅本人'], ['all', '全部成员'], ['selected', '指定成员']].map(([v, l]) =>
             h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, l),
               h('input', { type: 'radio', name: 'scope', value: v, checked: st.scope === v, onchange: () => { st.scope = v; }, style: { width: '18px', height: '18px' } }))))));
     } else if (st.step === 2) {
-      root.append(section('校验结果', h('div', { class: 'group' }, st.checks.map((c) => h('div', { class: 'check' }, checkIcon(c.ok),
+      root.append(section('校验结果', h('div', { class: 'group' }, st.checks.list.map((c) => h('div', { class: 'check' }, checkIcon(c.ok),
         h('div', {}, h('div', { style: { 'font-weight': 500 } }, c.title), h('div', { class: 'muted', style: { 'font-size': '13px' } }, c.detail)))))));
     } else {
       root.append(
@@ -203,11 +214,12 @@ export async function register(ctx) {
     }
 
     if (st.error) root.append(h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.error));
-    const allOk = st.checks?.every((c) => c.ok);
+    if (st.error && st.cli) root.append(h('div', { class: 'code' }, st.cli));
+    const blocked = !st.checks || st.checks.blocked;
     root.append(h('div', { class: 'actions' },
       h('button', { type: 'button', class: 'btn', onclick: () => { if (st.step === 1) ctx.navigate('#/services'); else { st.step -= 1; st.error = null; draw(); } } }, st.step === 1 ? '取消' : '上一步'),
-      st.step === 1 ? h('button', { type: 'button', class: 'btn primary', disabled: st.busy, onclick: verifyAndRegister }, st.busy ? '正在校验…' : '开始校验')
-        : st.step === 2 ? h('button', { type: 'button', class: 'btn primary', disabled: !allOk, onclick: () => { st.step = 3; draw(); } }, '发布')
+      st.step === 1 ? h('button', { type: 'button', class: 'btn primary', disabled: st.busy, onclick: verify }, st.busy ? '正在校验…' : '开始校验')
+        : st.step === 2 ? h('button', { type: 'button', class: 'btn primary', disabled: blocked || st.busy, onclick: publish }, st.busy ? '正在发布…' : '发布')
           : h('a', { class: 'btn primary', href: '#/services' }, '完成')),
       h('p', { class: 'muted', style: { margin: 0, 'padding-top': '20px', 'border-top': '1px solid var(--hairline)', 'font-size': '13px' } },
         '管理员可在「用户与权限」中为任意成员代为注册模型服务，归属校验规则保持一致。'));

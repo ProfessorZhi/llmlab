@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 import { sunburstLayout, dotGridLayout, barsLayout, fmtInt, fmtGiB } from '../../web/console/js/charts.js';
 import {
-  percentile, servicesFromOps, hourlyFromOps, callsFacts, overviewModel,
+  percentile, servicesFromOps, hourlyFromOps, callsFacts, overviewModel, preflightChecks,
 } from '../../web/console/js/viewmodel.js';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -140,4 +140,26 @@ test('console demo gate: index.html is production, only qa.html can honour ?demo
   assert.match(qa, /data-build-profile="qa"/);
   assert.match(main, /resolveDataMode\(location\.search, \{ qa: isQaBuild\(document\) \}\)/);
   assert.doesNotMatch(main, /get\('demo'\)/, 'no second, ungated reading of ?demo');
+});
+
+test('preflight: three-state checks, missing source is not a failure', () => {
+  const r = preflightChecks({
+    all_ok: false,
+    checks: {
+      port_reachable: { ok: true, detail: 'connected' },
+      ownership: { ok: null, detail: 'no_ownership_source_in_this_deployment' },
+      openai_compat: { ok: true, detail: 'model_list_verified' },
+      name_unique: { ok: true, detail: 'available' },
+    },
+  });
+  assert.deepEqual(r.list.map((c) => c.ok), [true, null, true, true]);
+  assert.equal(r.blocked, false);
+  assert.equal(r.allOk, false);
+  assert.equal(r.list[1].detail, '本部署未启用归属校验');
+
+  const bad = preflightChecks({ all_ok: false, checks: { ownership: { ok: false, detail: 'owner_mismatch:1001' } } });
+  assert.equal(bad.blocked, true);
+  assert.equal(bad.list[1].detail, '监听进程属于其他账户（uid 1001）');
+  assert.equal(bad.list[0].ok, null, 'an absent check reads as not available, never as passed');
+  assert.equal(preflightChecks({}), null);
 });

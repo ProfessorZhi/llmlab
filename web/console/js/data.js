@@ -27,7 +27,7 @@ export const PATHS = Object.freeze({
   userRole: '/auth/admin/users/role',
   userLinux: '/auth/admin/users/linux',
   userStatus: '/auth/admin/users/status',
-  verify: '/api/v2/ops/engines/verify',
+  preflight: '/api/v2/registry/engines/preflight',
   registryEngines: '/api/v2/registry/engines',
 });
 

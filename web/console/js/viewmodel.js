@@ -242,3 +242,42 @@ export function overviewModel({ ops = null, host = null, log = null, demo = null
     host: hf,
   };
 }
+
+/* 注册预检（POST /api/v2/registry/engines/preflight，registry-engine-preflight/1）。
+ * ok 三态：true 通过 / false 校验失败 / null 本部署没有这条来源（不是失败）。 */
+const PREFLIGHT_DETAIL = Object.freeze({
+  connected: '端口已响应',
+  connection_refused: '连接被拒绝，端口上没有服务在监听',
+  timeout: '连接超时',
+  verified: '监听进程的运行账户与当前用户绑定的 Linux 账户一致',
+  not_listening: '该端口没有监听进程',
+  ambiguous: '该端口存在多个不同账户的监听进程，无法确定归属',
+  unknown_user: '当前账户未绑定有效的 Linux 用户',
+  target_not_loopback: '服务地址必须为 127.0.0.1',
+  proc_net_unreadable: '无法读取本机端口表',
+  proc_net_unparseable: '本机端口表格式无法识别',
+  model_list_verified: 'GET /v1/models 校验通过',
+  transport_unreachable: '接口不可达',
+  available: '名称可用',
+  engine_name_taken: '您已有同名服务',
+  not_configured_in_this_deployment: '本部署未接入此项校验',
+  no_ownership_source_in_this_deployment: '本部署未启用归属校验',
+});
+const PREFLIGHT_ORDER = [['port_reachable', '端口可达'], ['ownership', '进程归属'], ['openai_compat', '接口兼容性'], ['name_unique', '名称唯一性']];
+
+function preflightDetail(raw) {
+  if (typeof raw !== 'string' || !raw) return '—';
+  if (raw.startsWith('owner_mismatch:')) return `监听进程属于其他账户（uid ${raw.slice('owner_mismatch:'.length)}）`;
+  return PREFLIGHT_DETAIL[raw] ?? raw;
+}
+
+export function preflightChecks(data) {
+  const checks = data?.checks;
+  if (!checks || typeof checks !== 'object') return null;
+  const list = PREFLIGHT_ORDER.map(([key, title]) => {
+    const c = checks[key];
+    const ok = c?.ok === true ? true : c?.ok === false ? false : null;
+    return { key, title, ok, detail: c ? preflightDetail(c.detail) : '本部署未接入此项校验' };
+  });
+  return { list, allOk: data.all_ok === true, blocked: list.some((c) => c.ok === false) };
+}

@@ -181,6 +181,12 @@ export function brandMark(size = 28) {
 }
 
 export function checkIcon(ok = true, size = 20) {
+  if (ok === null) {
+    // 未接入：灰色横线，不与失败混淆。
+    return s('svg', { width: size, height: size, viewBox: '0 0 20 20', 'aria-hidden': 'true' },
+      s('circle', { cx: 10, cy: 10, r: 9, fill: 'var(--fill-strong, #C7C7CC)' }),
+      s('path', { d: 'M6.5 10h7', stroke: '#FFFFFF', 'stroke-width': 1.8, 'stroke-linecap': 'round' }));
+  }
   return s('svg', { width: size, height: size, viewBox: '0 0 20 20', 'aria-hidden': 'true' },
     s('circle', { cx: 10, cy: 10, r: 9, fill: ok ? 'var(--green)' : 'var(--red)' }),
     ok ? s('path', { d: 'M6 10.3 8.7 12.8 14 7.4', fill: 'none', stroke: '#FFFFFF', 'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })
