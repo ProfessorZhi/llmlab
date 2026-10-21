@@ -24,6 +24,7 @@ from typing import Callable, Iterable
 from . import dto, gateway as gateway_mod
 from . import health as health_mod
 from . import ownership as ownership_mod
+from . import preflight as preflight_mod
 from . import router as router_mod
 from .authz import AccessPolicy, assert_no_default_private_trap
 from .errors import (
@@ -103,10 +104,12 @@ from .ownership import (
     OWNERSHIP_POLICIES,
     OWNERSHIP_POLICY_ADVISORY,
     OWNERSHIP_POLICY_ENFORCED,
+    OWNERSHIP_PROVER_KINDS,
+    OWNERSHIP_PROVER_NONE,
     REASON_OPERATOR_POLICY,
-    NoOwnershipProver,
     OperatorPolicy,
     OwnershipProof,
+    build_ownership_prover,
 )
 from .store import Store
 from .urls import (
@@ -162,6 +165,12 @@ class RegistryConfig:
     ownership_policy: str = OWNERSHIP_POLICY_ADVISORY
     #: 是否把「协议验证」当作 ready 的必要条件（另一根轴见 ``health``）。
     require_protocol_verification: bool = False
+    #: 用哪个所有权 prover（未显式注入 ``ownership_prover`` 时生效）：
+    #: ``none``（**缺省**，fail-closed，永远 ``ownership_unverified``）或
+    #: ``proc_net``（读全员可读的 ``/proc/net/tcp(6)`` 的 uid 列，见
+    #: ``ownership.ProcNetOwnershipProver``；只经 fixture 单测验证，真实主机验证待做）。
+    #: 缺省不变，是为了让既有部署与测试的行为**逐字节**不变 —— 这是一个显式的选择。
+    ownership_prover_kind: str = OWNERSHIP_PROVER_NONE
     #: ``engine_id -> {"file": ..., "var": ...}``：Gateway 快照里每个 engine 引用
     #: 上游凭据的**位置**（只点名文件与变量，绝不携带值）。缺省空 —— 于是缺省
     #: 下没有任何 engine 会被发布，这正是 fail-closed 该有的样子：不配置就不发。
@@ -177,6 +186,10 @@ class RegistryConfig:
                 raise InvalidRequest(f"invalid port in allowlist: {port!r}")
         if self.ownership_policy not in OWNERSHIP_POLICIES:
             raise InvalidRequest(f"unknown ownership policy: {self.ownership_policy!r}")
+        if self.ownership_prover_kind not in OWNERSHIP_PROVER_KINDS:
+            raise InvalidRequest(
+                f"unknown ownership prover kind: {self.ownership_prover_kind!r}"
+            )
         if not isinstance(self.operator_policy, OperatorPolicy):
             raise InvalidRequest("operator_policy must be an OperatorPolicy")
         if not isinstance(self.engine_secret_refs, dict):
@@ -263,6 +276,7 @@ class RegistryService:
         protocol_prober: object | None = None,
         ownership_prover: object | None = None,
         router: object | None = None,
+        port_checker: Callable[[NormalizedTarget], tuple[bool, str]] | None = None,
         clock: Clock = utc_now,
     ) -> None:
         self.store = store
@@ -273,10 +287,25 @@ class RegistryService:
         self.prober = prober
         #: 协议轴。缺省是「说不出来」，不是「大概是」。
         self.protocol_prober = protocol_prober if protocol_prober is not None else NoProtocolProber()
-        #: 所有权证明。缺省**永远**给 ``ownership_unverified``。
+        #: 所有权证明。显式注入的优先；否则按 ``config.ownership_prover_kind`` 选，
+        #: 其缺省 ``none`` **永远**给 ``ownership_unverified``。
         self.ownership_prover = (
-            ownership_prover if ownership_prover is not None else NoOwnershipProver()
+            ownership_prover
+            if ownership_prover is not None
+            else build_ownership_prover(self.config.ownership_prover_kind)
         )
+        #: 登记前检查（``preflight_engine``）的「端口能不能连上」。显式注入的优先；
+        #: 否则**只有**本部署挂了传输 prober（即允许本机回环探测）时才用真实的
+        #: TCP connect —— 没有观测源的部署不会因为 preflight 而开出 socket。
+        if port_checker is not None:
+            self.port_checker: Callable[[NormalizedTarget], tuple[bool, str]] | None = port_checker
+        elif self.prober is not None:
+            timeout = self.config.probe_timeout_seconds
+            self.port_checker = lambda target: preflight_mod.tcp_connect_check(
+                target, timeout_seconds=timeout
+            )
+        else:
+            self.port_checker = None
         self.gateway = gateway if gateway is not None else gateway_mod.DetachedGatewayAdapter()
         #: 路由同步。缺省 ``DetachedRouterAdapter``：不写任何 Gateway，repoint 之后
         #: 状态诚实停在 ``pending_router_sync`` —— 与「本仓库不写 Gateway」一字不差。
@@ -293,12 +322,19 @@ class RegistryService:
         return self.operator_policy.match(target)
 
     def _prove_ownership(
-        self, target: NormalizedTarget, *, entry: OperatorTarget | None
+        self,
+        target: NormalizedTarget,
+        *,
+        entry: OperatorTarget | None,
+        owner_linux_user: str | None = None,
     ) -> OwnershipProof:
         """所有权结论的**唯一**来源，按可信度排序。
 
         运维承认的既有服务**优先**：它是运维写下的记录，比任何本机启发式都硬。
         否则交给注入的 prover —— 缺省那个永远说不出来。
+
+        ``owner_linux_user`` 只来自受信目录（登记者的 ``RequesterContext`` 或
+        engine owner 在 ``PrincipalDirectory`` 里的那一行），从不来自请求体。
         """
         if entry is not None:
             return OwnershipProof(
@@ -307,10 +343,15 @@ class RegistryService:
                 detail=f"admitted by operator policy entry {entry.label!r}",
                 source=entry.source,
             )
-        proof = self.ownership_prover.prove(target)
+        proof = self.ownership_prover.prove(target, owner_linux_user=owner_linux_user)
         if not isinstance(proof, OwnershipProof):
             raise InvalidRequest("ownership_prover must return an OwnershipProof")
         return proof
+
+    def _owner_linux_user(self, principal: str) -> str | None:
+        """engine owner 的 Linux 用户名：**只**从受信目录查，查不到就是 ``None``。"""
+        found = self.principals.lookup(principal)
+        return found.linux_user if found is not None else None
 
     def _observe_protocol(self, target: NormalizedTarget, protocol: str) -> ProtocolObservation:
         observation = self.protocol_prober.probe(target, protocol)
@@ -593,21 +634,14 @@ class RegistryService:
         }
         return data
 
-    def register_engine(
-        self, requester: RequesterContext, payload: dict, *, idempotency_key: object = None
-    ) -> tuple[dict, bool]:
-        policy = self.policy(requester)
-        policy.require_write_scope()
-        if not isinstance(payload, dict):
-            raise InvalidRequest("payload must be an object")
-        _reject_identity_fields(payload)
+    def _engine_target_for(
+        self, requester: RequesterContext, payload: dict, mode: str
+    ) -> tuple[NormalizedTarget, OperatorTarget | None]:
+        """按登记模式解析目标，返回 ``(target, 运维 entry 或 None)``。
 
-        name = validate_name(payload.get("name"), what="engine name")
-        protocol = validate_protocol(payload.get("protocol"))
-        mode = payload.get("engine_mode") or ENGINE_MODE_USER
-        if mode not in ENGINE_MODES:
-            raise InvalidRequest(f"unsupported engine_mode: {mode!r}")
-
+        ``register_engine`` 与 ``preflight_engine`` 共用这一处 —— 「预检说能登记、
+        登记却被拒」这种两份规则漂移的结局，只有一份规则才能杜绝。
+        """
         # **登记模式决定能用哪个 allowlist**，这是本函数最关键的一处：
         #
         #   user 模式       -> operator_allowlist=()  运维的承认**不**对普通用户生效，
@@ -635,6 +669,23 @@ class RegistryService:
         else:
             target = self._target(payload.get("target_url"))
             entry = None
+        return target, entry
+
+    def register_engine(
+        self, requester: RequesterContext, payload: dict, *, idempotency_key: object = None
+    ) -> tuple[dict, bool]:
+        policy = self.policy(requester)
+        policy.require_write_scope()
+        if not isinstance(payload, dict):
+            raise InvalidRequest("payload must be an object")
+        _reject_identity_fields(payload)
+
+        name = validate_name(payload.get("name"), what="engine name")
+        protocol = validate_protocol(payload.get("protocol"))
+        mode = payload.get("engine_mode") or ENGINE_MODE_USER
+        if mode not in ENGINE_MODES:
+            raise InvalidRequest(f"unsupported engine_mode: {mode!r}")
+        target, entry = self._engine_target_for(requester, payload, mode)
 
         description = validate_optional_text(payload.get("description"), what="description")
         tags = validate_tags(payload.get("tags"))
@@ -667,7 +718,9 @@ class RegistryService:
             raise Conflict(f"engine {name!r} already exists with different content")
 
         now = self._now()
-        ownership = self._prove_ownership(target, entry=entry)
+        ownership = self._prove_ownership(
+            target, entry=entry, owner_linux_user=requester.linux_user
+        )
         observation, protocol_obs, merged = self._verification(target, protocol)
 
         status = ENGINE_REGISTERED
@@ -722,6 +775,55 @@ class RegistryService:
         )
         return self._engine_view(engine, policy, requester), True
 
+    def preflight_engine(self, requester: RequesterContext, payload: dict) -> dict:
+        """「登记模型服务」之前的**只读**预检：不写库、不写审计、不登记任何东西。
+
+        回答前端登记表单的四个问题，每个都是 ``{ok, detail}``（``ok`` 为 ``None``
+        表示本部署**没有**这条来源，不是失败）：
+
+        * ``port_reachable`` —— 回环 TCP connect（短超时；只有挂了传输 prober 的部署
+          才真的连）；
+        * ``ownership`` —— 与登记走同一个 prover，登记者用户名来自受信目录；
+        * ``openai_compat`` —— 与登记走同一个协议 prober（只读 ``/v1/models``）；
+        * ``name_unique`` —— 在调用者自己的 engine 名字空间里是否已被占用。
+
+        目标解析与 ``register_engine`` **共用**同一个 helper：预检能过的，登记的
+        目标校验也一定能过。需要 ``registry:write`` —— 它只服务于登记流程。
+        """
+        policy = self.policy(requester)
+        policy.require_write_scope()
+        if not isinstance(payload, dict):
+            raise InvalidRequest("payload must be an object")
+        _reject_identity_fields(payload)
+
+        name = validate_name(payload.get("name"), what="engine name")
+        mode = payload.get("engine_mode") or ENGINE_MODE_USER
+        if mode not in ENGINE_MODES:
+            raise InvalidRequest(f"unsupported engine_mode: {mode!r}")
+        target, entry = self._engine_target_for(requester, payload, mode)
+
+        existing = self.store.engine_by_owner_name(requester.principal, name)
+        ownership = self._prove_ownership(
+            target, entry=entry, owner_linux_user=requester.linux_user
+        )
+        protocol_obs = self._observe_protocol(target, PROTOCOL_OPENAI_COMPAT)
+        data = preflight_mod.build_engine_preflight(
+            target=target,
+            name=name,
+            existing_engine_id=existing.id if existing is not None else None,
+            ownership=ownership,
+            port_checker=self.port_checker,
+            protocol=protocol_obs,
+        )
+        return self._envelope(
+            data,
+            requester,
+            notes=[
+                "只读预检：不登记、不写审计；ok=null 表示本部署没有这条来源，不是失败。",
+                "所有权的用户名来自受信目录；请求里的 uid/owner 字段一律被拒绝。",
+            ],
+        )
+
     def _engine_view(
         self, engine: Engine, policy: AccessPolicy, requester: RequesterContext, *, replay: bool = False
     ) -> dict:
@@ -772,7 +874,11 @@ class RegistryService:
         target = NormalizedTarget(**engine.target)
         # 所有权**重新**证明一次：进程可能已经换了个 uid 在跑，旧结论不该被沿用。
         entry = self._operator_entry_for(target) if engine.mode == ENGINE_MODE_SYSTEM_EXISTING else None
-        ownership = self._prove_ownership(target, entry=entry)
+        ownership = self._prove_ownership(
+            target,
+            entry=entry,
+            owner_linux_user=self._owner_linux_user(engine.owner_principal),
+        )
         protocol_obs = self._observe_protocol(target, engine.protocol)
         merged = build_verification(
             transport=observation,
@@ -2331,6 +2437,7 @@ def build_service(
     protocol_prober: object | None = None,
     ownership_prover: object | None = None,
     router: object | None = None,
+    port_checker: Callable[[NormalizedTarget], tuple[bool, str]] | None = None,
     clock: Callable[[], object] = utc_now,
 ) -> RegistryService:
     """构造一个服务实例。**只建对象、不开端口、不起进程。**"""
@@ -2345,5 +2452,6 @@ def build_service(
         protocol_prober=protocol_prober,
         ownership_prover=ownership_prover,
         router=router,
+        port_checker=port_checker,
         clock=clock,  # type: ignore[arg-type]
     )
