@@ -242,6 +242,7 @@ Endpoint**。它**不** `stat`、**不**打开、**不**哈希内容、**不** `
 | GET | `/status` | 服务与各来源（观测源 / 网关 / 用量管道）的可用性 |
 | GET | `/engines` · POST `/engines` | 列表 / 登记 |
 | GET | `/engines/{id}` · POST `/engines/{id}/verify` | 单个 / 触发验证 |
+| POST | `/engines/preflight` | **只读**登记预检（不写库、不写审计；需 `registry:write`），见 §18.3.1 |
 | GET | `/models` · POST `/models` | 列表 / 登记 |
 | GET | `/models/{id}` | 单个（模型没有探测路径，故无 verify） |
 | GET | `/deployments` · POST `/deployments` | 列表 / 登记 |
@@ -550,6 +551,7 @@ python3 -m backend.registry serve --db /tmp/registry.sqlite --port 8000 \
 | `test_cli_over_loopback.py` | 40 | 真实子进程 + 真实回环 HTTP：fail closed、退出码、完整链、跨用户可见性、**repoint/rollback/routings** |
 | `test_endpoint_repoint.py` | 39 | 稳定 alias、CAS/竞态、ACL 不带过去、跨 owner 拒绝、回滚走同一套检查、只追加历史、pending 不谎报 |
 | `test_engine_ownership.py` | 40 | 运维策略加载与拒绝、8080 的唯一通路、`system_existing` 权限、所有权强制档 |
+| `test_proc_net_ownership.py` | 57 | `/proc/net/tcp(6)` fixture 表解析（IPv4/IPv6/mapped/通配/非 LISTEN）、uid 证明的各失败原因、prover 选择、`/engines/preflight`、本进程回环监听的真实内核冒烟 |
 | `test_verification_axes.py` | 27 | 传输 vs 协议两根轴、真回环模拟器的「正确/错误」上游、模型清单解析 |
 | `test_trusted_gateway_and_router.py` | 44 | 受信 Gateway adapter 的三条 fail-closed 规则、PR #20 快照形状与校验、落后的代数/sha 被拒、repoint 的 pending↔applied、**A→B 全链与撤权**（§21） |
 
@@ -610,8 +612,9 @@ python3 -m backend.registry serve --db /tmp/registry.sqlite --port 8000 \
    schema 版本（`registry/1`），**没有**去改它。把两者折叠是一次显式的集成决定，
    见 §15。
 8. **没有 CI。** 本仓库此刻没有任何 CI/CD（`docs/architecture.md` 已记录）。
-9. **所有权自动证明未实现（BLOCKED）。** 见 §18.3：契约与注入点是有的，
-   默认 fail-closed；uid/socket 那条特权路径**故意没有实现**。
+9. **所有权自动证明是可选的，且真实主机验证待做。** 见 §18.3：
+   `ProcNetOwnershipProver` 读全员可读的 `/proc/net/tcp(6)` 的 uid 列（不需要 root），
+   只经 fixture 单测与本进程回环监听的冒烟验证；缺省仍是 fail-closed 的 `NoOwnershipProver`。
 10. **`ownership_policy` / `require_protocol_verification` 默认关着**（§19.4）。
     生产必须用 `RegistryConfig.production_posture()`。
 11. **端口归属仍未证明。** `registry:write` 的人依然可以登记**别人**在允许端口上
@@ -856,21 +859,88 @@ ready、归属必须证明、revision 必须对得上、ACL 同样重置。
 把目标放到回环之外** —— 这条边界没有例外。加载失败必须让进程起不来，
 不能「悄悄没读到策略」。
 
-### 18.3 所有权证明：契约有了，uid 那条路是 **BLOCKED**
+### 18.3 所有权证明：`/proc/net/tcp(6)` 的 uid 列（可选，真实主机待验证）
 
-`ownership.py` 里的 `OwnershipProver` 是留给特权 owner-agent 的洞。本轮只有两个
-实现：默认 fail-closed 的 `NoOwnershipProver`（永远说不出来）与显式标注的
-测试替身 `StaticOwnershipProver`。
+`ownership.py` 里的 `OwnershipProver` 有三个实现：默认 fail-closed 的
+`NoOwnershipProver`（永远说不出来）、显式标注的测试替身 `StaticOwnershipProver`，
+以及**可选**的 `ProcNetOwnershipProver`。
 
-**自动的 uid / socket 属主证明没有实现，这是有意的**，理由如实记在这里：
-要回答「这个回环端口属于哪个 uid」，得读 `/proc/net/tcp` 拿 inode、再扫
-`/proc/<pid>/fd` 反查进程、再用 `os.stat` 拿 socket 属主 —— 分别需要 root 权限
-与遍历**其他用户**的进程表。本仓库的可达边界不支持这个
-（`docs/access-boundaries.md` 明确不触碰其他 Linux 用户的进程与家目录），
-而且那段代码无法在 CI 里被真实验证。一段「跑不了、验不了」的特权扫描代码
-不该以「已完成」的姿态进库。
+上一轮把自动 uid 证明判为 BLOCKED，前提是「得读 `/proc/net/tcp` 拿 inode、再扫
+`/proc/<pid>/fd` 反查进程」—— 后一步需要 root 与遍历其他用户的进程表。那个前提
+错了一半：`/proc/net/tcp` 与 `/proc/net/tcp6` **全员可读**，且每一行已经带着
+socket 属主的 `uid` 列、本地 `地址:端口`（主机字节序 hex）与状态（`0A` = LISTEN）。
+不需要 inode 反查，不碰任何 `/proc/<pid>`。
 
-所以：**能用的那条路是运维策略**（它是一条真实的、可审计的记录）。
+判定：
+
+1. 期望 uid = `pwd.getpwnam(<登记者 Linux 用户名>)`；用户名**只**来自受信目录
+   （登记时是 `RequesterContext.linux_user`，verify 时是 engine owner 在
+   `PrincipalDirectory` 里的那一行）。请求里的 `uid`/`owner`/`linux_user` 字段照旧 400。
+2. 在 LISTEN 行里找绑定在该端口、能服务这个回环目标的 socket：精确地址
+   （含 `::ffff:127.0.0.1` 这种 mapped 写法）、同族通配（`0.0.0.0` / `::`）、
+   以及 `::` 之于 IPv4 目标（双栈；`IPV6_V6ONLY` 从表上看不出，所以按「可能接得到」算）。
+   通配命中会记进 `detail`。绑在别的地址上的 socket 不算。
+3. 结论（`ownership.reason`，机器可读）：
+
+| reason | 含义 |
+|---|---|
+| `null`（`state=uid_verified`） | 能服务该目标的 socket 恰好一个 uid，且就是登记者 |
+| `not_listening` | 没有能服务该目标的 LISTEN socket |
+| `owner_mismatch:<uid>` | 恰好一个 uid，但不是登记者 |
+| `ambiguous` | 能服务该目标的 socket 不止一个 uid |
+| `unknown_user` | 没有受信用户名，或该用户在本机不存在 |
+| `proc_net_unreadable` / `proc_net_unparseable` | 表读不到 / 有看不懂的行（**不跳过**：被跳过的那行可能正是冲突者） |
+
+选择方式：`RegistryConfig(ownership_prover_kind="proc_net")`，或开发服务器
+`--ownership-prover proc_net`。**缺省仍是 `none`**，于是既有部署与测试的行为不变。
+显式注入的 `ownership_prover` 优先于配置。
+
+诚实的边界：
+
+* **只**由单元测试（注入的 fixture 表）与「本进程自己开的回环监听」冒烟验证过；
+  在 Dell 上对真实引擎的验证**仍待做**。
+* `/proc/net/*` 按网络命名空间：Registry 与引擎不在同一 netns 时读到的是另一张表，
+  结论会是 `not_listening`（fail-closed，不会误放行）。
+* 它证明的是「监听这个端口的 socket 属于谁」，不是「进程是哪个二进制」。
+
+运维承认的既有服务仍走运维策略，且优先于任何 prover。
+
+#### 18.3.1 登记预检：`POST /engines/preflight`
+
+前端「登记模型服务」表单在提交前调用。**只读**：不写库、不写审计。需要
+`registry:write`（它只服务于登记流程），目标解析与 `POST /engines` 共用同一个
+helper（预检能过的目标，登记的目标校验也能过）。请求：
+
+```json
+{"name": "qwen-local", "target_url": "http://127.0.0.1:8000/v1"}
+```
+
+（可选 `engine_mode`，规则与登记相同。）响应 `data`：
+
+```json
+{
+  "schema": "registry-engine-preflight/1",
+  "read_only": true,
+  "name": "qwen-local",
+  "target": {"scheme": "http", "host": "127.0.0.1", "port": 8000, "path": "/v1", "...": "..."},
+  "checks": {
+    "port_reachable": {"ok": true, "detail": "connected"},
+    "ownership": {"ok": true, "detail": "verified", "evidence": {"state": "uid_verified", "...": "..."}},
+    "openai_compat": {"ok": true, "detail": "model_list_verified"},
+    "name_unique": {"ok": true, "detail": "available"}
+  },
+  "all_ok": true
+}
+```
+
+`ok` 是三值：`true` 通过、`false` 查了没通过（`detail` 是原因 token，如
+`connection_refused` / `owner_mismatch:1002` / `model_list_missing` /
+`engine_name_taken`）、`null` **本部署没有这条来源**（`detail` 为
+`not_configured_in_this_deployment` 或 `no_ownership_source_in_this_deployment`）。
+`all_ok` 只有四个都是 `true` 才为真。`port_reachable` 只在挂了传输 prober 的部署
+（`--probe-loopback`）才真的做回环 TCP connect；`openai_compat` 用协议 prober
+（只读 `GET /v1/models`）。BFF（`/api/v2/ops/*`）**没有**镜像这条路由：那需要改
+`route_map`、能力目录与 CSRF 接线，属于 Integration Lane。
 
 ### 18.4 强制档
 
@@ -939,7 +1009,7 @@ health 类路径（`/healthz` 等）**不足以**判定 `verified`：一个 200 
 | 一次真实的探测成功过 | `verified` / `verified_transport` / `verified_protocol` | Registry 的探测（由本部署的 prober 提供） |
 | **进程真的在跑** | `running` | **恒为 `null`** —— 平台不启动进程，也没有观测源 |
 | 是不是这个部署声明的模型服务 | `verification.protocol` | 协议探测（只读模型清单） |
-| 这个引擎的进程属于谁 | `ownership` | 运维策略，或（BLOCKED 的）uid 证明 |
+| 这个引擎的进程属于谁 | `ownership` | 运维策略，或（可选、真实主机待验证的）`/proc/net` uid 证明 |
 
 **多条 Model 记录 ≠ 同时真实运行。** 一个 principal 可以登记多个 Model、
 多个 Deployment、多个 Endpoint（没有数量上限，唯一的约束是「同一 owner 下名字

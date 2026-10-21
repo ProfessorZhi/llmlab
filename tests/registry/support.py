@@ -139,8 +139,8 @@ def default_protocol_prober() -> StaticProtocolProber:
 def default_ownership_prover() -> StaticOwnershipProver:
     """确定性**所有权** prover：把夹具端口判成「属于 alice(4001)」。
 
-    同样只是 fixture。真实那条路（读 /proc、socket 属主）**没有实现**，
-    见 ``ownership.py`` 里的 BLOCKED 说明。
+    同样只是 fixture。真实那条路是可选的 ``ownership.ProcNetOwnershipProver``
+    （读 ``/proc/net/tcp(6)`` 的 uid 列），它自己的测试在 ``test_proc_net_ownership.py``。
     """
     return StaticOwnershipProver(
         {
