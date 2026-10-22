@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "atlas_adapter_not_attached",
+    "message": "the atlas (calls) adapter is not attached"
+  }
+}

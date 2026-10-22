@@ -1,0 +1,440 @@
+{
+  "count": 29,
+  "routes": [
+    {
+      "name": "ops.read",
+      "methods": [
+        "GET"
+      ],
+      "path": "/api/v2/ops",
+      "auth": "session",
+      "kind": "read",
+      "csrf": false,
+      "source": "registry",
+      "owner": "Integration#49",
+      "handler": "_ops",
+      "scope": null,
+      "note": "可见性由 Registry 判定；本层不复制行级 ACL。"
+    },
+    {
+      "name": "ops.usage",
+      "methods": [
+        "GET"
+      ],
+      "path": "/api/v2/ops/usage",
+      "auth": "session",
+      "kind": "read",
+      "csrf": false,
+      "source": "observability",
+      "owner": "Data#47",
+      "handler": "_usage",
+      "scope": "observability:self:read",
+      "note": "完整用量 DTO；未接线时 503 observability_adapter_not_attached。"
+    },
+    {
+      "name": "ops.engines",
+      "methods": [
+        "GET"
+      ],
+      "path": "/api/v2/ops/engines",
+      "auth": "session",
+      "kind": "read",
+      "csrf": false,
+      "source": "observability",
+      "owner": "Data#47",
+      "handler": "_engines",
+      "scope": "observability:self:read",
+      "note": "引擎状态 DTO；未接线时 503 observability_adapter_not_attached。"
+    },
+    {
+      "name": "ops.share",
+      "methods": [
+        "PUT"
+      ],
+      "path": "/api/v2/ops/deployments/{deployment_id}/share",
+      "auth": "session",
+      "kind": "write",
+      "csrf": true,
+      "source": "registry",
+      "owner": "Integration#49",
+      "handler": "_share",
+      "scope": "portal:endpoints:share",
+      "note": "共享范围变更；CSRF/同源复用既有 auth 应用的 _preflight。"
+    },
+    {
+      "name": "registry.engines.preflight",
+      "methods": [
+        "POST"
+      ],
+      "path": "/api/v2/registry/engines/preflight",
+      "auth": "session",
+      "kind": "write",
+      "csrf": true,
+      "source": "registry",
+      "owner": "Integration#49",
+      "handler": "_registry_preflight",
+      "scope": "registry:write",
+      "note": "网页登记的只读预检（不写库）。POST 只因为它带一份表单体；身份只来自会话，所有权由 Registry 依据本机端口表判定。"
+    },
+    {
+      "name": "registry.engines.register",
+      "methods": [
+        "POST"
+      ],
+      "path": "/api/v2/registry/engines",
+      "auth": "session",
+      "kind": "write",
+      "csrf": true,
+      "source": "registry",
+      "owner": "Integration#49",
+      "handler": "_registry_register",
+      "scope": "registry:write",
+      "note": "网页登记推理服务。owner 是会话主体（平台账户或 Linux 主体），不来自请求体。"
+    },
+    {
+      "name": "registry.discovery",
+      "methods": [
+        "GET"
+      ],
+      "path": "/api/v2/registry/discovery",
+      "auth": "session",
+      "kind": "read",
+      "csrf": false,
+      "source": "registry",
+      "owner": "Integration#49",
+      "handler": "_registry_discovery",
+      "scope": "registry:read",
+      "note": "本机候选：回环上监听的推理服务（/proc/net/tcp + 只读 /v1/models）与授权目录里的模型。只读。"
+    },
+    {
+      "name": "registry.models.register",
+      "methods": [
+        "POST"
+      ],
+      "path": "/api/v2/registry/models",
+      "auth": "session",
+      "kind": "write",
+      "csrf": true,
+      "source": "registry",
+      "owner": "Integration#49",
+      "handler": "_registry_model_register",
+      "scope": "registry:write",
+      "note": "网页登记模型。owner 只来自会话；权重路径只是登记引用，Registry 不打开它。"
+    },
+    {
+      "name": "ops.invoke",
+      "methods": [
+        "POST"
+      ],
+      "path": "/api/v2/ops/endpoints/{endpoint_id}/invoke",
+      "auth": "session",
+      "kind": "write",
+      "csrf": true,
+      "source": "registry",
+      "owner": "Integration#49",
+      "handler": "_invoke_endpoint",
+      "scope": "registry:endpoint:invoke",
+      "note": "同源调用入口（SEAM-1）。身份只来自会话/scoped token；endpoint 只在路径里；载荷是有界 JSON 对象。只下发调用元数据，不下发模型正文。"
+    },
+    {
+      "name": "portal.infra_summary",
+      "methods": [
+        "GET"
+      ],
+      "path": "/api/infra/summary",
+      "auth": "session",
+      "kind": "read",
+      "csrf": false,
+      "source": "host_summary",
+      "owner": "Data#47",
+      "handler": "_infra_summary",
+      "scope": "observability:host:read",
+      "note": "固定 Prometheus/NVML 只读投影；未装配时 503，不是一份全 UNKNOWN 的 200。"
+    },
+    {
+      "name": "portal.model_service_key_create",
+      "methods": [
+        "POST"
+      ],
+      "path": "/api/model-service/keys",
+      "auth": "session",
+      "kind": "write",
+      "csrf": true,
+      "source": "model_service",
+      "owner": "Data#47",
+      "handler": "_model_service_key_create",
+      "scope": null,
+      "note": "签发一把新的模型推理密钥；写入引擎环境文件并触发引擎重载，因此响应里带 restart。"
+    },
+    {
+      "name": "portal.system_resources",
+      "methods": [
+        "GET"
+      ],
+      "path": "/api/infra/system",
+      "auth": "session",
+      "kind": "read",
+      "csrf": false,
+      "source": "host_summary",
+      "owner": "Data#47",
+      "handler": "_system_resources",
+      "scope": "observability:host:read",
+      "note": "BFF 直读 /proc 的整机读数（CPU/内存/交换/磁盘/网络/按用户）；未装配时 503。"
+    },
+    {
+      "name": "portal.model_service_key",
+      "methods": [
+        "GET"
+      ],
+      "path": "/api/model-service/key",
+      "auth": "session",
+      "kind": "read",
+      "csrf": false,
+      "source": "model_service",
+      "owner": "Data#47",
+      "handler": "_model_service_key",
+      "scope": null,
+      "note": "下发给平台管理员的模型服务密钥（完整明文）；未签发时 404。"
+    },
+    {
+      "name": "atlas.calls",
+      "methods": [
+        "GET"
+      ],
+      "path": "/api/atlas/calls",
+      "auth": "session",
+      "kind": "read",
+      "csrf": false,
+      "source": "atlas",
+      "owner": "Data#47",
+      "handler": "_atlas_calls",
+      "scope": "atlas:calls:self:read",
+      "note": "只报**本人**的调用元数据；未装配时 503 atlas_adapter_not_attached。"
+    },
+    {
+      "name": "evaluation.report_sources",
+      "methods": [
+        "GET"
+      ],
+      "path": "/api/evaluation/report-sources",
+      "auth": "session",
+      "kind": "read",
+      "csrf": false,
+      "source": "evaluation",
+      "owner": "Data#47",
+      "handler": "_eval_report_sources",
+      "scope": "evaluation:read",
+      "note": "两条来源各自的可用状态；来源隔离由评测模块自己盖章，本层不映射第二遍。"
+    },
+    {
+      "name": "evaluation.reports",
+      "methods": [
+        "GET"
+      ],
+      "path": "/api/evaluation/reports",
+      "auth": "session",
+      "kind": "read",
+      "csrf": false,
+      "source": "evaluation",
+      "owner": "Data#47",
+      "handler": "_eval_reports",
+      "scope": "evaluation:read",
+      "note": "报告目录；未知归属的记录由评测模块自己隐藏。"
+    },
+    {
+      "name": "evaluation.report_download",
+      "methods": [
+        "GET"
+      ],
+      "path": "/api/evaluation/reports/{report_ref}/download",
+      "auth": "session",
+      "kind": "read",
+      "csrf": false,
+      "source": "evaluation",
+      "owner": "Data#47",
+      "handler": "_eval_report_download",
+      "scope": "evaluation:read",
+      "note": "**第四条报告路由**（评测 Lane #78 / PR #91 交付判定，本 Lane 挂载）：受限下载的**判定**，不是字节。本部署内容读取关闭 ⇒ content_read=false，不是一个 0 字节的成功下载。"
+    },
+    {
+      "name": "evaluation.report_detail",
+      "methods": [
+        "GET"
+      ],
+      "path": "/api/evaluation/reports/{report_ref}",
+      "auth": "session",
+      "kind": "read",
+      "csrf": false,
+      "source": "evaluation",
+      "owner": "Data#47",
+      "handler": "_eval_report_detail",
+      "scope": "evaluation:read",
+      "note": "单份报告；未授权与不存在由评测模块塌成同一个答复。"
+    },
+    {
+      "name": "portal.services",
+      "methods": [
+        "GET"
+      ],
+      "path": "/api/portal/services",
+      "auth": "session",
+      "kind": "read",
+      "csrf": false,
+      "source": "host_summary",
+      "owner": "Data#47",
+      "handler": "_portal_services",
+      "scope": "observability:host:read",
+      "note": "固定服务就绪证据；未装配时 503，与主机投影同一条门。"
+    },
+    {
+      "name": "portal.events",
+      "methods": [
+        "GET"
+      ],
+      "path": "/api/portal/events",
+      "auth": "session",
+      "kind": "read",
+      "csrf": false,
+      "source": "audit",
+      "owner": "Integration#49",
+      "handler": "_portal_events",
+      "scope": "portal:admin:read",
+      "note": "有界、脱敏的审计时间线；两条真实来源（本层提权审计 + Registry audit_log）。只下发白名单字段，两个账本的 detail 列整体丢弃。"
+    },
+    {
+      "name": "portal.capabilities",
+      "methods": [
+        "GET"
+      ],
+      "path": "/api/portal/capabilities",
+      "auth": "session",
+      "kind": "read",
+      "csrf": false,
+      "source": "portal",
+      "owner": "Integration#49",
+      "handler": "_capabilities",
+      "scope": null,
+      "note": "装配状态清单。它是**拟议路由**的落地实现，不是「已上线」的声明。"
+    },
+    {
+      "name": "portal.integrations",
+      "methods": [
+        "GET"
+      ],
+      "path": "/api/portal/integrations",
+      "auth": "session",
+      "kind": "read",
+      "csrf": false,
+      "source": "portal",
+      "owner": "Integration#49",
+      "handler": "_integrations",
+      "scope": null,
+      "note": "插件目录与各插件的原生界面跳转地址；看不到的地址下发 null。"
+    },
+    {
+      "name": "portal.integrations.update",
+      "methods": [
+        "PUT"
+      ],
+      "path": "/api/portal/integrations/{key}",
+      "auth": "session",
+      "kind": "write",
+      "csrf": true,
+      "source": "portal",
+      "owner": "Integration#49",
+      "handler": "_integration_update",
+      "scope": "portal:admin:read",
+      "note": "管理员设置 / 清除某个插件的跳转地址与可见范围。"
+    },
+    {
+      "name": "auth.linux.login",
+      "methods": [
+        "POST"
+      ],
+      "path": "/auth/linux/login",
+      "auth": "anonymous",
+      "kind": "write",
+      "csrf": true,
+      "source": "session",
+      "owner": "IAM#45",
+      "handler": "_linux_login",
+      "scope": null,
+      "note": "没有真实 PAM 后端；未实现时以 503 收场，不伪造会话。"
+    },
+    {
+      "name": "auth.linux.status",
+      "methods": [
+        "GET"
+      ],
+      "path": "/auth/linux/status",
+      "auth": "anonymous",
+      "kind": "read",
+      "csrf": false,
+      "source": "session",
+      "owner": "IAM#45",
+      "handler": "_linux_status",
+      "scope": null,
+      "note": "公开说明：这条登录路径此刻的真实状态，不是任何人的秘密。"
+    },
+    {
+      "name": "auth.admin.status",
+      "methods": [
+        "GET"
+      ],
+      "path": "/auth/admin/status",
+      "auth": "anonymous",
+      "kind": "read",
+      "csrf": false,
+      "source": "session",
+      "owner": "IAM#45",
+      "handler": "_admin_status",
+      "scope": null,
+      "note": "没有会话也是一个合法答案（elevated: false）。"
+    },
+    {
+      "name": "auth.admin.enter",
+      "methods": [
+        "POST"
+      ],
+      "path": "/auth/admin/enter",
+      "auth": "session",
+      "kind": "write",
+      "csrf": true,
+      "source": "session",
+      "owner": "IAM#45",
+      "handler": "_admin_enter",
+      "scope": null,
+      "note": "提权是**每条会话**的状态；口令错误不泄露会话是否存在。"
+    },
+    {
+      "name": "auth.admin.exit",
+      "methods": [
+        "POST"
+      ],
+      "path": "/auth/admin/exit",
+      "auth": "session",
+      "kind": "write",
+      "csrf": true,
+      "source": "session",
+      "owner": "IAM#45",
+      "handler": "_admin_exit",
+      "scope": null,
+      "note": "幂等；不要求会话仍处于提权状态。"
+    },
+    {
+      "name": "auth.logout",
+      "methods": [
+        "POST"
+      ],
+      "path": "/auth/logout",
+      "auth": "session",
+      "kind": "write",
+      "csrf": true,
+      "source": "session",
+      "owner": "IAM#45",
+      "handler": null,
+      "scope": null,
+      "note": "登出由既有 auth 应用执行；成功后才清提权，顺序见 app.py。"
+    }
+  ]
+}

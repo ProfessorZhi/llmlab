@@ -1,0 +1,7 @@
+{
+  "ok": false,
+  "error": {
+    "code": "forbidden",
+    "message": "You do not have access to this resource."
+  }
+}

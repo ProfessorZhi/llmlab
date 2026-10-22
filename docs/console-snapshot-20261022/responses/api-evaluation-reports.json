@@ -1,0 +1,36 @@
+{
+  "data": {
+    "reports": [],
+    "returned": 0,
+    "include_unowned": false,
+    "sources": [
+      {
+        "source": "evalscope",
+        "source_label": "EvalScope 报告",
+        "state": "unconfigured",
+        "synthetic": false,
+        "observed_at": null,
+        "stale": false,
+        "reason": "report_source_not_configured",
+        "visible_count": 0
+      },
+      {
+        "source": "legacy-benchmark",
+        "source_label": "历史 Benchmark 镜像",
+        "state": "unconfigured",
+        "synthetic": false,
+        "observed_at": null,
+        "stale": false,
+        "reason": "report_source_not_configured",
+        "visible_count": 0
+      }
+    ],
+    "empty_state": {
+      "state": "unknown",
+      "label": "等待数据接入",
+      "value": null,
+      "what": "evaluation reports",
+      "note": "这不是评测失败，也不代表已有模型得分为 0。"
+    }
+  }
+}

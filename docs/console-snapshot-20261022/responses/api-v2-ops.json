@@ -1,0 +1,225 @@
+{
+  "data": {
+    "ops": {
+      "schema_version": "portal-ops/1",
+      "synthetic": false,
+      "state": "ready",
+      "transport": {
+        "mode": "demo",
+        "gateway_attached": true,
+        "synthetic": false,
+        "label": "SYNTHETIC / 本部署无生产 Gateway"
+      },
+      "scope": {
+        "subject": "account:0cc69724cf49ad17b9ab5ef748a88f7a",
+        "roles": [
+          "member"
+        ],
+        "scopes": [
+          "atlas:calls:self:read",
+          "portal:endpoints:share",
+          "portal:modules:read"
+        ],
+        "visibility": "private"
+      },
+      "registry": {
+        "adapter_attached": true,
+        "reason": null,
+        "owned": [],
+        "shared": [],
+        "all": [],
+        "engines": [
+          {
+            "engine_id": "eng_9c3071673a52286a",
+            "name": "strata-qwen38-flash-next",
+            "protocol": "openai_compatible",
+            "framework": "strata",
+            "port": 8080,
+            "owner": "account:319ff153f9792ed5d8bd353c3260b4e5",
+            "owner_name": "fjd",
+            "owner_is_self": false,
+            "status": "verified",
+            "ownership_state": "operator_verified",
+            "ownership_verified": true,
+            "run_as_user": null,
+            "run_as_uid": null,
+            "last_seen_at": "2026-10-22T05:47:27Z"
+          }
+        ],
+        "models": [
+          {
+            "model_id": "mdl_95362d852bfa7554",
+            "name": "qwen3.8-flash-next-iq2_xs",
+            "format": "gguf",
+            "parameter_count": "30B-class",
+            "description": "Qwen3.8-Flash-Next IQ2_XS 量化，支持图像输入（vision）",
+            "owner": "account:319ff153f9792ed5d8bd353c3260b4e5",
+            "owner_name": "fjd",
+            "owner_is_self": false,
+            "status": "registered",
+            "weight_path": null,
+            "created_at": "2026-10-22T05:47:27Z"
+          }
+        ]
+      },
+      "keys": [],
+      "playground": {
+        "authorized": false,
+        "backend": null,
+        "audited": false,
+        "endpoint": null,
+        "reason": "no_authorized_backend"
+      },
+      "metrics": {
+        "items": [
+          {
+            "name": "principal.requests",
+            "label": "本人已验证 key 的请求数",
+            "unit": "count",
+            "kind": "observability",
+            "value": null,
+            "state": "unknown",
+            "source": null,
+            "updated_at": null,
+            "reason": "no_sample"
+          },
+          {
+            "name": "principal.errors",
+            "label": "本人已验证 key 的失败请求数",
+            "unit": "count",
+            "kind": "observability",
+            "value": null,
+            "state": "unknown",
+            "source": null,
+            "updated_at": null,
+            "reason": "no_sample"
+          },
+          {
+            "name": "principal.throttled_429",
+            "label": "本人被限流的请求数",
+            "unit": "count",
+            "kind": "observability",
+            "value": null,
+            "state": "unknown",
+            "source": null,
+            "updated_at": null,
+            "reason": "no_sample"
+          },
+          {
+            "name": "principal.tokens.input",
+            "label": "本人输入 token 数",
+            "unit": "tokens",
+            "kind": "observability",
+            "value": null,
+            "state": "unknown",
+            "source": null,
+            "updated_at": null,
+            "reason": "no_sample"
+          },
+          {
+            "name": "principal.tokens.output",
+            "label": "本人输出 token 数",
+            "unit": "tokens",
+            "kind": "observability",
+            "value": null,
+            "state": "unknown",
+            "source": null,
+            "updated_at": null,
+            "reason": "no_sample"
+          },
+          {
+            "name": "principal.queue_p50_ms",
+            "label": "本人排队 p50",
+            "unit": "milliseconds",
+            "kind": "observability",
+            "value": null,
+            "state": "unknown",
+            "source": null,
+            "updated_at": null,
+            "reason": "no_sample"
+          },
+          {
+            "name": "principal.queue_p95_ms",
+            "label": "本人排队 p95",
+            "unit": "milliseconds",
+            "kind": "observability",
+            "value": null,
+            "state": "unknown",
+            "source": null,
+            "updated_at": null,
+            "reason": "no_sample"
+          },
+          {
+            "name": "principal.latency_p50_ms",
+            "label": "本人总延迟 p50",
+            "unit": "milliseconds",
+            "kind": "observability",
+            "value": null,
+            "state": "unknown",
+            "source": null,
+            "updated_at": null,
+            "reason": "no_sample"
+          },
+          {
+            "name": "principal.latency_p95_ms",
+            "label": "本人总延迟 p95",
+            "unit": "milliseconds",
+            "kind": "observability",
+            "value": null,
+            "state": "unknown",
+            "source": null,
+            "updated_at": null,
+            "reason": "no_sample"
+          }
+        ],
+        "my_source": null,
+        "global_source": null,
+        "window": "24h"
+      },
+      "gateway_feed": {
+        "feed": "gateway-usage-export",
+        "path": "/srv/llm-lab/state/api-gateway/usage.jsonl",
+        "window_hours": 24,
+        "readable": true,
+        "error": null,
+        "bytes_read": 70323,
+        "lines": 173,
+        "unmapped": 0,
+        "events": 173,
+        "last_event_ts": "2026-10-15T01:37:43Z",
+        "in_window": 0,
+        "keys_total": 16,
+        "keys_bound": 0
+      },
+      "trends": null,
+      "evaluation": {
+        "runs": [],
+        "submit": {
+          "ready": false,
+          "reason": "admin_dispatch_disabled"
+        }
+      },
+      "admin": {
+        "available": false,
+        "reason": "missing_required_scope",
+        "principals": []
+      },
+      "links": [
+        {
+          "label": "我的调用日志",
+          "href": "/atlas#calls",
+          "kind": "internal",
+          "requires": "atlas:calls:self:read"
+        }
+      ],
+      "notes": [
+        "本页数据来自同源 BFF，数据源是 Registry 的登记库；转发层是 mock，不是生产 Gateway。",
+        "权限只由服务端根据受信会话断言；请求头里的 UID / 角色一律被拒绝。",
+        "GPU 指标没有已声明的 NVML 来源，因此一律 UNKNOWN，而不是 0。",
+        "没有 portal:admin:read，因此本页不含全局视图与全员名单。",
+        "观测数据来自合成样本；指标卡没有白名单来源（gateway-usage-export / nvml-verified / prometheus-readonly），因此一律 UNKNOWN，只有曲线带 SYNTHETIC 标记。",
+        "真实评测派发在本部署关闭：任务可入队，但不会有 runner 执行它。"
+      ]
+    }
+  }
+}

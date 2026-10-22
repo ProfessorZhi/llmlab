@@ -1,0 +1,48 @@
+{
+  "data": {
+    "schema_version": "portal-host-summary/1",
+    "route": "/api/infra/summary",
+    "source": "nvml-verified",
+    "accepted": true,
+    "reason": null,
+    "observed_at": "2026-10-22T07:29:23.157Z",
+    "services": {
+      "prometheus": {
+        "key": "<REDACTED>",
+        "state": "live",
+        "up": true,
+        "reason": null
+      },
+      "gateway": {
+        "key": "<REDACTED>",
+        "state": "live",
+        "up": true,
+        "reason": null
+      },
+      "grafana": {
+        "key": "<REDACTED>",
+        "state": "live",
+        "up": true,
+        "reason": null
+      },
+      "evalscope": {
+        "key": "<REDACTED>",
+        "state": "live",
+        "up": true,
+        "reason": null
+      },
+      "strata": {
+        "key": "<REDACTED>",
+        "state": "live",
+        "up": true,
+        "reason": null
+      },
+      "strata_model": {
+        "key": "<REDACTED>",
+        "state": "live",
+        "up": true,
+        "reason": null
+      }
+    }
+  }
+}

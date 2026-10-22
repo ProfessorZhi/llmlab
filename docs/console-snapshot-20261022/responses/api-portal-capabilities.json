@@ -1,0 +1,91 @@
+{
+  "data": {
+    "schema_version": "portal-capabilities/1",
+    "observed_at": "2026-10-22T07:29:23Z",
+    "scope": {
+      "subject": "account:0cc69724cf49ad17b9ab5ef748a88f7a",
+      "scopes": [
+        "atlas:calls:self:read",
+        "evaluation:read",
+        "evaluation:submit",
+        "observability:host:read",
+        "observability:self:read",
+        "portal:endpoints:share",
+        "portal:modules:read"
+      ]
+    },
+    "sources": [
+      {
+        "source": "registry",
+        "owner": "Registry#76",
+        "route": "/api/v2/ops",
+        "scope": null,
+        "state": "ready",
+        "reason": null,
+        "attached": true,
+        "sample_at": "2026-10-22T07:29:23Z",
+        "observed_at": "2026-10-22T07:29:23Z",
+        "age_seconds": 0.0,
+        "ttl_seconds": null
+      },
+      {
+        "source": "observability",
+        "owner": "Host#74",
+        "route": "/api/v2/ops/usage",
+        "scope": "observability:self:read",
+        "state": "ready",
+        "reason": null,
+        "attached": true,
+        "sample_at": "2026-10-22T07:29:23Z",
+        "observed_at": "2026-10-22T07:29:23Z",
+        "age_seconds": 0.0,
+        "ttl_seconds": null
+      },
+      {
+        "source": "host_summary",
+        "owner": "Host#74",
+        "route": "/api/infra/summary",
+        "scope": "observability:host:read",
+        "state": "ready",
+        "reason": null,
+        "attached": true,
+        "sample_at": "2026-10-22T07:29:23Z",
+        "observed_at": "2026-10-22T07:29:23Z",
+        "age_seconds": 0.000703,
+        "ttl_seconds": 90
+      },
+      {
+        "source": "atlas_calls",
+        "owner": "Calls#77",
+        "route": "/api/atlas/calls",
+        "scope": "atlas:calls:self:read",
+        "state": "not_configured",
+        "reason": "adapter_not_attached",
+        "attached": false,
+        "sample_at": null,
+        "observed_at": null,
+        "age_seconds": null,
+        "ttl_seconds": null
+      },
+      {
+        "source": "evaluation",
+        "owner": "Evaluation#78",
+        "route": "/api/evaluation/reports",
+        "scope": "evaluation:read",
+        "state": "ready",
+        "reason": null,
+        "attached": true,
+        "sample_at": "2026-10-22T07:29:23Z",
+        "observed_at": "2026-10-22T07:29:23Z",
+        "age_seconds": 0.0,
+        "ttl_seconds": null
+      }
+    ],
+    "summary": {
+      "ready": 4,
+      "stale": 0,
+      "auth_required": 0,
+      "not_configured": 1
+    }
+  }
+}

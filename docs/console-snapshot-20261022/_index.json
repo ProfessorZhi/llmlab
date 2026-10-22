@@ -1,0 +1,97 @@
+{
+  "base": "http://127.0.0.1:8790",
+  "as": "vince",
+  "csrf_present": true,
+  "endpoints": [
+    {
+      "name": "auth-me",
+      "path": "/auth/me",
+      "status": 200,
+      "bytes": 311
+    },
+    {
+      "name": "auth-tokens",
+      "path": "/auth/tokens",
+      "status": 200,
+      "bytes": 850
+    },
+    {
+      "name": "auth-admin-users",
+      "path": "/auth/admin/users",
+      "status": 403,
+      "bytes": 94
+    },
+    {
+      "name": "api-v2-ops",
+      "path": "/api/v2/ops",
+      "status": 200,
+      "bytes": 5154
+    },
+    {
+      "name": "api-infra-summary",
+      "path": "/api/infra/summary",
+      "status": 200,
+      "bytes": 2879
+    },
+    {
+      "name": "api-infra-system",
+      "path": "/api/infra/system",
+      "status": 200,
+      "bytes": 4215
+    },
+    {
+      "name": "api-model-service-key",
+      "path": "/api/model-service/key",
+      "status": 403,
+      "bytes": 87
+    },
+    {
+      "name": "api-atlas-calls",
+      "path": "/api/atlas/calls",
+      "status": 503,
+      "bytes": 101
+    },
+    {
+      "name": "api-portal-integrations",
+      "path": "/api/portal/integrations",
+      "status": 200,
+      "bytes": 827
+    },
+    {
+      "name": "api-portal-capabilities",
+      "path": "/api/portal/capabilities",
+      "status": 200,
+      "bytes": 1679
+    },
+    {
+      "name": "api-portal-services",
+      "path": "/api/portal/services",
+      "status": 200,
+      "bytes": 609
+    },
+    {
+      "name": "api-v2-registry-discovery",
+      "path": "/api/v2/registry/discovery",
+      "status": 200,
+      "bytes": 1103
+    },
+    {
+      "name": "api-v2-ops-usage",
+      "path": "/api/v2/ops/usage",
+      "status": 200,
+      "bytes": 7398
+    },
+    {
+      "name": "api-evaluation-reports",
+      "path": "/api/evaluation/reports",
+      "status": 200,
+      "bytes": 736
+    },
+    {
+      "name": "api-evaluation-report-sources",
+      "path": "/api/evaluation/report-sources",
+      "status": 200,
+      "bytes": 478
+    }
+  ]
+}

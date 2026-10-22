@@ -1,0 +1,62 @@
+{
+  "data": {
+    "integrations": [
+      {
+        "key": "<REDACTED>",
+        "name": "Strata",
+        "kind": "engine",
+        "has_ui": true,
+        "ui_url": "http://fj-nj-ser-1009.tail3d8b76.ts.net:8080/",
+        "visibility": "all"
+      },
+      {
+        "key": "<REDACTED>",
+        "name": "vLLM",
+        "kind": "engine",
+        "has_ui": false,
+        "ui_url": null,
+        "visibility": "all"
+      },
+      {
+        "key": "<REDACTED>",
+        "name": "SGLang",
+        "kind": "engine",
+        "has_ui": false,
+        "ui_url": null,
+        "visibility": "all"
+      },
+      {
+        "key": "<REDACTED>",
+        "name": "Gateway",
+        "kind": "gateway",
+        "has_ui": false,
+        "ui_url": null,
+        "visibility": "admin"
+      },
+      {
+        "key": "<REDACTED>",
+        "name": "Prometheus",
+        "kind": "observability",
+        "has_ui": true,
+        "ui_url": null,
+        "visibility": "admin"
+      },
+      {
+        "key": "<REDACTED>",
+        "name": "Grafana",
+        "kind": "observability",
+        "has_ui": true,
+        "ui_url": null,
+        "visibility": "admin"
+      },
+      {
+        "key": "<REDACTED>",
+        "name": "EvalScope",
+        "kind": "evaluation",
+        "has_ui": true,
+        "ui_url": "http://fj-nj-ser-1009.tail3d8b76.ts.net:9000/",
+        "visibility": "all"
+      }
+    ]
+  }
+}

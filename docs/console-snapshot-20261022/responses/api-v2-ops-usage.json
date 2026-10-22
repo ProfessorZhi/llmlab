@@ -1,0 +1,316 @@
+{
+  "data": {
+    "kind": "usage.self",
+    "source": "gateway-usage-export",
+    "synthetic": false,
+    "schema_version": "observability/1",
+    "scope": {
+      "uid": "account:0cc69724cf49ad17b9ab5ef748a88f7a",
+      "viewing_uid": "account:0cc69724cf49ad17b9ab5ef748a88f7a",
+      "requested_uid": null,
+      "is_self_view": true,
+      "roles": [
+        "member"
+      ],
+      "scopes": [
+        "observability:host:read",
+        "observability:self:read"
+      ],
+      "endpoints": [
+        "ep_32b400432bd1c6c1"
+      ],
+      "admin": false,
+      "host_visible": true,
+      "requested_endpoint": null,
+      "cross_endpoint": false
+    },
+    "window": {
+      "from": "2026-10-21T07:01:08Z",
+      "to": "2026-10-22T07:01:08Z",
+      "bucket": "1h",
+      "timezone": "UTC",
+      "hours": 24
+    },
+    "page": {
+      "limit": 50,
+      "offset": 0,
+      "total": 0,
+      "returned": 0,
+      "has_more": false
+    },
+    "quality": {
+      "calls": "unknown",
+      "latency": "unknown",
+      "queue": "unknown",
+      "ttft": "unknown",
+      "buckets": "unknown",
+      "truncated": false
+    },
+    "billing_basis": "verified-key",
+    "counters": {
+      "calls": 0,
+      "success": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "throttled_429": 0
+    },
+    "metrics": {
+      "principal.requests": {
+        "metric_id": "principal.requests",
+        "scope": "principal",
+        "unit": "count",
+        "physical": false,
+        "value": null,
+        "quality": "unknown",
+        "display_quality": "unknown",
+        "source": "gateway-usage-export",
+        "observed_at": null,
+        "reason": "no_sample",
+        "freshness": {
+          "age_seconds": null,
+          "stale": null,
+          "clock_skew": null,
+          "threshold_seconds": 60
+        }
+      },
+      "principal.errors": {
+        "metric_id": "principal.errors",
+        "scope": "principal",
+        "unit": "count",
+        "physical": false,
+        "value": null,
+        "quality": "unknown",
+        "display_quality": "unknown",
+        "source": "gateway-usage-export",
+        "observed_at": null,
+        "reason": "no_sample",
+        "freshness": {
+          "age_seconds": null,
+          "stale": null,
+          "clock_skew": null,
+          "threshold_seconds": 60
+        }
+      },
+      "principal.throttled_429": {
+        "metric_id": "principal.throttled_429",
+        "scope": "principal",
+        "unit": "count",
+        "physical": false,
+        "value": null,
+        "quality": "unknown",
+        "display_quality": "unknown",
+        "source": "gateway-usage-export",
+        "observed_at": null,
+        "reason": "no_sample",
+        "freshness": {
+          "age_seconds": null,
+          "stale": null,
+          "clock_skew": null,
+          "threshold_seconds": 60
+        }
+      },
+      "principal.tokens.input": {
+        "metric_id": "principal.tokens.input",
+        "scope": "principal",
+        "unit": "tokens",
+        "physical": false,
+        "value": null,
+        "quality": "unknown",
+        "display_quality": "unknown",
+        "source": "gateway-usage-export",
+        "observed_at": null,
+        "reason": "no_sample",
+        "freshness": {
+          "age_seconds": null,
+          "stale": null,
+          "clock_skew": null,
+          "threshold_seconds": 60
+        }
+      },
+      "principal.tokens.output": {
+        "metric_id": "principal.tokens.output",
+        "scope": "principal",
+        "unit": "tokens",
+        "physical": false,
+        "value": null,
+        "quality": "unknown",
+        "display_quality": "unknown",
+        "source": "gateway-usage-export",
+        "observed_at": null,
+        "reason": "no_sample",
+        "freshness": {
+          "age_seconds": null,
+          "stale": null,
+          "clock_skew": null,
+          "threshold_seconds": 60
+        }
+      },
+      "principal.queue_p50_ms": {
+        "metric_id": "principal.queue_p50_ms",
+        "scope": "principal",
+        "unit": "milliseconds",
+        "physical": false,
+        "value": null,
+        "quality": "unknown",
+        "display_quality": "unknown",
+        "source": "gateway-usage-export",
+        "observed_at": null,
+        "reason": "no_sample",
+        "freshness": {
+          "age_seconds": null,
+          "stale": null,
+          "clock_skew": null,
+          "threshold_seconds": 60
+        }
+      },
+      "principal.queue_p95_ms": {
+        "metric_id": "principal.queue_p95_ms",
+        "scope": "principal",
+        "unit": "milliseconds",
+        "physical": false,
+        "value": null,
+        "quality": "unknown",
+        "display_quality": "unknown",
+        "source": "gateway-usage-export",
+        "observed_at": null,
+        "reason": "no_sample",
+        "freshness": {
+          "age_seconds": null,
+          "stale": null,
+          "clock_skew": null,
+          "threshold_seconds": 60
+        }
+      },
+      "principal.latency_p50_ms": {
+        "metric_id": "principal.latency_p50_ms",
+        "scope": "principal",
+        "unit": "milliseconds",
+        "physical": false,
+        "value": null,
+        "quality": "unknown",
+        "display_quality": "unknown",
+        "source": "gateway-usage-export",
+        "observed_at": null,
+        "reason": "no_sample",
+        "freshness": {
+          "age_seconds": null,
+          "stale": null,
+          "clock_skew": null,
+          "threshold_seconds": 60
+        }
+      },
+      "principal.latency_p95_ms": {
+        "metric_id": "principal.latency_p95_ms",
+        "scope": "principal",
+        "unit": "milliseconds",
+        "physical": false,
+        "value": null,
+        "quality": "unknown",
+        "display_quality": "unknown",
+        "source": "gateway-usage-export",
+        "observed_at": null,
+        "reason": "no_sample",
+        "freshness": {
+          "age_seconds": null,
+          "stale": null,
+          "clock_skew": null,
+          "threshold_seconds": 60
+        }
+      }
+    },
+    "latency": {
+      "p50_ms": null,
+      "p95_ms": null,
+      "samples": 0,
+      "missing": 0,
+      "basis": "raw-request-samples"
+    },
+    "queue": {
+      "p50_ms": null,
+      "p95_ms": null,
+      "samples": 0,
+      "missing": 0,
+      "basis": "raw-request-samples"
+    },
+    "ttft": {
+      "p50_ms": null,
+      "p95_ms": null,
+      "samples": 0,
+      "missing": 0,
+      "basis": "raw-request-samples",
+      "excluded_non_stream": 0
+    },
+    "tokens": {
+      "input_total": null,
+      "output_total": null,
+      "input_missing": 0,
+      "output_missing": 0
+    },
+    "groups": [],
+    "buckets": {
+      "unit": "1h",
+      "expected_count": 25,
+      "observed_count": 0,
+      "items": []
+    },
+    "unknown": {
+      "out_of_window": 0,
+      "revoked_key": 0,
+      "filtered_out": 0,
+      "out_of_scope_endpoint": 0,
+      "endpoint_missing": 0,
+      "outcome_status_mismatch": 0,
+      "latency_missing": 0,
+      "ttft_missing": 0,
+      "unknown_key": null,
+      "malformed_lines": null,
+      "content_field_rejected": null
+    },
+    "external_ui": {
+      "policy": "same-origin-proxy-with-session-auth",
+      "iframe_allowed": false,
+      "iframe_reason": "上游原生 UI 不以 iframe 嵌入：跨源 iframe 无法由本服务施加授权，且会把上游会话/Cookie 暴露在平台页面的源下。改为同源反向代理路径，由 Portal 会话授权后再转发。",
+      "entries": [
+        {
+          "id": "grafana",
+          "label": "Grafana",
+          "path": null,
+          "requires": "observability:admin:read",
+          "visible": false,
+          "external_url": null
+        },
+        {
+          "id": "prometheus",
+          "label": "Prometheus",
+          "path": null,
+          "requires": "observability:admin:read",
+          "visible": false,
+          "external_url": null
+        },
+        {
+          "id": "evalscope",
+          "label": "EvalScope",
+          "path": null,
+          "requires": "observability:admin:read",
+          "visible": false,
+          "external_url": null
+        }
+      ],
+      "notes": [
+        "external_url 恒为 null：平台不下发任意外部地址，避免授权退化为可分享链接。",
+        "Grafana 自身的匿名/组织权限仍由 Grafana 侧配置，本模块只负责入口授权。"
+      ]
+    },
+    "display_hints": [
+      "本人用量在本窗口内无可用样本：显示为 UNKNOWN（不是 0）。空日志与未接线在数据上无法区分，因此不给出「0 次请求」这个结论。",
+      "本人用量按 **Gateway 已验证 key** 归属（billing_basis=verified-key）；与整卡 GPU 利用率/显存是两套口径。"
+    ],
+    "notes": [
+      "归属只来自服务端可信 key 目录；label / 请求头 / 请求体里的自报字段一律忽略。",
+      "p50/p95 由筛选后每条原始请求样本计算（linear-interpolation-type7），不对各组 p95 求平均。",
+      "缺测一律为 null（UNKNOWN），不以 0 代替。",
+      "共享推理实例上不虚构分用户显存：按人计量只有已验证 key 的请求/token 口径。",
+      "授权范围外的行既不计数也不展示；不可归属的原始诊断普通主体为 null。"
+    ]
+  }
+}

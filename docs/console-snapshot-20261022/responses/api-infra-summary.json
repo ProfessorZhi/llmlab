@@ -1,0 +1,166 @@
+{
+  "data": {
+    "accepted": true,
+    "reason": null,
+    "source": "nvml-verified",
+    "synthetic": false,
+    "readonly": true,
+    "version": 1,
+    "observed_at": "2026-10-22T07:29:22.410Z",
+    "metrics": {
+      "gpu_utilization_ratio": {
+        "key": "<REDACTED>",
+        "state": "live",
+        "value": 0.0,
+        "unit": "ratio",
+        "sample_at": "2026-10-22T07:29:22.410Z",
+        "age_seconds": 0.000341,
+        "reason": null,
+        "source": "nvml-verified"
+      },
+      "gpu_temperature_celsius": {
+        "key": "<REDACTED>",
+        "state": "live",
+        "value": 33.0,
+        "unit": "celsius",
+        "sample_at": "2026-10-22T07:29:22.410Z",
+        "age_seconds": 0.000341,
+        "reason": null,
+        "source": "nvml-verified"
+      },
+      "gpu_power_watts": {
+        "key": "<REDACTED>",
+        "state": "live",
+        "value": 21.473,
+        "unit": "watts",
+        "sample_at": "2026-10-22T07:29:22.410Z",
+        "age_seconds": 0.000341,
+        "reason": null,
+        "source": "nvml-verified"
+      },
+      "strata_up": {
+        "key": "<REDACTED>",
+        "state": "live",
+        "value": 1.0,
+        "unit": "bool",
+        "sample_at": "2026-10-22T07:29:22.410Z",
+        "age_seconds": 0.000341,
+        "reason": null,
+        "source": "nvml-verified"
+      },
+      "gpu_memory_used_mib": {
+        "key": "<REDACTED>",
+        "state": "live",
+        "value": 41958.125,
+        "unit": "mib",
+        "sample_at": "2026-10-22T07:29:22.410Z",
+        "age_seconds": 0.000341,
+        "reason": null,
+        "source": "nvml-verified"
+      },
+      "gpu_memory_total_mib": {
+        "key": "<REDACTED>",
+        "state": "live",
+        "value": 49140.0,
+        "unit": "mib",
+        "sample_at": "2026-10-22T07:29:22.410Z",
+        "age_seconds": 0.000341,
+        "reason": null,
+        "source": "nvml-verified"
+      },
+      "gpu_memory_free_mib": {
+        "key": "<REDACTED>",
+        "state": "live",
+        "value": 6574.3125,
+        "unit": "mib",
+        "sample_at": "2026-10-22T07:29:22.410Z",
+        "age_seconds": 0.000341,
+        "reason": null,
+        "source": "nvml-verified"
+      },
+      "gpu_memory_reserved_mib": {
+        "key": "<REDACTED>",
+        "state": "live",
+        "value": 607.5625,
+        "unit": "mib",
+        "sample_at": "2026-10-22T07:29:22.410Z",
+        "age_seconds": 0.000341,
+        "reason": null,
+        "source": "nvml-verified"
+      }
+    },
+    "services": {
+      "prometheus": {
+        "key": "<REDACTED>",
+        "state": "live",
+        "up": true,
+        "reason": null
+      },
+      "gateway": {
+        "key": "<REDACTED>",
+        "state": "live",
+        "up": true,
+        "reason": null
+      },
+      "grafana": {
+        "key": "<REDACTED>",
+        "state": "live",
+        "up": true,
+        "reason": null
+      },
+      "evalscope": {
+        "key": "<REDACTED>",
+        "state": "live",
+        "up": true,
+        "reason": null
+      },
+      "strata": {
+        "key": "<REDACTED>",
+        "state": "live",
+        "up": true,
+        "reason": null
+      },
+      "strata_model": {
+        "key": "<REDACTED>",
+        "state": "live",
+        "up": true,
+        "reason": null
+      }
+    },
+    "schema_version": "portal-host-summary/1",
+    "route": "/api/infra/summary",
+    "runtime": {
+      "schema_version": "portal-runtime/1",
+      "source": "loopback-runtime-readonly",
+      "synthetic": false,
+      "readonly": true,
+      "state": "known",
+      "observed_at": "2026-10-22T07:29:22.439Z",
+      "engine": {
+        "name": "Strata",
+        "state": "healthy",
+        "checked_at": "2026-10-22T07:29:22.439Z",
+        "reason": null
+      },
+      "model": {
+        "id": "qwen3.8-flash-next-iq2_xs",
+        "vision": true,
+        "state": "loaded",
+        "checked_at": "2026-10-22T07:29:22.439Z",
+        "reason": null
+      },
+      "gateway": {
+        "state": "healthy",
+        "checked_at": "2026-10-22T07:29:22.439Z",
+        "reason": null
+      },
+      "route": {
+        "alias": "strata-vision",
+        "target_model": "qwen3.8-flash-next-iq2_xs",
+        "state": "not_applied",
+        "checked_at": "2026-10-22T07:29:22.439Z",
+        "reason": null
+      }
+    }
+  }
+}

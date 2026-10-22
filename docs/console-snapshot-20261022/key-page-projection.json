@@ -1,0 +1,33 @@
+{
+  "ok": true,
+  "data": {
+    "id": "msk_t63q3K1jwFQ",
+    "label": "对外 · 公网交付",
+    "key": "<REDACTED>",
+    "model": "qwen3.8-flash-next-iq2_xs",
+    "endpoint": "http://127.0.0.1:8080/v1/chat/completions",
+    "public_endpoint": "http://fj-nj-ser-1009.tail3d8b76.ts.net:8080/v1/chat/completions",
+    "concurrency": 2,
+    "engine": "strata (fjd 用户态服务)",
+    "created_at": "2026-10-22T14:50:32+08:00",
+    "note": "调用本机推理引擎用；不具备平台管理权限。",
+    "external_endpoint": "https://fj-nj-ser-1009.tail3d8b76.ts.net:8443/v1/chat/completions",
+    "lan_endpoint": "http://192.168.32.179:8081/v1/chat/completions",
+    "keys": [
+      {
+        "id": "msk_t63q3K1jwFQ",
+        "label": "对外 · 公网交付",
+        "key": "<REDACTED>",
+        "model": "qwen3.8-flash-next-iq2_xs",
+        "endpoint": "http://127.0.0.1:8080/v1/chat/completions",
+        "public_endpoint": "http://fj-nj-ser-1009.tail3d8b76.ts.net:8080/v1/chat/completions",
+        "concurrency": 2,
+        "engine": "strata (fjd 用户态服务)",
+        "created_at": "2026-10-22T14:50:32+08:00",
+        "note": "调用本机推理引擎用；不具备平台管理权限。",
+        "external_endpoint": "https://fj-nj-ser-1009.tail3d8b76.ts.net:8443/v1/chat/completions",
+        "lan_endpoint": "http://192.168.32.179:8081/v1/chat/completions"
+      }
+    ]
+  }
+}

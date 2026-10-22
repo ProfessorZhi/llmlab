@@ -1,0 +1,30 @@
+{
+  "data": {
+    "sources": [
+      {
+        "source": "evalscope",
+        "source_label": "EvalScope 报告",
+        "state": "unconfigured",
+        "synthetic": false,
+        "observed_at": null,
+        "stale": false,
+        "reason": "report_source_not_configured",
+        "visible_count": 0
+      },
+      {
+        "source": "legacy-benchmark",
+        "source_label": "历史 Benchmark 镜像",
+        "state": "unconfigured",
+        "synthetic": false,
+        "observed_at": null,
+        "stale": false,
+        "reason": "report_source_not_configured",
+        "visible_count": 0
+      }
+    ],
+    "configured": [
+      "evalscope",
+      "legacy-benchmark"
+    ]
+  }
+}

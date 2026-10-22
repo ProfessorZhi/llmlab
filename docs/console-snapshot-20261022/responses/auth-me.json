@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "data": {
+    "authenticated": true,
+    "user": {
+      "id": "account:0cc69724cf49ad17b9ab5ef748a88f7a",
+      "display_name": "vince",
+      "role": "member",
+      "auth_source": "platform",
+      "is_platform_admin": false,
+      "username": "vince",
+      "linux_user": "vince",
+      "must_change_password": false
+    },
+    "projects": [],
+    "session_expires_at": 1792697362.2367432
+  }
+}

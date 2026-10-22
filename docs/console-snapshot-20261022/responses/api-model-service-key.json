@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "bff.access_denied",
+    "message": "a platform administrator is required"
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "ok": true,
+  "data": {
+    "tokens": [
+      {
+        "token_id": "mLMet9ciF5Nsot0K",
+        "principal": "account:0cc69724cf49ad17b9ab5ef748a88f7a",
+        "scopes": [
+          "registry:endpoint:invoke",
+          "registry:endpoint:share",
+          "registry:read",
+          "registry:write"
+        ],
+        "roles": [
+          "member"
+        ],
+        "label": "llmlab-model-service-management-20261022",
+        "created_at": 1792634579.6634786,
+        "expires_at": 1795226579.6634786,
+        "revoked_at": null,
+        "rotated_at": null,
+        "rotation_of": null,
+        "last_used_at": 1792634942.44343,
+        "revoked": false
+      },
+      {
+        "token_id": "XPYHjSL33U5fzBfH",
+        "principal": "account:0cc69724cf49ad17b9ab5ef748a88f7a",
+        "scopes": [
+          "registry:endpoint:invoke",
+          "registry:endpoint:share",
+          "registry:read",
+          "registry:write"
+        ],
+        "roles": [
+          "member"
+        ],
+        "label": "agent-cli-vince",
+        "created_at": 1792600302.1190135,
+        "expires_at": 1795192302.1190135,
+        "revoked_at": null,
+        "rotated_at": null,
+        "rotation_of": null,
+        "last_used_at": 1792641107.6089177,
+        "revoked": false
+      }
+    ]
+  }
+}

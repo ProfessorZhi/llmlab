@@ -1,0 +1,67 @@
+{
+  "schema_version": "registry/1",
+  "mode": "live",
+  "source": "registry_store",
+  "synthetic": false,
+  "data": {
+    "configured": true,
+    "engines": [
+      {
+        "kind": "engine",
+        "port": 8081,
+        "target_url": "http://127.0.0.1:8081",
+        "run_as_uid": 1000,
+        "run_as_user": "fjd",
+        "openai_compatible": false,
+        "models": [],
+        "framework": null,
+        "registered": false,
+        "registered_by_me": false,
+        "suggested_name": null
+      },
+      {
+        "kind": "engine",
+        "port": 9000,
+        "target_url": "http://127.0.0.1:9000",
+        "run_as_uid": 1005,
+        "run_as_user": "llmlab",
+        "openai_compatible": false,
+        "models": [],
+        "framework": null,
+        "registered": false,
+        "registered_by_me": false,
+        "suggested_name": null
+      }
+    ],
+    "models": [],
+    "model_roots": [],
+    "allowed_ports": [
+      8000,
+      8001,
+      8081,
+      9000,
+      9001
+    ],
+    "problems": []
+  },
+  "scope": {
+    "principal": "account:0cc69724cf49ad17b9ab5ef748a88f7a",
+    "uid": -1,
+    "scopes": [
+      "registry:endpoint:invoke",
+      "registry:endpoint:share",
+      "registry:read",
+      "registry:write"
+    ],
+    "roles": [
+      "member"
+    ],
+    "is_admin_read": false,
+    "is_admin_manage": false,
+    "elevated_read": false
+  },
+  "notes": [
+    "候选只是清单：登记走与手动登记相同的接口与校验。"
+  ],
+  "display_hints": []
+}

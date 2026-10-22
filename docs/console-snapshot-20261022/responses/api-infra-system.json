@@ -1,0 +1,302 @@
+{
+  "data": {
+    "schema": "host-system/1",
+    "source": "proc-verified",
+    "synthetic": false,
+    "readonly": true,
+    "observed_at": "2026-10-22T07:29:23.010Z",
+    "window_seconds": 0.52,
+    "cpu": {
+      "cores": 20,
+      "utilization_ratio": 0.0077,
+      "iowait_ratio": 0.0,
+      "load1": 0.25,
+      "load5": 0.44,
+      "load15": 0.74
+    },
+    "memory": {
+      "total_mib": 31287.3,
+      "available_mib": 14887.0,
+      "used_mib": 16400.4,
+      "used_ratio": 0.5242,
+      "swap_total_mib": 8192.0,
+      "swap_used_mib": 8191.4,
+      "swap_used_ratio": 0.9999
+    },
+    "disk": {
+      "devices": [
+        {
+          "name": "nvme0n1",
+          "read_bytes_per_s": 0,
+          "write_bytes_per_s": 7882,
+          "busy_ratio": 0.0
+        },
+        {
+          "name": "sda",
+          "read_bytes_per_s": 0,
+          "write_bytes_per_s": 0,
+          "busy_ratio": 0.0
+        },
+        {
+          "name": "sdb",
+          "read_bytes_per_s": 0,
+          "write_bytes_per_s": 0,
+          "busy_ratio": 0.0
+        }
+      ],
+      "read_bytes_per_s": 0,
+      "write_bytes_per_s": 7882,
+      "busy_ratio_sum": 0.0,
+      "usage": [
+        {
+          "mount": "/data",
+          "device": "/dev/mapper/vg--data-lv--data",
+          "fstype": "xfs",
+          "total_bytes": 1999429423104,
+          "used_bytes": 38318010368,
+          "free_bytes": 1961111412736,
+          "used_ratio": 0.0192
+        },
+        {
+          "mount": "/",
+          "device": "/dev/nvme0n1p2",
+          "fstype": "ext4",
+          "total_bytes": 501809635328,
+          "used_bytes": 314217705472,
+          "free_bytes": 162026127360,
+          "used_ratio": 0.6262
+        },
+        {
+          "mount": "/boot/efi",
+          "device": "/dev/nvme0n1p1",
+          "fstype": "vfat",
+          "total_bytes": 1124999168,
+          "used_bytes": 6623232,
+          "free_bytes": 1118375936,
+          "used_ratio": 0.0059
+        }
+      ]
+    },
+    "thermal": {
+      "cpu_c": 30.0,
+      "nvme_c": 14.8,
+      "fans_rpm": [
+        1012,
+        698,
+        1314,
+        1723
+      ],
+      "sensors": [
+        {
+          "chip": "nvme",
+          "max_c": 14.8
+        },
+        {
+          "chip": "dell_smm",
+          "max_c": 31.0
+        },
+        {
+          "chip": "coretemp",
+          "max_c": 30.0
+        }
+      ]
+    },
+    "connections": {
+      "listening": 35,
+      "established": 25,
+      "time_wait": 23,
+      "total": 83
+    },
+    "engine": {
+      "reachable": true,
+      "source": "strata-exporter",
+      "info": {
+        "gpu_name": "NVIDIA RTX A6000",
+        "cpu_name": "Intel(R) Core(TM) i9-10900X CPU @ 3.70GHz",
+        "gpu_count": "1",
+        "cores": "10",
+        "threads": "20"
+      },
+      "values": {
+        "cache_last_prompt_tokens": 53.0,
+        "cache_last_reused_tokens": 0.0,
+        "gpu_power_watts": 21.473,
+        "gpu_temperature_celsius": 33.0,
+        "gpu_utilization_ratio": 0.0,
+        "prefill_tokens_per_second_mean": 0.0,
+        "tokens_per_second": 0.0,
+        "tokens_per_second_mean": 0.0,
+        "requests_kept": 2.0,
+        "decode_seconds_total": 0.5186000000000001,
+        "speculative_drafts_accepted_total": 42.0,
+        "speculative_drafts_offered_total": 62.0,
+        "output_tokens_total": 69.0,
+        "prompt_seconds_total": 0.8874000000000001,
+        "prompt_tokens_total": 111.0,
+        "requests_total": 2.0,
+        "cached_prompt_tokens_total": 0.0
+      }
+    },
+    "network": {
+      "interfaces": [
+        {
+          "name": "eno1",
+          "rx_bytes_per_s": 3953,
+          "tx_bytes_per_s": 113572
+        }
+      ],
+      "rx_bytes_per_s": 3953,
+      "tx_bytes_per_s": 113572
+    },
+    "per_user": [
+      {
+        "uid": 1000,
+        "user": "fjd",
+        "processes": 115,
+        "memory_mib": 9447.1,
+        "cpu_ratio": 0.1155,
+        "vram_mib": 41912
+      },
+      {
+        "uid": 1004,
+        "user": "kaidong",
+        "processes": 40,
+        "memory_mib": 1265.7,
+        "cpu_ratio": 0.0192,
+        "vram_mib": null
+      },
+      {
+        "uid": 0,
+        "user": "root",
+        "processes": 309,
+        "memory_mib": 227.6,
+        "cpu_ratio": 0.0577,
+        "vram_mib": null
+      },
+      {
+        "uid": 1005,
+        "user": "llmlab",
+        "processes": 7,
+        "memory_mib": 221.4,
+        "cpu_ratio": 0.0,
+        "vram_mib": null
+      },
+      {
+        "uid": 1002,
+        "user": "vince",
+        "processes": 15,
+        "memory_mib": 25.1,
+        "cpu_ratio": 0.0,
+        "vram_mib": null
+      },
+      {
+        "uid": 979,
+        "user": "polkitd",
+        "processes": 1,
+        "memory_mib": 9.7,
+        "cpu_ratio": 0.0,
+        "vram_mib": null
+      },
+      {
+        "uid": 110,
+        "user": "cups-browsed",
+        "processes": 1,
+        "memory_mib": 8.7,
+        "cpu_ratio": 0.0,
+        "vram_mib": null
+      },
+      {
+        "uid": 995,
+        "user": "messagebus",
+        "processes": 1,
+        "memory_mib": 5.4,
+        "cpu_ratio": 0.0,
+        "vram_mib": null
+      },
+      {
+        "uid": 989,
+        "user": "systemd-resolve",
+        "processes": 1,
+        "memory_mib": 4.2,
+        "cpu_ratio": 0.0,
+        "vram_mib": null
+      },
+      {
+        "uid": 100,
+        "user": "syslog",
+        "processes": 1,
+        "memory_mib": 2.9,
+        "cpu_ratio": 0.0,
+        "vram_mib": null
+      },
+      {
+        "uid": 101,
+        "user": "uuidd",
+        "processes": 1,
+        "memory_mib": 2.6,
+        "cpu_ratio": 0.0,
+        "vram_mib": null
+      },
+      {
+        "uid": 986,
+        "user": "systemd-oom",
+        "processes": 1,
+        "memory_mib": 2.4,
+        "cpu_ratio": 0.0,
+        "vram_mib": null
+      },
+      {
+        "uid": 988,
+        "user": "_chrony",
+        "processes": 2,
+        "memory_mib": 2.0,
+        "cpu_ratio": 0.0,
+        "vram_mib": null
+      },
+      {
+        "uid": 978,
+        "user": "rtkit",
+        "processes": 1,
+        "memory_mib": 2.0,
+        "cpu_ratio": 0.0,
+        "vram_mib": null
+      },
+      {
+        "uid": 103,
+        "user": "avahi",
+        "processes": 2,
+        "memory_mib": 1.8,
+        "cpu_ratio": 0.0,
+        "vram_mib": null
+      },
+      {
+        "uid": 112,
+        "user": "nvidia-persistenced",
+        "processes": 1,
+        "memory_mib": 0.8,
+        "cpu_ratio": 0.0,
+        "vram_mib": null
+      },
+      {
+        "uid": 977,
+        "user": "colord",
+        "processes": 1,
+        "memory_mib": 0.8,
+        "cpu_ratio": 0.0,
+        "vram_mib": null
+      }
+    ],
+    "gpu_processes": [
+      {
+        "pid": 3410146,
+        "used_mib": 41912,
+        "uid": 1000,
+        "user": "fjd",
+        "unit": "strata.service"
+      }
+    ],
+    "notes": [
+      "per-user 磁盘读写不可得：跨用户读 /proc/<pid>/io 需要 root。"
+    ]
+  }
+}
