@@ -6,35 +6,35 @@
     "synthetic": false,
     "readonly": true,
     "version": 1,
-    "observed_at": "2026-10-22T07:29:22.410Z",
+    "observed_at": "2026-10-22T08:29:01.693Z",
     "metrics": {
       "gpu_utilization_ratio": {
         "key": "<REDACTED>",
         "state": "live",
         "value": 0.0,
         "unit": "ratio",
-        "sample_at": "2026-10-22T07:29:22.410Z",
-        "age_seconds": 0.000341,
+        "sample_at": "2026-10-22T08:29:01.693Z",
+        "age_seconds": 0.000191,
         "reason": null,
         "source": "nvml-verified"
       },
       "gpu_temperature_celsius": {
         "key": "<REDACTED>",
         "state": "live",
-        "value": 33.0,
+        "value": 34.0,
         "unit": "celsius",
-        "sample_at": "2026-10-22T07:29:22.410Z",
-        "age_seconds": 0.000341,
+        "sample_at": "2026-10-22T08:29:01.693Z",
+        "age_seconds": 0.000191,
         "reason": null,
         "source": "nvml-verified"
       },
       "gpu_power_watts": {
         "key": "<REDACTED>",
         "state": "live",
-        "value": 21.473,
+        "value": 21.547,
         "unit": "watts",
-        "sample_at": "2026-10-22T07:29:22.410Z",
-        "age_seconds": 0.000341,
+        "sample_at": "2026-10-22T08:29:01.693Z",
+        "age_seconds": 0.000191,
         "reason": null,
         "source": "nvml-verified"
       },
@@ -43,8 +43,8 @@
         "state": "live",
         "value": 1.0,
         "unit": "bool",
-        "sample_at": "2026-10-22T07:29:22.410Z",
-        "age_seconds": 0.000341,
+        "sample_at": "2026-10-22T08:29:01.693Z",
+        "age_seconds": 0.000191,
         "reason": null,
         "source": "nvml-verified"
       },
@@ -53,8 +53,8 @@
         "state": "live",
         "value": 41958.125,
         "unit": "mib",
-        "sample_at": "2026-10-22T07:29:22.410Z",
-        "age_seconds": 0.000341,
+        "sample_at": "2026-10-22T08:29:01.693Z",
+        "age_seconds": 0.000191,
         "reason": null,
         "source": "nvml-verified"
       },
@@ -63,8 +63,8 @@
         "state": "live",
         "value": 49140.0,
         "unit": "mib",
-        "sample_at": "2026-10-22T07:29:22.410Z",
-        "age_seconds": 0.000341,
+        "sample_at": "2026-10-22T08:29:01.693Z",
+        "age_seconds": 0.000191,
         "reason": null,
         "source": "nvml-verified"
       },
@@ -73,8 +73,8 @@
         "state": "live",
         "value": 6574.3125,
         "unit": "mib",
-        "sample_at": "2026-10-22T07:29:22.410Z",
-        "age_seconds": 0.000341,
+        "sample_at": "2026-10-22T08:29:01.693Z",
+        "age_seconds": 0.000191,
         "reason": null,
         "source": "nvml-verified"
       },
@@ -83,8 +83,8 @@
         "state": "live",
         "value": 607.5625,
         "unit": "mib",
-        "sample_at": "2026-10-22T07:29:22.410Z",
-        "age_seconds": 0.000341,
+        "sample_at": "2026-10-22T08:29:01.693Z",
+        "age_seconds": 0.000191,
         "reason": null,
         "source": "nvml-verified"
       }
@@ -135,30 +135,30 @@
       "synthetic": false,
       "readonly": true,
       "state": "known",
-      "observed_at": "2026-10-22T07:29:22.439Z",
+      "observed_at": "2026-10-22T08:29:01.745Z",
       "engine": {
         "name": "Strata",
         "state": "healthy",
-        "checked_at": "2026-10-22T07:29:22.439Z",
+        "checked_at": "2026-10-22T08:29:01.745Z",
         "reason": null
       },
       "model": {
         "id": "qwen3.8-flash-next-iq2_xs",
         "vision": true,
         "state": "loaded",
-        "checked_at": "2026-10-22T07:29:22.439Z",
+        "checked_at": "2026-10-22T08:29:01.745Z",
         "reason": null
       },
       "gateway": {
         "state": "healthy",
-        "checked_at": "2026-10-22T07:29:22.439Z",
+        "checked_at": "2026-10-22T08:29:01.745Z",
         "reason": null
       },
       "route": {
         "alias": "strata-vision",
         "target_model": "qwen3.8-flash-next-iq2_xs",
         "state": "not_applied",
-        "checked_at": "2026-10-22T07:29:22.439Z",
+        "checked_at": "2026-10-22T08:29:01.745Z",
         "reason": null
       }
     }

@@ -1,5 +1,5 @@
 {
-  "count": 29,
+  "count": 30,
   "routes": [
     {
       "name": "ops.read",
@@ -180,6 +180,21 @@
       "handler": "_system_resources",
       "scope": "observability:host:read",
       "note": "BFF 直读 /proc 的整机读数（CPU/内存/交换/磁盘/网络/按用户）；未装配时 503。"
+    },
+    {
+      "name": "engine.live",
+      "methods": [
+        "GET"
+      ],
+      "path": "/api/v2/engine/live",
+      "auth": "session",
+      "kind": "read",
+      "csrf": false,
+      "source": "engine",
+      "owner": "Data#47",
+      "handler": "_engine_live",
+      "scope": "observability:host:read",
+      "note": "BFF 代取引擎 /metrics 的窄投影（槽位/排队/吞吐）。引擎凭据只在服务端，响应体里没有 key；读不到时是 200 + reachable:false，不是 503。"
     },
     {
       "name": "portal.model_service_key",

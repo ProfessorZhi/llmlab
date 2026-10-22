@@ -1,7 +1,7 @@
 {
   "data": {
     "schema_version": "portal-capabilities/1",
-    "observed_at": "2026-10-22T07:29:23Z",
+    "observed_at": "2026-10-22T08:29:03Z",
     "scope": {
       "subject": "account:0cc69724cf49ad17b9ab5ef748a88f7a",
       "scopes": [
@@ -23,8 +23,8 @@
         "state": "ready",
         "reason": null,
         "attached": true,
-        "sample_at": "2026-10-22T07:29:23Z",
-        "observed_at": "2026-10-22T07:29:23Z",
+        "sample_at": "2026-10-22T08:29:03Z",
+        "observed_at": "2026-10-22T08:29:03Z",
         "age_seconds": 0.0,
         "ttl_seconds": null
       },
@@ -36,8 +36,8 @@
         "state": "ready",
         "reason": null,
         "attached": true,
-        "sample_at": "2026-10-22T07:29:23Z",
-        "observed_at": "2026-10-22T07:29:23Z",
+        "sample_at": "2026-10-22T08:29:03Z",
+        "observed_at": "2026-10-22T08:29:03Z",
         "age_seconds": 0.0,
         "ttl_seconds": null
       },
@@ -49,9 +49,9 @@
         "state": "ready",
         "reason": null,
         "attached": true,
-        "sample_at": "2026-10-22T07:29:23Z",
-        "observed_at": "2026-10-22T07:29:23Z",
-        "age_seconds": 0.000703,
+        "sample_at": "2026-10-22T08:29:03Z",
+        "observed_at": "2026-10-22T08:29:03Z",
+        "age_seconds": 0.000367,
         "ttl_seconds": 90
       },
       {
@@ -75,8 +75,8 @@
         "state": "ready",
         "reason": null,
         "attached": true,
-        "sample_at": "2026-10-22T07:29:23Z",
-        "observed_at": "2026-10-22T07:29:23Z",
+        "sample_at": "2026-10-22T08:29:03Z",
+        "observed_at": "2026-10-22T08:29:03Z",
         "age_seconds": 0.0,
         "ttl_seconds": null
       }

@@ -2,7 +2,7 @@
 
 这是一份**真实响应**的存档，给看不到那台机器的人改 `web/console/` 前端用。
 
-抓取时间：2026-10-22 15:2x（东八区），主机 Dell 5820（LAN `192.168.32.179`，
+抓取时间：2026-10-22 16:29（东八区）重抓，初版 15:2x；主机 Dell 5820（LAN `192.168.32.179`，
 tailnet `fj-nj-ser-1009`），以平台账户 `vince` 登录后逐条 GET。全部经过脱敏
 （`key` / `token` / `password` 字段整棵替换成 `<REDACTED>`，正文里残留的 `sk-*` 也抹掉）。
 
@@ -30,10 +30,15 @@ tailnet `fj-nj-ser-1009`），以平台账户 `vince` 登录后逐条 GET。全�
   网关    127.0.0.1:8200   老的 LiteLLM 式网关（写 usage.jsonl，**没有 Web UI**）
 ```
 
+**唯一的例外**：`GET /api/v2/engine/live` 是 BFF **用服务端凭据代取** Strata
+`:8080/metrics`（key 取自 `~/.config/strata/api-key.env` 的第一条，那是引擎本体那把，
+不是发给使用者的 `sk-qwen-*`），投影成 `engine-live/1` 后下发。浏览器全程不接触那把
+key，响应里也没有它。所以「引擎实时负载」不需要人去引擎控制台填 API key。
+
 **前端没有构建步骤。** `web/console/js/*.js` 是原生 ES 模块，改文件即生效，
 8444 直接读仓库工作树。所以：不要在浏览器里改、不要引入 bundler。
 
-跑测试：`npm test`（node:test，现为 598 项）。契约相关用例在
+跑测试：`npm test`（node:test，现为 603 项）。契约相关用例在
 `tests/web-features/*.test.js`，它们逐字钉住很多文案与形状。
 
 ---
@@ -64,9 +69,9 @@ tailnet `fj-nj-ser-1009`），以平台账户 `vince` 登录后逐条 GET。全�
 | 页面 | 路由 | 读的接口 | 备注 |
 |---|---|---|---|
 | 概览 | `#/overview` | `/api/v2/ops`、`/api/infra/summary`、`/api/atlas/calls` | calls 当前 503 |
-| 资源监控 | `#/usage` | `/api/v2/ops`、`/api/infra/summary`、`/api/infra/system` | |
+| 资源监控 | `#/usage` | `/api/v2/ops`、`/api/infra/summary`、`/api/infra/system` | 「按用户」表每行带 `account: human|system`，前端默认折叠系统服务账号（见 §5.4） |
 | 模型库 | `#/models` | `/api/v2/ops`（其中的 `registry.models`）、`/api/infra/summary` | `GET /api/v2/registry/models` 是 **405**，它只支持 POST 登记 |
-| 推理服务 | `#/services` | `/api/v2/ops`、`/api/infra/summary`、`/api/v2/registry/discovery` | 同上，`/api/v2/registry/engines` 也只有 POST |
+| 推理服务 | `#/services` | `/api/v2/ops`、`/api/infra/summary`、`/api/v2/registry/discovery`、`/api/v2/engine/live` | 同上，`/api/v2/registry/engines` 也只有 POST；引擎实时负载由 BFF 代取 |
 | 模型评测 | `#/evaluation` | `/api/v2/ops`（`data.ops.evaluation.runs`） | `/api/evaluation/reports*` 另有一套只读列表 |
 | 插件 | `#/plugins` | `/api/infra/summary`、`/api/portal/integrations` | |
 | API 密钥 | `#/keys` | `GET /api/model-service/key`（**单数**）、`POST /api/model-service/keys` 签发 | 仅平台管理员；成员 403 |
@@ -82,14 +87,15 @@ tailnet `fj-nj-ser-1009`），以平台账户 `vince` 登录后逐条 GET。全�
 
 | 文件 | 端点 | 状态 | 内容是否真实 |
 |---|---|---|---|
-| `_routes.json` | —（从 `backend/bff/route_map.py` 导出） | — | 29 条路由：方法、鉴权、CSRF、来源、归属域、scope |
+| `_routes.json` | —（从 `backend/bff/route_map.py` 导出） | — | 30 条路由：方法、鉴权、CSRF、来源、归属域、scope |
 | `_index.json` | — | — | 抓取清单：每条的状态码与字节数 |
 | `responses/auth-me.json` | `GET /auth/me` | 200 | 真实 |
 | `responses/auth-tokens.json` | `GET /auth/tokens` | 200 | 真实（令牌值已脱敏） |
 | `responses/auth-admin-users.json` | `GET /auth/admin/users` | **403** | 真实错误体；成员无权看全员名单 |
 | `responses/api-v2-ops.json` | `GET /api/v2/ops` | 200 | **真实**，控制台最重要的一份 |
 | `responses/api-infra-summary.json` | `GET /api/infra/summary` | 200 | 真实（本机探测） |
-| `responses/api-infra-system.json` | `GET /api/infra/system` | 200 | 真实（/proc、hwmon、statvfs） |
+| `responses/api-infra-system.json` | `GET /api/infra/system` | 200 | 真实（/proc、hwmon、statvfs）；`per_user[]` 每行带 `account` |
+| `responses/api-v2-engine-live.json` | `GET /api/v2/engine/live` | 200 | **真实**：BFF 代取 Strata `/metrics` 的窄投影（槽位、排队、吞吐、token 计数），不含提示词与密钥 |
 | `responses/api-model-service-key.json` | `GET /api/model-service/key` | **403** | 真实错误体 |
 | `key-page-projection.json` | 同上，**用服务层投影** | — | 真实数据、真实形状（`ModelServiceKeyStore.list()`，与路由同一条代码路径），密钥值已脱敏 |
 | `responses/api-atlas-calls.json` | `GET /api/atlas/calls` | **503** | 真实错误体：适配器没挂上 |
@@ -117,6 +123,12 @@ tailnet `fj-nj-ser-1009`），以平台账户 `vince` 登录后逐条 GET。全�
    每条都带 `value: null` + `state: "unknown"` + `reason: "no_sample"`。
 3. **权限只看服务端会话**。请求头里塞 UID/角色会被直接拒绝；前端能做的只是
    `ctx.isAdmin()` 决定画不画入口，真闸门在 BFF。
+4. **17 个账户不等于 17 个人**。`per_user[]` 每行带 `account: "human" | "system"`，
+   判据是 **UID**（`< 1000` 或 `65534` = 系统服务账号），不看用户名像不像人名。
+   快照里是 4 个人类账户（fjd / kaidong / llmlab / vince）+ 13 个系统服务账号
+   （root、polkitd、messagebus、avahi、_chrony…）。前端默认只列人类账户，系统账号
+   折成一句摘要按需展开 —— 数据完整，只是不让守护进程冒充使用者。
+   已知边界：`llmlab` 是平台自建的服务账号，但 uid ≥ 1000，因此被判为 human。
 
 ---
 

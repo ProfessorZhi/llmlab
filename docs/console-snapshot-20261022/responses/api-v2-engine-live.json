@@ -1,0 +1,85 @@
+{
+  "data": {
+    "schema_version": "engine-live/1",
+    "source": "strata-metrics-proxied",
+    "synthetic": false,
+    "readonly": true,
+    "observed_at": "2026-10-22T08:29:02.860384Z",
+    "reachable": true,
+    "reason": null,
+    "engine": {
+      "model": "qwen3.8-flash-next-iq2_xs",
+      "max_context": 32768,
+      "images": true,
+      "batch_slots": 4,
+      "version": "0.1.41",
+      "state": "idle",
+      "parallel": 4
+    },
+    "live": {
+      "state": "idle",
+      "running": 0,
+      "queued": 0,
+      "waiting": 0,
+      "slots": [
+        {
+          "index": 0,
+          "state": "idle",
+          "held_tokens": 0
+        },
+        {
+          "index": 1,
+          "state": "idle",
+          "held_tokens": 0
+        },
+        {
+          "index": 2,
+          "state": "idle",
+          "held_tokens": 0
+        },
+        {
+          "index": 3,
+          "state": "idle",
+          "held_tokens": 0
+        }
+      ]
+    },
+    "throughput": {
+      "tok_s": null,
+      "tok_s_mean": null,
+      "prefill_tok_s_mean": null
+    },
+    "totals": {
+      "since": "2026-10-22T07:12:33.717065Z",
+      "requests": 3,
+      "prompt_tokens": 164,
+      "output_tokens": 105
+    },
+    "recent": [
+      {
+        "at": "2026-10-22T08:25:36.032721Z",
+        "duration_s": 0.5,
+        "finish": "stop",
+        "prompt_tokens": 53,
+        "output_tokens": 36,
+        "decode_tok_s": 116.8
+      },
+      {
+        "at": "2026-10-22T07:16:22.512427Z",
+        "duration_s": 0.8,
+        "finish": "stop",
+        "prompt_tokens": 53,
+        "output_tokens": 36,
+        "decode_tok_s": 109.4
+      },
+      {
+        "at": "2026-10-22T07:12:59.333677Z",
+        "duration_s": 0.7,
+        "finish": "stop",
+        "prompt_tokens": 58,
+        "output_tokens": 33,
+        "decode_tok_s": 174.2
+      }
+    ]
+  }
+}

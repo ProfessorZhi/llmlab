@@ -37,7 +37,13 @@
       "name": "api-infra-system",
       "path": "/api/infra/system",
       "status": 200,
-      "bytes": 4215
+      "bytes": 4531
+    },
+    {
+      "name": "api-v2-engine-live",
+      "path": "/api/v2/engine/live",
+      "status": 200,
+      "bytes": 1143
     },
     {
       "name": "api-model-service-key",

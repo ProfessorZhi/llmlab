@@ -4,32 +4,32 @@
     "source": "proc-verified",
     "synthetic": false,
     "readonly": true,
-    "observed_at": "2026-10-22T07:29:23.010Z",
-    "window_seconds": 0.52,
+    "observed_at": "2026-10-22T08:29:02.349Z",
+    "window_seconds": 0.548,
     "cpu": {
       "cores": 20,
-      "utilization_ratio": 0.0077,
-      "iowait_ratio": 0.0,
-      "load1": 0.25,
-      "load5": 0.44,
-      "load15": 0.74
+      "utilization_ratio": 0.0082,
+      "iowait_ratio": 0.0009,
+      "load1": 0.72,
+      "load5": 0.72,
+      "load15": 0.79
     },
     "memory": {
       "total_mib": 31287.3,
-      "available_mib": 14887.0,
-      "used_mib": 16400.4,
-      "used_ratio": 0.5242,
+      "available_mib": 14194.8,
+      "used_mib": 17092.5,
+      "used_ratio": 0.5463,
       "swap_total_mib": 8192.0,
-      "swap_used_mib": 8191.4,
-      "swap_used_ratio": 0.9999
+      "swap_used_mib": 8183.0,
+      "swap_used_ratio": 0.9989
     },
     "disk": {
       "devices": [
         {
           "name": "nvme0n1",
           "read_bytes_per_s": 0,
-          "write_bytes_per_s": 7882,
-          "busy_ratio": 0.0
+          "write_bytes_per_s": 7471,
+          "busy_ratio": 0.0055
         },
         {
           "name": "sda",
@@ -45,7 +45,7 @@
         }
       ],
       "read_bytes_per_s": 0,
-      "write_bytes_per_s": 7882,
+      "write_bytes_per_s": 7471,
       "busy_ratio_sum": 0.0,
       "usage": [
         {
@@ -62,9 +62,9 @@
           "device": "/dev/nvme0n1p2",
           "fstype": "ext4",
           "total_bytes": 501809635328,
-          "used_bytes": 314217705472,
-          "free_bytes": 162026127360,
-          "used_ratio": 0.6262
+          "used_bytes": 315996368896,
+          "free_bytes": 160247463936,
+          "used_ratio": 0.6297
         },
         {
           "mount": "/boot/efi",
@@ -78,34 +78,34 @@
       ]
     },
     "thermal": {
-      "cpu_c": 30.0,
-      "nvme_c": 14.8,
+      "cpu_c": 32.0,
+      "nvme_c": 21.9,
       "fans_rpm": [
-        1012,
-        698,
-        1314,
-        1723
+        997,
+        695,
+        1318,
+        1708
       ],
       "sensors": [
         {
           "chip": "nvme",
-          "max_c": 14.8
+          "max_c": 21.9
         },
         {
           "chip": "dell_smm",
-          "max_c": 31.0
+          "max_c": 32.0
         },
         {
           "chip": "coretemp",
-          "max_c": 30.0
+          "max_c": 32.0
         }
       ]
     },
     "connections": {
       "listening": 35,
-      "established": 25,
+      "established": 33,
       "time_wait": 23,
-      "total": 83
+      "total": 91
     },
     "engine": {
       "reachable": true,
@@ -119,71 +119,76 @@
       },
       "values": {
         "cache_last_prompt_tokens": 53.0,
-        "cache_last_reused_tokens": 0.0,
-        "gpu_power_watts": 21.473,
-        "gpu_temperature_celsius": 33.0,
+        "cache_last_reused_tokens": 48.0,
+        "gpu_power_watts": 21.547,
+        "gpu_temperature_celsius": 34.0,
         "gpu_utilization_ratio": 0.0,
         "prefill_tokens_per_second_mean": 0.0,
         "tokens_per_second": 0.0,
         "tokens_per_second_mean": 0.0,
-        "requests_kept": 2.0,
-        "decode_seconds_total": 0.5186000000000001,
-        "speculative_drafts_accepted_total": 42.0,
-        "speculative_drafts_offered_total": 62.0,
-        "output_tokens_total": 69.0,
-        "prompt_seconds_total": 0.8874000000000001,
-        "prompt_tokens_total": 111.0,
-        "requests_total": 2.0,
-        "cached_prompt_tokens_total": 0.0
+        "requests_kept": 3.0,
+        "decode_seconds_total": 0.8268,
+        "speculative_drafts_accepted_total": 60.0,
+        "speculative_drafts_offered_total": 97.0,
+        "output_tokens_total": 105.0,
+        "prompt_seconds_total": 1.0452000000000001,
+        "prompt_tokens_total": 164.0,
+        "requests_total": 3.0,
+        "cached_prompt_tokens_total": 48.0
       }
     },
     "network": {
       "interfaces": [
         {
           "name": "eno1",
-          "rx_bytes_per_s": 3953,
-          "tx_bytes_per_s": 113572
+          "rx_bytes_per_s": 8504,
+          "tx_bytes_per_s": 195009
         }
       ],
-      "rx_bytes_per_s": 3953,
-      "tx_bytes_per_s": 113572
+      "rx_bytes_per_s": 8504,
+      "tx_bytes_per_s": 195009
     },
     "per_user": [
       {
         "uid": 1000,
         "user": "fjd",
-        "processes": 115,
-        "memory_mib": 9447.1,
-        "cpu_ratio": 0.1155,
+        "account": "human",
+        "processes": 118,
+        "memory_mib": 9877.5,
+        "cpu_ratio": 0.1094,
         "vram_mib": 41912
       },
       {
         "uid": 1004,
         "user": "kaidong",
+        "account": "human",
         "processes": 40,
-        "memory_mib": 1265.7,
-        "cpu_ratio": 0.0192,
-        "vram_mib": null
-      },
-      {
-        "uid": 0,
-        "user": "root",
-        "processes": 309,
-        "memory_mib": 227.6,
-        "cpu_ratio": 0.0577,
+        "memory_mib": 1276.2,
+        "cpu_ratio": 0.0365,
         "vram_mib": null
       },
       {
         "uid": 1005,
         "user": "llmlab",
+        "account": "human",
         "processes": 7,
-        "memory_mib": 221.4,
+        "memory_mib": 286.5,
         "cpu_ratio": 0.0,
+        "vram_mib": null
+      },
+      {
+        "uid": 0,
+        "user": "root",
+        "account": "system",
+        "processes": 323,
+        "memory_mib": 236.4,
+        "cpu_ratio": 0.0182,
         "vram_mib": null
       },
       {
         "uid": 1002,
         "user": "vince",
+        "account": "human",
         "processes": 15,
         "memory_mib": 25.1,
         "cpu_ratio": 0.0,
@@ -192,6 +197,7 @@
       {
         "uid": 979,
         "user": "polkitd",
+        "account": "system",
         "processes": 1,
         "memory_mib": 9.7,
         "cpu_ratio": 0.0,
@@ -200,6 +206,7 @@
       {
         "uid": 110,
         "user": "cups-browsed",
+        "account": "system",
         "processes": 1,
         "memory_mib": 8.7,
         "cpu_ratio": 0.0,
@@ -208,6 +215,7 @@
       {
         "uid": 995,
         "user": "messagebus",
+        "account": "system",
         "processes": 1,
         "memory_mib": 5.4,
         "cpu_ratio": 0.0,
@@ -216,6 +224,7 @@
       {
         "uid": 989,
         "user": "systemd-resolve",
+        "account": "system",
         "processes": 1,
         "memory_mib": 4.2,
         "cpu_ratio": 0.0,
@@ -224,6 +233,7 @@
       {
         "uid": 100,
         "user": "syslog",
+        "account": "system",
         "processes": 1,
         "memory_mib": 2.9,
         "cpu_ratio": 0.0,
@@ -232,6 +242,7 @@
       {
         "uid": 101,
         "user": "uuidd",
+        "account": "system",
         "processes": 1,
         "memory_mib": 2.6,
         "cpu_ratio": 0.0,
@@ -240,6 +251,7 @@
       {
         "uid": 986,
         "user": "systemd-oom",
+        "account": "system",
         "processes": 1,
         "memory_mib": 2.4,
         "cpu_ratio": 0.0,
@@ -248,6 +260,7 @@
       {
         "uid": 988,
         "user": "_chrony",
+        "account": "system",
         "processes": 2,
         "memory_mib": 2.0,
         "cpu_ratio": 0.0,
@@ -256,6 +269,7 @@
       {
         "uid": 978,
         "user": "rtkit",
+        "account": "system",
         "processes": 1,
         "memory_mib": 2.0,
         "cpu_ratio": 0.0,
@@ -264,6 +278,7 @@
       {
         "uid": 103,
         "user": "avahi",
+        "account": "system",
         "processes": 2,
         "memory_mib": 1.8,
         "cpu_ratio": 0.0,
@@ -272,6 +287,7 @@
       {
         "uid": 112,
         "user": "nvidia-persistenced",
+        "account": "system",
         "processes": 1,
         "memory_mib": 0.8,
         "cpu_ratio": 0.0,
@@ -280,6 +296,7 @@
       {
         "uid": 977,
         "user": "colord",
+        "account": "system",
         "processes": 1,
         "memory_mib": 0.8,
         "cpu_ratio": 0.0,
