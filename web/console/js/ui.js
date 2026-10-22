@@ -1,6 +1,6 @@
 /*! web/console/js/ui.js — 控制台的通用组件。 */
 import { h, s } from './dom.js';
-import { sunburstLayout, dotGridLayout, barsLayout, fmtInt, fmtGiB } from './charts.js';
+import { sunburstLayout, dotGridLayout, barsLayout, arcPath, fmtInt, fmtGiB } from './charts.js';
 import { STATE_TEXT } from './data.js';
 import { engineLabel } from './viewmodel.js';
 
@@ -182,6 +182,14 @@ const ICONS = {
   evaluation: () => [s('path', { d: 'M3 7.3 5.8 10 11 4', fill: 'none', stroke: '#fff', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })],
   models: () => [s('ellipse', { cx: 7, cy: 3.6, rx: 4.6, ry: 1.8, fill: 'none', stroke: '#fff', 'stroke-width': 1.3 }), s('path', { d: 'M2.4 3.6V10.4C2.4 11.4 4.5 12.2 7 12.2S11.6 11.4 11.6 10.4V3.6M2.4 7C2.4 8 4.5 8.8 7 8.8S11.6 8 11.6 7', fill: 'none', stroke: '#fff', 'stroke-width': 1.3 })],
   memory: () => [s('rect', { x: 2.5, y: 3.5, width: 9, height: 7, rx: 1.2, fill: 'none', stroke: '#fff', 'stroke-width': 1.3 }), s('path', { d: 'M4.5 1.8V3.5M7 1.8V3.5M9.5 1.8V3.5M4.5 10.5V12.2M7 10.5V12.2M9.5 10.5V12.2', stroke: '#fff', 'stroke-width': 1.2, 'stroke-linecap': 'round' })],
+  gateway: () => [s('path', { d: 'M2 4.5H9.5M7.5 2.5 9.8 4.5 7.5 6.5M12 9.5H4.5M6.5 7.5 4.2 9.5 6.5 11.5', fill: 'none', stroke: '#fff', 'stroke-width': 1.4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })],
+  route: () => [s('circle', { cx: 3.5, cy: 3.5, r: 1.6, fill: 'none', stroke: '#fff', 'stroke-width': 1.3 }), s('circle', { cx: 10.5, cy: 10.5, r: 1.6, fill: 'none', stroke: '#fff', 'stroke-width': 1.3 }), s('path', { d: 'M5 3.5H8.5A2 2 0 0 1 8.5 7.5H5.5A2 2 0 0 0 5.5 11.5H9', fill: 'none', stroke: '#fff', 'stroke-width': 1.3, 'stroke-linecap': 'round' })],
+  chat: () => [s('path', { d: 'M2.5 3.5A1.5 1.5 0 0 1 4 2H10A1.5 1.5 0 0 1 11.5 3.5V8A1.5 1.5 0 0 1 10 9.5H6L3.5 11.8V9.5H4A1.5 1.5 0 0 1 2.5 8Z', fill: 'none', stroke: '#fff', 'stroke-width': 1.3, 'stroke-linejoin': 'round' })],
+  token: () => [s('circle', { cx: 7, cy: 7, r: 4.6, fill: 'none', stroke: '#fff', 'stroke-width': 1.3 }), s('path', { d: 'M5 7H9M7 5V9', stroke: '#fff', 'stroke-width': 1.3, 'stroke-linecap': 'round' })],
+  timer: () => [s('circle', { cx: 7, cy: 7.8, r: 4.4, fill: 'none', stroke: '#fff', 'stroke-width': 1.3 }), s('path', { d: 'M7 5.4V7.9L8.6 9M5.8 1.8H8.2', fill: 'none', stroke: '#fff', 'stroke-width': 1.3, 'stroke-linecap': 'round' })],
+  check: () => [s('path', { d: 'M3 7.3 5.8 10 11 4', fill: 'none', stroke: '#fff', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })],
+  cpu: () => [s('rect', { x: 3.5, y: 3.5, width: 7, height: 7, rx: 1.2, fill: 'none', stroke: '#fff', 'stroke-width': 1.3 }), s('path', { d: 'M5.5 1.8V3.5M8.5 1.8V3.5M5.5 10.5V12.2M8.5 10.5V12.2M1.8 5.5H3.5M1.8 8.5H3.5M10.5 5.5H12.2M10.5 8.5H12.2', stroke: '#fff', 'stroke-width': 1.2, 'stroke-linecap': 'round' })],
+  account: () => [s('circle', { cx: 7, cy: 5, r: 2.3, fill: 'none', stroke: '#fff', 'stroke-width': 1.3 }), s('path', { d: 'M2.8 12C3.4 9.7 5 8.7 7 8.7S10.6 9.7 11.2 12', fill: 'none', stroke: '#fff', 'stroke-width': 1.3, 'stroke-linecap': 'round' })],
   launch: () => [s('path', { d: 'M5.5 3H3V11H11V8.5M8 2.5H11.5V6M11.5 2.5 6.5 7.5', fill: 'none', stroke: '#fff', 'stroke-width': 1.4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })],
   users: () => [s('circle', { cx: 7, cy: 4.8, r: 2.4, fill: 'none', stroke: '#fff', 'stroke-width': 1.4 }), s('path', { d: 'M2.5 12.2C3.2 9.8 5 8.8 7 8.8S10.8 9.8 11.5 12.2', fill: 'none', stroke: '#fff', 'stroke-width': 1.4, 'stroke-linecap': 'round' })],
   extensions: () => [s('path', { d: 'M5 2V5M9 2V5M3.5 5H10.5V7.5A3.5 3.5 0 0 1 3.5 7.5Z M7 11V12.5', fill: 'none', stroke: '#fff', 'stroke-width': 1.4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })],
@@ -209,4 +217,92 @@ export function checkIcon(ok = true, size = 20) {
     s('circle', { cx: 10, cy: 10, r: 9, fill: ok ? 'var(--green)' : 'var(--red)' }),
     ok ? s('path', { d: 'M6 10.3 8.7 12.8 14 7.4', fill: 'none', stroke: '#FFFFFF', 'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })
       : s('path', { d: 'M7 7 13 13M13 7 7 13', stroke: '#FFFFFF', 'stroke-width': 1.8, 'stroke-linecap': 'round' }));
+}
+
+export function glyph(name) {
+  return s('svg', { viewBox: '0 0 14 14' }, (ICONS[name] ?? ICONS.overview)());
+}
+
+/** 指标卡（与概览同一套视觉）：``[{label, tint, glyph, value, unit, note}]``。 */
+export function metricCards(items) {
+  return h('section', { class: 'kpis', 'aria-label': '关键指标' }, items.map((it) => h('div', { class: 'kpi', style: { '--tint': it.tint } },
+    h('div', { class: 'kpi-label' }, h('span', { class: 'kpi-glyph', 'aria-hidden': 'true' }, glyph(it.glyph)), it.label),
+    h('div', { class: 'kpi-value' }, it.value ?? '—', it.unit ? h('small', {}, ` ${it.unit}`) : null),
+    h('div', { class: 'kpi-note' }, it.note ?? ' '))));
+}
+
+/** 滚动窗口的柱状图：``labels`` 是横轴刻度（左到右），峰值高亮。 */
+export function windowBars(points, { labels = [], height = 120, tint = 'var(--blue)', unit = '次' } = {}) {
+  const lay = barsLayout(points, { width: 600, height, gap: points.length > 24 ? 3 : 5 });
+  const peakVal = lay.peak >= 0 ? points[lay.peak] : null;
+  return h('div', {},
+    s('svg', { viewBox: `0 0 ${lay.width} ${lay.height}`, width: '100%', height: lay.height, preserveAspectRatio: 'none', role: 'img',
+      'aria-label': peakVal != null ? `峰值 ${fmtInt(peakVal)} ${unit}` : '暂无数据', style: { display: 'block' } },
+    lay.bars.map((b) => s('rect', { x: b.x, y: b.y, width: b.w, height: Math.max(b.h, 1.5), rx: 3, fill: b.peak ? tint : `color-mix(in srgb, ${tint} 30%, var(--card))` }))),
+    h('div', { class: 'axis', style: { 'margin-top': '6px' } }, labels.map((t) => h('span', {}, t))));
+}
+
+/**
+ * 环形图：``items`` = ``[{id, label, value, color, me?}]``。点图例或扇区聚焦；``me`` 的一块外扩并标「我」。
+ * ``rest`` 是不属于任何人的剩余（如「空闲」），灰色、不可聚焦。
+ */
+export function donutPanel(items, { title = '', fmt = fmtInt, rest = null, size = 220 } = {}) {
+  let focus = items.find((i) => i.me)?.id ?? null;
+  const holder = h('div', { class: 'donut-row' });
+  const all = [...items.filter((i) => i.value > 0), ...(rest && rest.value > 0 ? [{ ...rest, id: '__rest', color: 'var(--track)', rest: true }] : [])];
+  const total = all.reduce((t, i) => t + i.value, 0);
+  const draw = () => {
+    while (holder.firstChild) holder.firstChild.remove();
+    const c = size / 2; const r0 = size * 0.30; const r1 = size * 0.46;
+    let a = 0;
+    const arcs = all.map((it) => {
+      const a1 = a + (total ? it.value / total : 0) * Math.PI * 2;
+      const pop = it.id === focus && !it.rest ? size * 0.025 : 0;
+      const mid = (a + a1) / 2;
+      const d = arcPath(c + pop * Math.sin(mid), c - pop * Math.cos(mid), r0, r1 + (it.id === focus ? size * 0.015 : 0), a, a1, 0.008);
+      a = a1;
+      return s('path', { d, fill: it.color, opacity: focus && it.id !== focus && !it.rest ? 0.35 : 1, stroke: 'var(--card)', 'stroke-width': 1.5,
+        style: { cursor: it.rest ? 'default' : 'pointer', transition: 'opacity .2s' }, onclick: () => { if (!it.rest) { focus = focus === it.id ? null : it.id; draw(); } } });
+    });
+    const f = all.find((i) => i.id === focus);
+    const aria = `${title}：${all.map((i) => `${i.label} ${fmt(i.value)}`).join('，')}`;
+    holder.append(
+      s('svg', { viewBox: `0 0 ${size} ${size}`, width: size, height: size, role: 'img', 'aria-label': aria }, arcs,
+        s('text', { x: c, y: c - 6, 'text-anchor': 'middle', 'font-size': 12, fill: 'var(--secondary)' }, f ? f.label : title),
+        s('text', { x: c, y: c + 18, 'text-anchor': 'middle', 'font-size': 20, 'font-weight': 600, fill: 'var(--label)' }, f ? `${total ? Math.round(f.value / total * 100) : 0}%` : fmt(total))),
+      h('div', { class: 'legend', role: 'group', 'aria-label': `${title} 图例` }, all.map((it) => h(it.rest ? 'div' : 'button', {
+        type: it.rest ? null : 'button', class: `legend-item${it.rest ? ' static' : ''}${it.me ? ' me' : ''}`, 'aria-pressed': it.rest ? null : String(focus === it.id),
+        onclick: it.rest ? null : () => { focus = focus === it.id ? null : it.id; draw(); },
+      }, h('span', { class: 'swatch', style: { background: it.color, 'border-radius': '50%' } }),
+        h('span', { class: 'name' }, it.label, it.me ? h('span', { class: 'me-tag' }, '我') : null),
+        h('span', { class: 'share' }, total ? `${(it.value / total * 100).toFixed(1)}%` : '—'),
+        h('span', { class: 'val', style: { 'min-width': '64px', 'text-align': 'right' } }, fmt(it.value))))));
+  };
+  draw();
+  return holder;
+}
+
+/** 小号环形进度：``ratio`` 0–1，null 显示空环。 */
+export function ringGauge(ratio, { tint = 'var(--blue)', size = 56 } = {}) {
+  const c = size / 2; const r = size * 0.4;
+  const len = 2 * Math.PI * r;
+  const v = ratio == null ? 0 : Math.max(0, Math.min(1, ratio));
+  return s('svg', { viewBox: `0 0 ${size} ${size}`, width: size, height: size, role: 'img', 'aria-label': ratio == null ? '无读数' : `${Math.round(v * 100)}%` },
+    s('circle', { cx: c, cy: c, r, fill: 'none', stroke: 'var(--track)', 'stroke-width': size * 0.12 }),
+    s('circle', { cx: c, cy: c, r, fill: 'none', stroke: tint, 'stroke-width': size * 0.12, 'stroke-linecap': 'round',
+      'stroke-dasharray': `${(len * v).toFixed(2)} ${len.toFixed(2)}`, transform: `rotate(-90 ${c} ${c})`, style: { transition: 'stroke-dasharray .6s' } }),
+    s('text', { x: c, y: c + 4, 'text-anchor': 'middle', 'font-size': size * 0.22, 'font-weight': 600, fill: 'var(--label)' }, ratio == null ? '—' : `${Math.round(v * 100)}`));
+}
+
+/** 星期 × 小时热力图：``matrix[7][24]``（周一在上）。 */
+export function heatmap(matrix, { tint = 'var(--blue)' } = {}) {
+  const max = Math.max(1, ...matrix.flat());
+  const days = ['一', '二', '三', '四', '五', '六', '日'];
+  return h('div', {},
+    h('div', { style: { display: 'grid', 'grid-template-columns': '18px 1fr', gap: '6px', 'align-items': 'center' } },
+      matrix.map((row, d) => [h('span', { class: 'muted', style: { 'font-size': '11px' } }, days[d]),
+        h('div', { class: 'heat', style: { 'grid-template-columns': 'repeat(24, 1fr)' } }, row.map((v, hr) => h('div', {
+          class: 'cellh', title: `周${days[d]} ${String(hr).padStart(2, '0')}:00 · ${v} 次`,
+          style: v ? { background: `color-mix(in srgb, ${tint} ${Math.round(18 + (v / max) * 82)}%, var(--card))` } : null })))])),
+    h('div', { class: 'heat-axis', style: { 'margin-left': '24px' } }, ['00', '06', '12', '18', '24'].map((t) => h('span', {}, t))));
 }

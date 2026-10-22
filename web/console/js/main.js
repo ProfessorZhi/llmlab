@@ -1,9 +1,11 @@
 /*! web/console/js/main.js — 控制台入口：会话、边栏导航与路由。 */
-import { h, clear } from './dom.js';
+import { h, clear, put } from './dom.js';
 import { PATHS, loadMe, loadIntegrations, login, safeJumpUrl, send, rememberCsrf } from './data.js';
 import { DEMO_ME } from './demo.js';
 import { navIcon, brandMark, emptyState } from './ui.js';
 import * as pages from './pages.js';
+import * as gateway from './gateway.js';
+import { detail as serviceDetail } from './service.js';
 import { resolveDataMode, DATA_MODES } from '../../js/demo-mode.js';
 import { isQaBuild } from '../../js/build-profile.js';
 
@@ -19,15 +21,25 @@ const NAV = [
     { route: '#/evaluation', label: '模型评测', icon: 'evaluation', color: '#FF2D55', page: pages.evaluation },
     { route: '#/plugins', label: '插件', icon: 'extensions', color: '#636366', page: pages.extensions },
   ] },
-  { group: 'API 调用', items: [
-    { route: '#/keys', label: 'API 密钥', icon: 'keys', color: '#FF9500', page: pages.keys },
-    { route: '#/requests', label: '请求日志', icon: 'requests', color: '#34C759', page: pages.requests },
+  { group: '网关', items: [
+    { route: '#/gateway', label: '网关概览', icon: 'gateway', color: '#007AFF', page: gateway.overview },
+    { route: '#/gateway/models', label: '模型路由', icon: 'route', color: '#AF52DE', page: gateway.models },
+    { route: '#/gateway/keys', label: 'API 密钥', icon: 'keys', color: '#FF9500', page: gateway.keys },
+    { route: '#/gateway/logs', label: '调用日志', icon: 'requests', color: '#34C759', page: gateway.logs },
+    { route: '#/gateway/playground', label: '在线体验', icon: 'chat', color: '#FF2D55', page: gateway.playground },
   ] },
   { group: '管理', admin: true, items: [
     { route: '#/admin/users', label: '用户与权限', icon: 'users', color: '#8E8E93', page: pages.users },
   ] },
 ];
-const EXTRA_ROUTES = { '#/services/register': { parent: '#/services', page: pages.register, label: '登记推理服务' } };
+const EXTRA_ROUTES = {
+  '#/services/register': { parent: '#/services', page: pages.register, label: '登记推理服务' },
+  '#/gateway/logs/full': { parent: '#/gateway/logs', page: gateway.logsFull, label: '全量日志' },
+  '#/account': { parent: '#/account', page: pages.account, label: '我的账户' },
+  // 旧地址：API 密钥与请求日志已并入「网关」。
+  '#/keys': { redirect: '#/gateway/keys' },
+  '#/requests': { redirect: '#/gateway/logs' },
+};
 
 const ctx = { demo: DEMO, me: null, navigate: (r) => { location.hash = r; }, isAdmin: () => isAdmin(), invalidateLaunch: () => { launchLinks = null; }, rerender: () => render() };
 const root = document.getElementById('app');
@@ -49,7 +61,7 @@ function sidebar(active) {
     quickLaunch(),
     h('div', { class: 'sidebar-foot' },
       h('span', { class: 'avatar', 'aria-hidden': 'true' }, name.slice(0, 1)),
-      h('div', { class: 'who' }, h('div', { style: { 'font-weight': 500 } }, name),
+      h('div', { class: 'who' }, h('a', { href: '#/account', class: 'who-name', 'aria-current': active === '#/account' ? 'page' : null }, name),
         h('div', {}, [ctx.me?.username ?? ctx.me?.linux_user, isAdmin() ? '管理员' : '成员'].filter(Boolean).join(' · ')),
         h('button', { type: 'button', class: 'linkbtn', onclick: logout }, '退出登录'))));
 }
@@ -85,9 +97,15 @@ function quickLaunch() {
   return [toggle, list];
 }
 
-function findRoute(hash) {
+function findRoute(full) {
+  const hash = full.split('?')[0];
   for (const g of NAV) for (const it of g.items) if (it.route === hash) return { ...it, adminOnly: !!g.admin };
   if (EXTRA_ROUTES[hash]) return { route: hash, ...EXTRA_ROUTES[hash] };
+  const svc = /^#\/services\/([^/]+)$/.exec(hash);
+  if (svc) {
+    const id = decodeURIComponent(svc[1]);
+    return { route: hash, parent: '#/services', label: '推理服务', page: (c) => serviceDetail(c, id) };
+  }
   return null;
 }
 
@@ -97,9 +115,10 @@ async function render() {
   if (ctx.me?.must_change_password) { renderChangePassword(); return; }
   if (launchLinks === null) await loadLaunchLinks();
   const route = findRoute(hash) ?? findRoute('#/overview');
+  if (route.redirect) { location.replace(route.redirect); return; }
   const active = route.parent ?? route.route;
   const main = h('main', { class: 'main', id: 'main', tabindex: -1 }, h('div', { class: 'page' }, h('p', { class: 'muted' }, '正在加载…')));
-  clear(root).append(h('div', { class: 'app' }, sidebar(active), main));
+  put(clear(root), h('div', { class: 'app' }, sidebar(active), main));
   document.title = `${route.label} · LLM Lab`;
   let content;
   try {
@@ -112,7 +131,7 @@ async function render() {
   if (DEMO) {
     content.prepend(h('div', { class: 'banner', role: 'note' }, h('strong', {}, '演示数据'), '当前页面显示的是示例数据，不代表实验室的真实状态。去掉地址中的 demo=1 即可查看真实数据。'));
   }
-  clear(main).append(content);
+  put(clear(main), content);
 }
 
 function renderLogin(message = null) {
@@ -136,7 +155,7 @@ function renderLogin(message = null) {
     render();
   };
   const btn = h('button', { type: 'submit', class: 'btn primary' }, '登录');
-  clear(root).append(h('main', { class: 'login' }, h('div', { class: 'login-card' },
+  put(clear(root), h('main', { class: 'login' }, h('div', { class: 'login-card' },
     brandMark(64),
     h('div', { style: { 'text-align': 'center' } }, h('h1', { style: { margin: 0, 'font-size': '28px', 'font-weight': 600 } }, '登录 LLM Lab'),
       h('p', { class: 'muted', style: { margin: '4px 0 0', 'font-size': '15px' } }, 'RTX A6000 工作站')),
@@ -164,7 +183,7 @@ function renderChangePassword() {
     render();
   };
   const input = (key, label, ac) => h('label', {}, h('span', {}, label), h('input', { type: 'password', autocomplete: ac, oninput: (e) => { st[key] = e.target.value; } }));
-  clear(root).append(h('main', { class: 'login' }, h('div', { class: 'login-card' },
+  put(clear(root), h('main', { class: 'login' }, h('div', { class: 'login-card' },
     brandMark(64),
     h('div', { style: { 'text-align': 'center' } }, h('h1', { style: { margin: 0, 'font-size': '28px', 'font-weight': 600 } }, '设置新密码'),
       h('p', { class: 'muted', style: { margin: '4px 0 0', 'font-size': '15px' } }, '您正在使用管理员提供的临时密码，请先设置新密码。')),

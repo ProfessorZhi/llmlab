@@ -45,6 +45,21 @@ export const BFF_ROUTES = Object.freeze([
   { name: 'registry.engines.register', method: 'POST', path: '/api/v2/registry/engines', auth: 'session', kind: 'write', scope: 'registry:write', owner: 'Integration#49', ui: '推理服务 · 登记' },
   { name: 'registry.discovery', method: 'GET', path: '/api/v2/registry/discovery', auth: 'session', kind: 'read', scope: 'registry:read', owner: 'Integration#49', ui: '推理服务 / 模型库 · 本机发现' },
   { name: 'registry.models.register', method: 'POST', path: '/api/v2/registry/models', auth: 'session', kind: 'write', scope: 'registry:write', owner: 'Integration#49', ui: '模型库 · 登记模型' },
+  // Integrated gateway (2026-10-22): same-origin /v1 with per-user virtual keys, model routes,
+  // per-key logs (bodies opt-in per key), and per-engine runtime parameters.
+  { name: 'gateway.overview', method: 'GET', path: '/api/gateway/overview', auth: 'session', kind: 'read', scope: null, owner: 'Integration#49', ui: '网关 · 概览' },
+  { name: 'gateway.keys', method: 'GET', path: '/api/gateway/keys', auth: 'session', kind: 'read', scope: null, owner: 'Integration#49', ui: '网关 · API 密钥' },
+  { name: 'gateway.keys.create', method: 'POST', path: '/api/gateway/keys/create', auth: 'session', kind: 'write', scope: null, owner: 'Integration#49', ui: '网关 · 创建密钥' },
+  { name: 'gateway.keys.revoke', method: 'POST', path: '/api/gateway/keys/{key_id}/revoke', auth: 'session', kind: 'write', scope: null, owner: 'Integration#49', ui: '网关 · 撤销密钥' },
+  { name: 'gateway.keys.update', method: 'POST', path: '/api/gateway/keys/{key_id}/update', auth: 'session', kind: 'write', scope: null, owner: 'Integration#49', ui: '网关 · 密钥设置（内容记录）' },
+  { name: 'gateway.models', method: 'GET', path: '/api/gateway/models', auth: 'session', kind: 'read', scope: null, owner: 'Integration#49', ui: '网关 · 模型路由' },
+  { name: 'gateway.models.publish', method: 'POST', path: '/api/gateway/models/publish', auth: 'session', kind: 'write', scope: null, owner: 'Integration#49', ui: '网关 · 发布模型' },
+  { name: 'gateway.models.update', method: 'POST', path: '/api/gateway/models/{route_id}/update', auth: 'session', kind: 'write', scope: null, owner: 'Integration#49', ui: '网关 · 修改路由' },
+  { name: 'gateway.logs', method: 'GET', path: '/api/gateway/logs', auth: 'session', kind: 'read', scope: null, owner: 'Integration#49', ui: '网关 · 调用日志' },
+  { name: 'gateway.logs.detail', method: 'GET', path: '/api/gateway/logs/{request_id}', auth: 'session', kind: 'read', scope: null, owner: 'Integration#49', ui: '网关 · 单次请求详情' },
+  { name: 'gateway.playground', method: 'POST', path: '/api/gateway/playground', auth: 'session', kind: 'write', scope: null, owner: 'Integration#49', ui: '网关 · 在线体验' },
+  { name: 'registry.engines.params', method: 'GET', path: '/api/v2/registry/engines/{engine_id}/params', auth: 'session', kind: 'read', scope: 'registry:read', owner: 'Integration#49', ui: '推理服务 · 运行参数' },
+  { name: 'registry.engines.params.update', method: 'POST', path: '/api/v2/registry/engines/{engine_id}/params/update', auth: 'session', kind: 'write', scope: 'registry:write', owner: 'Integration#49', ui: '推理服务 · 保存目标参数' },
   // SEAM-1 (#115). A declared write boundary, not a button: the authority is
   // Registry's `RegistryService.invoke` (row ACL, readiness, payload bound,
   // audit-before-forward). No control is wired to this path in this build, and

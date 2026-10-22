@@ -56,3 +56,9 @@ export function toast(message, ms = 2600) {
   document.body.append(el);
   setTimeout(() => el.remove(), ms);
 }
+
+/** ``el.append`` 的安全版：跳过 null / undefined / false（原生 append 会把 null 写成文本 "null"）。 */
+export function put(el, ...children) {
+  append(el, children);
+  return el;
+}

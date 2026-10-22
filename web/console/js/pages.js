@@ -1,19 +1,20 @@
 /*! web/console/js/pages.js — 控制台各页面。
  *  每个页面是 async (ctx) => Element。ctx.demo 为真时只使用 demo.js 的示例数据。 */
-import { h } from './dom.js';
+import { h, put } from './dom.js';
 import { fmtInt, fmtGiB } from './charts.js';
 import {
-  PATHS, loadOps, loadHost, loadCalls, loadUsers, loadIntegrations, loadDiscovery, loadTokens, safeJumpUrl, send,
+  PATHS, loadOps, loadHost, loadUsers, loadIntegrations, loadDiscovery, loadTokens, loadData, safeJumpUrl, send,
 } from './data.js';
 import {
-  overviewModel, servicesFromOps, modelsFromOps, keysFromOps, callsFacts, hostFacts, engineLabel, modelColorMap, preflightChecks,
+  overviewModel, servicesFromOps, modelsFromOps, hostFacts, engineLabel, modelColorMap, preflightChecks,
 } from './viewmodel.js';
 import {
-  demoOverview, demoServices, demoKeys, demoCalls, demoEvaluation, DEMO_USERS,
+  demoOverview, demoServices, demoEvaluation, DEMO_USERS,
 } from './demo.js';
+import { SNAP_SYSTEM } from './snapshot.js';
 import {
-  pageHead, emptyState, statusBadge, segmented, section, relTime, clock,
-  kpiBar, sunburstPanel, vramPanel, hourlyChart, hbarList, checkIcon, quietEmpty,
+  pageHead, emptyState, statusBadge, segmented, section, relTime,
+  kpiBar, sunburstPanel, vramPanel, hourlyChart, hbarList, checkIcon, quietEmpty, metricCards, donutPanel, ringGauge,
 } from './ui.js';
 
 const panel = (cls, title, sub, ...body) => h('section', { class: `panel ${cls}` },
@@ -22,7 +23,7 @@ const panel = (cls, title, sub, ...body) => h('section', { class: `panel ${cls}`
 
 /* ============================== 概览 ============================== */
 // 平台的核心是资源监控与推理服务；API 调用统计是次要信息，没配置、没调用都属正常。
-const CALLS_EMPTY = { title: '暂无调用记录', body: '为推理服务创建 API 密钥并通过网关调用后，这里会显示调用统计。' };
+const CALLS_EMPTY = { title: '暂无调用记录', body: '把推理服务发布到「网关」并用 API 密钥调用后，这里会显示调用统计。' };
 const SERVICES_EMPTY = { title: '还没有登记推理服务', body: '在自己的 Linux 用户下启动推理引擎，再用平台账户登记，这里会显示它的运行状态与显存占用。' };
 
 function servicesTable(list, { compact = false } = {}) {
@@ -31,7 +32,7 @@ function servicesTable(list, { compact = false } = {}) {
   return h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
     h('thead', {}, h('tr', {}, cols.map((t, i) => h('th', { scope: 'col', class: i === vramCol ? 'num' : null }, t)))),
     h('tbody', {}, list.map((x) => h('tr', {},
-      h('td', {}, h('div', { style: { 'font-weight': 500 } }, x.label),
+      h('td', {}, h('div', { style: { 'font-weight': 500 } }, x.kind === 'engine' ? h('a', { href: `#/services/${encodeURIComponent(x.id)}` }, x.label) : x.label),
         x.sharedToMe ? h('div', { class: 'muted', style: { 'font-size': '12px' } }, '共享给我')
           : x.port ? h('div', { class: 'muted tnum', style: { 'font-size': '12px' } }, `端口 ${x.port}`) : null),
       h('td', {}, engineLabel(x.engine)),
@@ -56,15 +57,30 @@ function gpuFacts(hf, hostState) {
     h('div', { class: 'group' }, SERVICES.map(([key, name]) => h('div', { class: 'cell' }, h('span', { class: 'grow' }, name), statusBadge(svc(hf.services?.[key]))))));
 }
 
+/** 网关概览 ⇒ 概览页的「API 调用」部分（调用者 → 模型的旭日图、各模型调用量、24 小时柱状图）。 */
+function gatewayCalls(o, kpis) {
+  const c = o.calls;
+  kpis.requests = c.requests; kpis.requestsScope = o.view === 'all' ? '近 24 小时 · 全实验室' : '近 24 小时 · 我发起的';
+  if (!c.requests) return { distribution: null, modelUsage: null, hourly: null };
+  const colors = modelColorMap(c.by_model.map((m) => m.model));
+  return {
+    distribution: { innerLabel: '调用者', groups: c.by_caller.map((x) => ({ id: x.caller, label: x.name, children: c.by_caller_model.filter((p) => p.caller === x.caller).map((p) => ({ id: p.model, label: p.model, value: p.requests })) })) },
+    modelUsage: c.by_model.map((m) => ({ id: m.model, label: m.model, value: m.requests })),
+    modelColors: colors,
+    hourly: { points: c.series.requests, scope: o.view },
+  };
+}
+
 export async function overview(ctx) {
   let model;
   let states = {};
   if (ctx.demo) {
     model = demoOverview();
   } else {
-    const [ops, host, calls] = await Promise.all([loadOps(), loadHost(), loadCalls()]);
-    states = { ops: ops.state, host: host.state, calls: calls.state };
-    model = overviewModel({ ops: ops.value, host: host.value, log: calls.value });
+    const [ops, host, gw] = await Promise.all([loadOps(), loadHost(), loadData(PATHS.gatewayOverview)]);
+    states = { ops: ops.state, host: host.state, calls: gw.state };
+    model = overviewModel({ ops: ops.value, host: host.value });
+    if (gw.state === 'ready') Object.assign(model, gatewayCalls(gw.value, model.kpis));
   }
   const now = new Date();
   const stamp = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -100,10 +116,10 @@ export async function overview(ctx) {
     h('section', { style: { display: 'flex', 'flex-direction': 'column', gap: '16px' }, 'aria-labelledby': 'calls-title' },
       h('div', { class: 'page-head' },
         h('h2', { id: 'calls-title', style: { margin: 0, 'font-size': '19px', 'font-weight': 600 } }, 'API 调用'),
-        h('a', { class: 'linkbtn', href: '#/requests' }, '查看请求日志')),
+        h('a', { class: 'linkbtn', href: '#/gateway' }, '打开网关')),
       hasCalls
         ? h('div', { class: 'row' },
-          panel('grow', '调用分布', `内环为${model.distribution?.innerLabel ?? 'API 密钥'}，外环为其调用的推理服务`, dist),
+          panel('grow', '调用分布', `内环为${model.distribution?.innerLabel ?? 'API 密钥'}，外环为其调用的模型`, dist),
           panel('side', '各服务调用量', null, usage))
         : h('div', { class: 'group' }, quietEmpty(states.calls ?? 'not_configured', CALLS_EMPTY))));
 }
@@ -209,7 +225,7 @@ function discoveryPanel(ctx, kind) {
     else if (!st.data) content = h('p', { class: 'muted', style: { margin: 0 } }, intro);
     else if (!st.data.configured) content = quietEmpty('ready', { title: '本部署未开启本机发现', body: '仍可手动登记，或请管理员在启动时开启发现。' });
     else content = rows();
-    holder.append(panel('', title, st.data ? intro : null,
+    put(holder, panel('', title, st.data ? intro : null,
       h('div', { style: { display: 'flex', 'flex-direction': 'column', gap: '12px' } },
         h('div', {}, h('button', { type: 'button', class: 'btn', disabled: st.busy, onclick: scan }, st.data ? '重新扫描' : '扫描本机')),
         st.msg ? h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left', margin: 0 } }, st.msg) : null,
@@ -263,11 +279,11 @@ export async function models(ctx) {
 
   function draw() {
     while (root.firstChild) root.firstChild.remove();
-    root.append(pageHead('模型库', '实验室登记的模型。模型和推理服务都是资源池里的资源：模型说明「是什么」，推理服务负责「运行它」。',
+    put(root, pageHead('模型库', '实验室登记的模型。模型和推理服务都是资源池里的资源：模型说明「是什么」，推理服务负责「运行它」。',
       h('button', { type: 'button', class: 'btn primary', onclick: () => { st.open = true; draw(); } }, '登记模型')));
-    if (st.msg) root.append(h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.msg));
-    if (st.open) root.append(form());
-    root.append(list
+    if (st.msg) put(root, h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.msg));
+    if (st.open) put(root, form());
+    put(root, list
       ? (list.length
         ? h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
           h('thead', {}, h('tr', {}, ['模型', '格式', '参数量', '所有者', '权重位置'].map((t) => h('th', { scope: 'col' }, t)))),
@@ -279,7 +295,7 @@ export async function models(ctx) {
             h('td', { class: m.weightPath ? 'mono' : 'muted', style: { 'font-size': '12px', 'word-break': 'break-all' } }, m.weightPath ?? (m.self ? '—' : '仅所有者可见')))))))
         : h('div', { class: 'group' }, quietEmpty('ready', { title: '还没有登记模型', body: '点击「登记模型」手动添加，或用下方的本机发现从授权目录里挑选。' })))
       : emptyState(state));
-    root.append(discoveryPanel(ctx, 'models'));
+    put(root, discoveryPanel(ctx, 'models'));
   }
   draw();
   return root;
@@ -346,7 +362,7 @@ export async function register(ctx) {
   function draw() {
     while (root.firstChild) root.firstChild.remove();
     const labels = ['服务配置', '登记检查', '发布'];
-    root.append(
+    put(root, 
       h('header', {},
         h('a', { class: 'crumb', href: '#/services' }, '推理服务'),
         h('h1', { class: 'page-title', style: { 'margin-top': '6px' } }, '登记推理服务'),
@@ -359,7 +375,7 @@ export async function register(ctx) {
 
     if (st.step === 1) {
       const sel = h('select', { onchange: (e) => { st.framework = e.target.value; } }, FRAMEWORKS.map(([v, l]) => h('option', { value: v, selected: v === st.framework }, l)));
-      root.append(
+      put(root, 
         section('服务配置', h('div', { class: 'group' },
           field('推理框架', sel),
           field('监听端口', h('input', { class: 'tnum', inputmode: 'numeric', placeholder: '8000', value: st.port, oninput: (e) => { st.port = e.target.value.trim(); } })),
@@ -371,20 +387,20 @@ export async function register(ctx) {
             h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, l),
               h('input', { type: 'radio', name: 'scope', value: v, checked: st.scope === v, onchange: () => { st.scope = v; }, style: { width: '18px', height: '18px' } }))))));
     } else if (st.step === 2) {
-      root.append(section('校验结果', h('div', { class: 'group' }, st.checks.list.map((c) => h('div', { class: 'check' }, checkIcon(c.ok),
+      put(root, section('校验结果', h('div', { class: 'group' }, st.checks.list.map((c) => h('div', { class: 'check' }, checkIcon(c.ok),
         h('div', {}, h('div', { style: { 'font-weight': 500 } }, c.title), h('div', { class: 'muted', style: { 'font-size': '13px' } }, c.detail)))))));
     } else {
-      root.append(
+      put(root, 
         h('div', { style: { display: 'flex', 'align-items': 'center', gap: '12px' } }, checkIcon(true, 28), h('h2', { style: { margin: 0, 'font-size': '22px', 'font-weight': 600 } }, '服务已发布')),
         h('p', { class: 'muted', style: { margin: 0 } }, `${st.name} 当前访问范围为「${{ private: '仅本人', all: '全部成员', selected: '指定成员' }[st.scope]}」，可在「推理服务」中查看运行状态。`),
         section('调用示例', h('div', { class: 'code' },
           `curl ${location.origin}/v1/chat/completions \\\n  -H "Authorization: Bearer $LLMLAB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model": "${st.name}", "messages": [{"role": "user", "content": "Hello"}]}'`)));
     }
 
-    if (st.error) root.append(h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.error));
-    if (st.error && st.cli) root.append(h('div', { class: 'code' }, st.cli));
+    if (st.error) put(root, h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.error));
+    if (st.error && st.cli) put(root, h('div', { class: 'code' }, st.cli));
     const blocked = !st.checks || st.checks.blocked;
-    root.append(h('div', { class: 'actions' },
+    put(root, h('div', { class: 'actions' },
       h('button', { type: 'button', class: 'btn', onclick: () => { if (st.step === 1) ctx.navigate('#/services'); else { st.step -= 1; st.error = null; draw(); } } }, st.step === 1 ? '取消' : '上一步'),
       st.step === 1 ? h('button', { type: 'button', class: 'btn primary', disabled: st.busy, onclick: verify }, st.busy ? '正在校验…' : '开始校验')
         : st.step === 2 ? h('button', { type: 'button', class: 'btn primary', disabled: blocked || st.busy, onclick: publish }, st.busy ? '正在发布…' : '发布')
@@ -396,27 +412,23 @@ export async function register(ctx) {
   return root;
 }
 
-/* ============================== API 密钥 ============================== */
-export async function keys(ctx) {
-  let list; let state = 'ready';
-  if (ctx.demo) list = demoKeys();
-  else { const r = await loadOps(); state = r.state; list = r.state === 'ready' ? keysFromOps(r.value) : null; }
-  const body = list
-    ? section(null, h('div', { class: 'group' },
-      list.length ? list.map((k) => h('div', { class: 'cell' },
-        h('div', { class: 'grow' }, h('div', { class: 'title' }, k.name), h('div', { class: 'sub tnum' }, `${k.prefix} · ${k.scopes.join('、') || '无权限范围'}`)),
-        h('span', { class: 'muted', style: { 'font-size': '13px' } }, k.active ? `最近使用 ${relTime(k.lastUsedAt)}` : '已撤销')))
-        : h('div', { class: 'cell' }, h('div', { class: 'grow sub' }, '暂无密钥。'))),
-    '密钥只显示前缀，完整内容仅在创建时显示一次。')
-    : h('div', { class: 'group' }, quietEmpty(state, { title: '暂无 API 密钥', body: '网关密钥接入后，这里会列出调用推理服务用的密钥。' }));
+/* ============================== 我的账户 ============================== */
+export async function account(ctx) {
+  const me = ctx.me ?? {};
+  const row = (label, value) => h('div', { class: 'cell' }, h('span', { class: 'grow' }, label), h('span', { class: value ? null : 'muted' }, value ?? '—'));
   return h('div', { class: 'page narrow' },
-    pageHead('API 密钥', '调用模型服务时使用的凭据，以及给命令行和 Agent 用的令牌。'),
-    body,
+    pageHead('我的账户', '平台账户、命令行与 Agent 令牌。调用模型用的 API 密钥在「网关 → API 密钥」。'),
+    section('账户', h('div', { class: 'group' },
+      row('用户名', me.username ?? me.subject),
+      row('显示名称', me.display_name),
+      row('角色', ctx.isAdmin() ? '管理员' : '成员'),
+      row('常用 Linux 用户', me.linux_user)),
+    '账户独立于 Linux 用户；登记推理服务时平台会记录它实际由哪个 Linux 用户运行。'),
     await agentTokens(ctx),
     section('接入', h('div', { class: 'group' },
-      h('div', { class: 'cell' }, h('span', { class: 'grow' }, '接入端点'), h('span', { class: 'mono' }, `${location.origin}/v1`)),
-      h('div', { class: 'cell' }, h('span', { class: 'grow' }, '接口协议'), h('span', {}, 'OpenAI 兼容')),
-      h('div', { class: 'cell' }, h('span', { class: 'grow' }, '命令行工具'), h('span', { class: 'mono' }, 'llmlab --help'))),
+      h('div', { class: 'cell' }, h('span', { class: 'grow' }, '模型调用（OpenAI 兼容）'), h('span', { class: 'mono' }, `${location.origin}/v1`)),
+      h('div', { class: 'cell' }, h('span', { class: 'grow' }, '命令行工具'), h('span', { class: 'mono' }, 'llmlab --help')),
+      h('a', { class: 'cell action', href: '#/gateway/keys' }, '管理 API 密钥')),
     '用上面创建的令牌配置 llmlab 后，可以执行 llmlab discover、engines、models、endpoints 等命令；加 --json 输出给 Agent 解析。'));
 }
 
@@ -447,9 +459,9 @@ async function agentTokens(ctx) {
 
   function draw() {
     while (holder.firstChild) holder.firstChild.remove();
-    if (!list) { holder.append(section('命令行 / Agent 令牌', h('div', { class: 'group' }, quietEmpty(state, { title: '令牌服务未开启', body: '本部署尚未开启命令行令牌。' })))); return; }
+    if (!list) { put(holder, section('命令行 / Agent 令牌', h('div', { class: 'group' }, quietEmpty(state, { title: '令牌服务未开启', body: '本部署尚未开启命令行令牌。' })))); return; }
     const live = list.filter((t) => !t.revoked);
-    holder.append(section('命令行 / Agent 令牌', h('div', { class: 'group' },
+    put(holder, section('命令行 / Agent 令牌', h('div', { class: 'group' },
       live.length ? live.map((t) => h('div', { class: 'cell' },
         h('div', { class: 'grow' }, h('div', { class: 'title' }, t.label ?? '未命名'),
           h('div', { class: 'sub' }, `${relTime(epochIso(t.last_used_at)) === '—' ? '尚未使用' : `最近使用 ${relTime(epochIso(t.last_used_at))}`} · ${new Date(t.expires_at * 1000).toLocaleDateString()} 到期`)),
@@ -463,65 +475,134 @@ async function agentTokens(ctx) {
         h('div', { class: 'muted', style: { 'font-size': '13px' } }, '令牌只显示这一次。交给你的 Agent 后，它就能像你一样在命令行里发现、登记和使用资源：'),
         h('div', { class: 'code' }, `export LLMLAB_API_BASE=${location.origin}\nexport LLMLAB_TOKEN=${st.issued.token}\nllmlab whoami\nllmlab discover\nllmlab discover --register 8000`)) : null),
     '令牌拥有与你的账户相同的资源权限（管理员账户的令牌也能查看全实验室），账户停用或令牌撤销后立即失效。'));
-    if (st.msg) holder.append(h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.msg));
+    if (st.msg) put(holder, h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.msg));
   }
   draw();
   return holder;
 }
 
-/* ============================== 请求日志 ============================== */
-export async function requests(ctx) {
-  let rows; let state = 'ready';
-  if (ctx.demo) rows = demoCalls();
-  else { const r = await loadCalls(); state = r.state; rows = r.state === 'ready' ? (callsFacts(r.value)?.recent ?? []) : null; }
-  if (!rows) return h('div', { class: 'page' }, pageHead('请求日志', '经网关转发的请求元数据。不记录提示词与输出正文。'), h('div', { class: 'group' }, quietEmpty(state, CALLS_EMPTY)));
-  let filter = '全部';
-  const holder = h('div', {});
-  const draw = () => {
-    while (holder.firstChild) holder.firstChild.remove();
-    const view = rows.filter((r) => filter === '全部' || (filter === '失败' ? !r.ok : r.ok));
-    if (!view.length) { holder.append(h('div', { class: 'group' }, quietEmpty('ready', rows.length ? { title: '没有符合条件的请求', body: '换一个筛选条件试试。' } : CALLS_EMPTY))); return; }
-    holder.append(h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
-      h('thead', {}, h('tr', {}, ['时间', '模型服务', '密钥', 'Token', '延迟', '状态'].map((t, i) => h('th', { scope: 'col', class: i === 3 || i === 4 ? 'num' : null }, t)))),
-      h('tbody', {}, view.map((r) => h('tr', {},
-        h('td', { class: 'tnum' }, clock(r.ts)), h('td', {}, r.model ?? '—'), h('td', { class: 'muted' }, r.key ?? '—'),
-        h('td', { class: 'num' }, fmtInt(r.tokens)), h('td', { class: 'num' }, r.totalMs == null ? '—' : `${(r.totalMs / 1000).toFixed(2)} s`),
-        h('td', { style: { color: r.ok ? 'var(--green-text)' : 'var(--red-text)' } }, `${r.status ?? '—'} ${r.ok ? '成功' : '失败'}`)))))));
-  };
-  draw();
-  const seg = segmented('筛选结果', ['全部', '成功', '失败'], filter, (v) => { filter = v; seg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.textContent === v))); draw(); });
-  return h('div', { class: 'page' }, pageHead('请求日志', '经网关转发的请求元数据。不记录提示词与输出正文。', seg), holder);
+/* ============================== 资源监控 ============================== */
+const fmtRate = (bps) => (bps == null ? '—' : bps >= 1024 ** 2 ? `${(bps / 1024 ** 2).toFixed(1)} MB/s` : bps >= 1024 ? `${(bps / 1024).toFixed(1)} KB/s` : `${Math.round(bps)} B/s`);
+const fmtDisk = (b) => (b >= 1024 ** 4 ? `${(b / 1024 ** 4).toFixed(2)} TB` : `${(b / 1024 ** 3).toFixed(b >= 100 * 1024 ** 3 ? 0 : 1)} GB`);
+
+function meterRow(label, ratio, right, tint) {
+  const tone = ratio >= 0.9 ? 'var(--red)' : ratio >= 0.75 ? 'var(--orange)' : tint;
+  return h('div', { class: 'hbar' },
+    h('div', { class: 'hbar-top' }, h('span', {}, label), h('span', { class: 'muted tnum' }, right)),
+    h('div', { class: 'hbar-track', role: 'img', 'aria-label': `${label} ${Math.round(ratio * 100)}%` }, h('div', { style: { width: `${(Math.min(1, ratio) * 100).toFixed(1)}%`, background: tone } })));
 }
 
-/* ============================== 资源监控 ============================== */
+/** 主机读数（/api/infra/system）：CPU、内存、磁盘、网络、温度与按 Linux 用户的占用。 */
+const USER_COLORS = ['#007AFF', '#34C759', '#FF9500', '#AF52DE', '#FF2D55', '#5AC8FA', '#FFCC00', '#5856D6'];
+
+/** 「我的占用」：当前账户对应的 Linux 用户占了多少内存 / CPU / 显存，每个人都能看到自己的那一份。 */
+function myShare(sys, me, gpuTotalMiB) {
+  const row = (sys.per_user ?? []).find((u) => u.user === me);
+  if (!row) return null;
+  const memTotal = sys.memory?.total_mib;
+  const cores = sys.cpu?.cores;
+  const gauge = (label, ratio, value, tint) => h('div', { class: 'gauge' }, ringGauge(ratio, { tint }),
+    h('div', {}, h('div', { class: 'gauge-label' }, label), h('div', { class: 'gauge-value' }, value)));
+  return panel('', `我的占用 · ${me}`, '以你的 Linux 用户运行的全部进程，占整机的比例',
+    h('div', { class: 'mine' },
+      gauge('内存', memTotal ? row.memory_mib / memTotal : null, `${fmtGiB(row.memory_mib)} GB`, '#30B0C7'),
+      gauge('CPU（整机）', row.cpu_ratio == null ? null : row.cpu_ratio / (cores || 1), row.cpu_ratio == null ? '—' : `${(row.cpu_ratio * 100).toFixed(1)}% 核`, '#34C759'),
+      gauge('显存', row.vram_mib != null && gpuTotalMiB ? row.vram_mib / gpuTotalMiB : (gpuTotalMiB ? 0 : null), row.vram_mib == null ? '0 GB' : `${fmtGiB(row.vram_mib)} GB`, '#5856D6'),
+      h('div', { class: 'gauge' }, h('div', { class: 'gauge-value', style: { 'font-size': '30px', 'min-width': '56px', 'text-align': 'center' } }, fmtInt(row.processes)),
+        h('div', {}, h('div', { class: 'gauge-label' }, '进程数'), h('div', { class: 'muted', style: { 'font-size': '12.5px' } }, `${(sys.gpu_processes ?? []).filter((g) => g.user === me).length} 个在用 GPU`)))));
+}
+
+/** 按用户的环形图：内存 / CPU / 显存，各自带「我」高亮；系统账户合并成一块。 */
+function userDonuts(sys, me, gpuTotalMiB) {
+  const humans = (sys.per_user ?? []).filter((u) => u.account === 'human');
+  const system = (sys.per_user ?? []).filter((u) => u.account !== 'human');
+  const color = new Map(humans.map((u, i) => [u.user, USER_COLORS[i % USER_COLORS.length]]));
+  const items = (key) => [
+    ...humans.map((u) => ({ id: u.user, label: u.user, value: u[key] ?? 0, color: color.get(u.user), me: u.user === me })),
+    ...(system.length ? [{ id: '__system', label: `系统账户（${system.length}）`, value: system.reduce((t, u) => t + (u[key] ?? 0), 0), color: '#8E8E93' }] : []),
+  ];
+  const memUsed = (sys.per_user ?? []).reduce((t, u) => t + (u.memory_mib ?? 0), 0);
+  const vramUsed = humans.reduce((t, u) => t + (u.vram_mib ?? 0), 0);
+  const gib = (v) => `${fmtGiB(v)} GB`;
+  return panel('', '按用户看资源', '点扇区或图例聚焦；「我」默认高亮。内存只统计进程常驻内存，缓存与内核占用计入「其他 / 空闲」。',
+    h('div', { class: 'donut-grid' },
+      h('div', {}, h('div', { class: 'section-title', style: { 'margin-bottom': '8px' } }, '内存'),
+        donutPanel(items('memory_mib'), { title: '进程内存', fmt: gib, rest: sys.memory ? { label: '其他 / 空闲', value: Math.max(0, sys.memory.total_mib - memUsed) } : null })),
+      h('div', {}, h('div', { class: 'section-title', style: { 'margin-bottom': '8px' } }, 'CPU'),
+        // cpu_ratio 以「核」计（1.0 = 跑满一个线程）；这里换成占整机的百分比。
+        donutPanel(items('cpu_ratio').map((i) => ({ ...i, value: ((i.value ?? 0) / (sys.cpu?.cores || 1)) * 100 })), { title: 'CPU（整机）', fmt: (v) => `${v.toFixed(v < 1 ? 2 : 1)}%`, rest: { label: '空闲', value: Math.max(0, 100 - (sys.per_user ?? []).reduce((t, u) => t + ((u.cpu_ratio ?? 0) / (sys.cpu?.cores || 1)) * 100, 0)) } })),
+      gpuTotalMiB ? h('div', {}, h('div', { class: 'section-title', style: { 'margin-bottom': '8px' } }, '显存'),
+        donutPanel(items('vram_mib').filter((i) => i.id !== '__system'), { title: 'GPU 显存', fmt: gib, rest: { label: '空闲', value: Math.max(0, gpuTotalMiB - vramUsed) } })) : null));
+}
+
+function hostSystem(sys, me) {
+  const humans = (sys.per_user ?? []).filter((u) => u.account === 'human');
+  const folded = (sys.per_user ?? []).filter((u) => u.account !== 'human');
+  const foldedMem = folded.reduce((t, u) => t + (u.memory_mib ?? 0), 0);
+  const maxMem = Math.max(...humans.map((u) => u.memory_mib ?? 0), 1);
+  const th = sys.thermal ?? {};
+  return [
+    h('div', { class: 'row' },
+      panel('grow', '磁盘', null, h('div', { style: { display: 'flex', 'flex-direction': 'column', gap: '14px' } },
+        (sys.disk?.usage ?? []).filter((d) => d.total_bytes > 4 * 1024 ** 3).map((d) => meterRow(d.mount, d.used_ratio, `${fmtDisk(d.used_bytes)} / ${fmtDisk(d.total_bytes)}`, '#30B0C7')),
+        h('div', { class: 'muted tnum', style: { 'font-size': '12.5px' } }, `读 ${fmtRate(sys.disk?.read_bytes_per_s)} · 写 ${fmtRate(sys.disk?.write_bytes_per_s)}`))),
+      panel('side', '网络与温度', null, h('div', { class: 'group' },
+        h('div', { class: 'cell' }, h('span', { class: 'grow' }, '下行 / 上行'), h('span', { class: 'tnum' }, `${fmtRate(sys.network?.rx_bytes_per_s)} / ${fmtRate(sys.network?.tx_bytes_per_s)}`)),
+        h('div', { class: 'cell' }, h('span', { class: 'grow' }, 'TCP 连接'), h('span', { class: 'tnum' }, sys.connections ? `${sys.connections.established} 已建立 · ${sys.connections.listening} 监听` : '—')),
+        h('div', { class: 'cell' }, h('span', { class: 'grow' }, 'CPU / NVMe 温度'), h('span', { class: 'tnum' }, `${th.cpu_c ?? '—'} °C / ${th.nvme_c ?? '—'} °C`)),
+        h('div', { class: 'cell' }, h('span', { class: 'grow' }, '风扇'), h('span', { class: 'tnum' }, th.fans_rpm?.length ? th.fans_rpm.map((r) => `${fmtInt(r)}`).join(' · ') + ' rpm' : '—'))))),
+    panel('', '按 Linux 用户', `进程、内存、CPU 与显存按运行用户统计${folded.length ? ` · ${folded.length} 个系统账户已折叠（共 ${fmtGiB(foldedMem)} GB 内存）` : ''}`,
+      humans.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
+        h('thead', {}, h('tr', {}, ['用户', '进程', '内存', '', 'CPU', '显存'].map((t, i) => h('th', { scope: 'col', class: i && i !== 3 ? 'num' : null }, t)))),
+        h('tbody', {}, humans.map((u) => h('tr', { class: u.user === me ? 'me' : null },
+          h('td', { style: { 'font-weight': 500 } }, u.user, u.user === me ? h('span', { class: 'me-tag' }, '我') : null),
+          h('td', { class: 'num' }, fmtInt(u.processes)),
+          h('td', { class: 'num' }, `${fmtGiB(u.memory_mib)} GB`),
+          h('td', { style: { width: '28%' } }, h('div', { class: 'hbar-track' }, h('div', { style: { width: `${((u.memory_mib ?? 0) / maxMem * 100).toFixed(1)}%`, background: '#30B0C7' } }))),
+          h('td', { class: 'num' }, u.cpu_ratio == null ? '—' : `${(u.cpu_ratio * 100).toFixed(1)}%`),
+          h('td', { class: 'num' }, u.vram_mib == null ? '—' : `${fmtGiB(u.vram_mib)} GB`))))))
+        : quietEmpty('ready', { title: '暂无按用户统计', body: '主机读数里没有用户进程信息。' })),
+    (sys.gpu_processes ?? []).length ? panel('', 'GPU 进程', '谁的哪个进程占着显存', h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
+      h('thead', {}, h('tr', {}, ['进程', '用户', 'systemd 单元', '显存'].map((t, i) => h('th', { scope: 'col', class: i === 3 ? 'num' : null }, t)))),
+      h('tbody', {}, sys.gpu_processes.map((g) => h('tr', {},
+        h('td', { class: 'tnum' }, `PID ${g.pid}`), h('td', {}, g.user ?? `uid ${g.uid}`), h('td', { class: 'mono' }, g.unit ?? '—'),
+        h('td', { class: 'num' }, `${fmtGiB(g.used_mib)} GB`))))))) : null,
+  ];
+}
+
 export async function usage(ctx) {
-  let model; let hostState = 'ready'; let opsState = 'ready';
-  if (ctx.demo) model = demoOverview();
+  let model; let hostState = 'ready'; let opsState = 'ready'; let sys = null;
+  if (ctx.demo) { model = demoOverview(); sys = SNAP_SYSTEM; }
   else {
-    const [ops, host] = await Promise.all([loadOps(), loadHost()]);
+    const [ops, host, system] = await Promise.all([loadOps(), loadHost(), loadData(PATHS.infraSystem)]);
     hostState = host.state; opsState = ops.state;
     model = overviewModel({ ops: ops.value, host: host.value });
+    sys = system.state === 'ready' && system.value.cpu ? system.value : null;
   }
   const hf = model.host;
-  const metric = (label, value, unit) => h('div', { class: 'cell' }, h('span', { class: 'grow' }, label), h('span', { class: 'tnum' }, value == null ? '—' : `${value}${unit}`));
+  const me = ctx.me?.linux_user ?? ctx.me?.username ?? null;
   const withVram = (model.services ?? []).filter((x) => x.vramMiB != null);
+  const mem = sys?.memory;
+  const cards = [
+    { label: 'GPU 显存', tint: '#5856D6', glyph: 'memory', value: hf?.vramUsedMiB == null ? '—' : fmtGiB(hf.vramUsedMiB), unit: hf?.vramTotalMiB ? `/ ${fmtGiB(hf.vramTotalMiB, 0)} GB` : null, note: hf?.vramUsedMiB != null && hf.vramTotalMiB ? `已用 ${Math.round(hf.vramUsedMiB / hf.vramTotalMiB * 100)}%` : '暂无 GPU 读数' },
+    { label: 'GPU 利用率', tint: '#FF9500', glyph: 'usage', value: hf?.utilRatio == null ? '—' : `${Math.round(hf.utilRatio * 100)}%`, note: [hf?.tempC != null ? `${Math.round(hf.tempC)} °C` : null, hf?.powerW != null ? `${Math.round(hf.powerW)} W` : null].filter(Boolean).join(' · ') || '暂无 GPU 读数' },
+    { label: 'CPU', tint: '#34C759', glyph: 'cpu', value: sys ? `${(sys.cpu.utilization_ratio * 100).toFixed(1)}%` : '—', note: sys ? `${sys.cpu.cores} 线程 · 负载 ${sys.cpu.load1} / ${sys.cpu.load5} / ${sys.cpu.load15}` : '暂无主机读数' },
+    { label: '内存', tint: '#30B0C7', glyph: 'services', value: mem ? fmtGiB(mem.used_mib) : '—', unit: mem ? `/ ${fmtGiB(mem.total_mib, 0)} GB` : null, note: mem ? `Swap ${fmtGiB(mem.swap_used_mib)} / ${fmtGiB(mem.swap_total_mib, 0)} GB${mem.swap_used_ratio > 0.9 ? ' · 已满' : ''}` : '暂无主机读数' },
+  ];
   return h('div', { class: 'page' },
-    pageHead('资源监控', 'GPU、主机与各推理服务的资源占用。'),
+    pageHead('资源监控', 'GPU、主机与各推理服务的资源占用。读数只读获取，取不到的一律显示「—」。'),
+    metricCards(cards),
     h('div', { class: 'row' },
-      h('div', { style: { flex: '1 1 320px', 'min-width': 0 } }, section('GPU', hf ? h('div', { class: 'group' },
-        metric('利用率', hf.utilRatio == null ? null : Math.round(hf.utilRatio * 100), '%'),
-        metric('显存', hf.vramUsedMiB == null ? null : `${fmtGiB(hf.vramUsedMiB)} / ${fmtGiB(hf.vramTotalMiB, 0)}`, ' GB'),
-        metric('温度', hf.tempC == null ? null : Math.round(hf.tempC), ' °C'),
-        metric('功耗', hf.powerW == null ? null : Math.round(hf.powerW), ' W')) : quietEmpty(hostState, { title: '暂无 GPU 读数', body: '接入 Prometheus 后显示。' }),
-      '数据来自 Prometheus 只读查询，超过 90 秒未更新的读数不予显示。')),
-      h('div', { style: { flex: '2 1 520px', 'min-width': 0 } }, panel('', '显存分配', model.vram ? '每个方块代表 0.25 GB' : null,
-        model.vram ? vramPanel(model.vram) : quietEmpty(hostState, { title: '暂无显存读数', body: '接入 Prometheus 后，这里会按推理服务显示显存分配。' })))),
+      panel('grow', '显存分配', model.vram ? `GPU 显存 ${fmtGiB(model.vram.totalMiB, 0)} GB · 每个方块代表 0.25 GB` : null,
+        model.vram ? vramPanel(model.vram) : quietEmpty(hostState, { title: '暂无显存读数', body: '接入 Prometheus 后，这里会按推理服务显示显存分配。' })),
+      panel('side', 'GPU 与服务', null, gpuFacts(hf, hostState))),
+    sys ? myShare(sys, me, hf?.vramTotalMiB) : null,
+    sys ? userDonuts(sys, me, hf?.vramTotalMiB) : null,
+    sys ? hostSystem(sys, me) : null,
     panel('', '各推理服务资源占用', null, model.services
       ? (withVram.length ? servicesTable(withVram, { compact: true }) : quietEmpty('ready', { title: '暂无按服务统计的显存', body: '推理服务登记并上报进程指标后，这里会列出每个服务的显存占用。' }))
       : quietEmpty(opsState, SERVICES_EMPTY)),
-    h('div', { class: 'row' },
-      panel('grow', '每小时请求数', null, model.hourly ? hourlyChart(model.hourly.points, { title: false }) : quietEmpty('not_configured', CALLS_EMPTY)),
-      panel('side', '调用热度', '按星期与小时统计', quietEmpty('not_configured', { title: '暂无小时级统计', body: '网关按小时汇总调用后，这里将显示星期 × 小时的调用热力图。' }))));
+    h('p', { class: 'muted', style: { margin: 0, 'font-size': '12.5px' } }, '调用量、Token 与延迟统计在「网关」一栏。'));
 }
 
 /* ============================== 模型评测 ============================== */
@@ -558,7 +639,7 @@ export async function users(ctx) {
   else { const r = await loadUsers(); state = r.state; list = r.state === 'ready' ? r.value : null; }
   const root = h('div', { class: 'page' });
   if (!list) {
-    root.append(pageHead('用户与权限', USERS_SUBTITLE), emptyState(state));
+    put(root, pageHead('用户与权限', USERS_SUBTITLE), emptyState(state));
     return root;
   }
   const st = { sel: list.find((u) => u.username !== ctx.me?.username)?.id ?? list[0]?.id, temp: null, creating: false, msg: null };
@@ -577,9 +658,9 @@ export async function users(ctx) {
   function draw() {
     while (root.firstChild) root.firstChild.remove();
     const sel = list.find((u) => u.id === st.sel) ?? list[0];
-    root.append(pageHead('用户与权限', USERS_SUBTITLE,
+    put(root, pageHead('用户与权限', USERS_SUBTITLE,
       h('button', { type: 'button', class: 'btn primary', onclick: () => { st.creating = true; st.temp = null; draw(); } }, '添加用户')));
-    if (st.msg) root.append(h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.msg));
+    if (st.msg) put(root, h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.msg));
 
     const table = h('div', { class: 'table-wrap', style: { flex: '999 1 560px', 'min-width': 0 } }, h('table', { class: 'data', style: { 'min-width': '560px' } },
       h('thead', {}, h('tr', {}, ['用户', '限定 Linux 用户', '角色', '状态', '最近登录'].map((t) => h('th', { scope: 'col' }, t)))),
@@ -644,7 +725,7 @@ export async function users(ctx) {
           } },
             sel.status === 'active' ? '停用用户…' : '恢复用户')));
     }
-    root.append(h('div', { class: 'row', style: { gap: '24px', 'align-items': 'flex-start' } }, table, side));
+    put(root, h('div', { class: 'row', style: { gap: '24px', 'align-items': 'flex-start' } }, table, side));
   }
   draw();
   return root;
@@ -728,10 +809,10 @@ export async function extensions(ctx) {
 
   function draw() {
     while (root.firstChild) root.firstChild.remove();
-    root.append(pageHead('插件', '推理框架、监控与评测以插件形式接入。自带网页界面的插件可以从这里跳转打开；没有界面的就是单纯的推理或数据插件，在平台内直接使用。'));
-    if (st.msg) root.append(h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.msg));
-    if (linksState !== 'ready' && !ctx.demo) root.append(h('p', { class: 'muted', style: { margin: 0, 'font-size': '13px' } }, '跳转地址暂时无法读取，插件卡片仍按已知信息显示。'));
-    root.append(h('div', { class: 'ext-grid' }, EXTENSIONS.map((e) => h('article', { class: 'ext' },
+    put(root, pageHead('插件', '推理框架、监控与评测以插件形式接入。自带网页界面的插件可以从这里跳转打开；没有界面的就是单纯的推理或数据插件，在平台内直接使用。'));
+    if (st.msg) put(root, h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.msg));
+    if (linksState !== 'ready' && !ctx.demo) put(root, h('p', { class: 'muted', style: { margin: 0, 'font-size': '13px' } }, '跳转地址暂时无法读取，插件卡片仍按已知信息显示。'));
+    put(root, h('div', { class: 'ext-grid' }, EXTENSIONS.map((e) => h('article', { class: 'ext' },
       h('div', { class: 'ext-head' },
         h('span', { class: 'ext-glyph', style: { background: e.tint }, 'aria-hidden': 'true' }, e.glyph),
         h('div', { style: { flex: '1 1 auto', 'min-width': 0 } }, h('h2', { class: 'ext-name' }, e.name), h('div', { class: 'muted', style: { 'font-size': '13px' } }, e.kind)),

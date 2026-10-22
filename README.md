@@ -63,7 +63,9 @@ LLMLAB_DEV_API=http://127.0.0.1:8790 npm run serve
 # 加 --model-root DIR（可重复）后，「模型库 → 本机发现」会在这些目录里找 HF 模型目录与 GGUF 文件。
 ```
 
-CLI / Agent：在「API 密钥 → 命令行 / Agent 令牌」创建令牌（只显示一次），令牌拥有与该账户相同的资源权限：
+模型调用走控制台自带的网关（同源 `/v1`，OpenAI 兼容）：在「网关 → 模型路由」把自己的推理服务发布成模型名，在「网关 → API 密钥」建自己的 `sk-lab-…` 密钥。引擎自身的密钥用 `--engine-secret-ref ENGINE=FILE:VAR` 只留在服务端。日志以密钥为单位，正文默认不记录。详见 [docs/gateway.md](docs/gateway.md)。
+
+CLI / Agent：在「我的账户 → 命令行 / Agent 令牌」创建令牌（只显示一次），令牌拥有与该账户相同的资源权限：
 
 ```bash
 export LLMLAB_API_BASE=http://127.0.0.1:8123 LLMLAB_TOKEN=<令牌>
@@ -132,7 +134,7 @@ Phase B 评审候选 `c941cd3` 的本地 CPU 测试记录：Python `3320` 项（
 - **[V6.2 生产接口与数据契约总目录](docs/integrations/README.md)** — Dell/Strata/Prometheus/Grafana/Gateway/EvalScope 能力清单、九页真实数据需求、Linux 管理员 ADR、机器可读接口登记，以及 Claude 不连接 A6000 的无虚构数据开发工作流。
 - **[Claude Code 前端改版交接包](docs/frontend/README.md)** — 当前 V6.2 Apple 外观；冻结 V5 保留页面与 Atlas 结构，国考交互与 V3 可读性供参考；前端完整开发须遵守上述生产数据契约。
 - [访问边界](docs/access-boundaries.md) · [Linux PAM 契约](docs/linux-pam-login.md) · [临时管理员模式](docs/v6-shared-admin-mode.md)。
-- [Registry 与 CLI](docs/registry-cli-contract.md) · [BFF 集成](docs/bff-integration-lane49-20261016.md)。
+- [集成网关与推理服务参数](docs/gateway.md) · [Registry 与 CLI](docs/registry-cli-contract.md) · [BFF 集成](docs/bff-integration-lane49-20261016.md)。
 - [Calls](docs/portal-call-log-contract.md) · [Atlas](docs/atlas-data-contract.md) · [Observability](docs/observability-contract.md)。
 - [Evaluation](docs/evalscope-center.md) · [EvalScope/Legacy 分源报告](docs/evaluation-report-sources-contract.md)。
 - [Phase B 集成证据](docs/atelier-v6-phase-b-candidate-2026-10-16.md) · [发布与回滚检查](docs/atelier-v6-release-checklist-2026-10-16.md)。
