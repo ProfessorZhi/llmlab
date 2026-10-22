@@ -68,6 +68,8 @@ from . import host_summary as bff_host_summary
 from . import identity as bff_identity
 from . import invoke as bff_invoke
 from . import ops as bff_ops
+from ..gateway import service as bff_gateway_service
+from ..runtime import params as runtime_params
 from . import integrations as bff_integrations
 from . import origin as bff_origin
 from . import route_map as bff_route_map
@@ -203,6 +205,10 @@ class OpsApplication:
         token_source=None,
         integrations=None,
         registry_api=None,
+        gateway=None,
+        gateway_app=None,
+        param_store=None,
+        param_fetch=None,
     ) -> None:
         self.auth_app = auth_app
         self.cfg = auth_app.cfg
@@ -236,6 +242,13 @@ class OpsApplication:
         #: 的 ``/api/v2/registry/*`` 请求原样交给它；浏览器（cookie）请求仍走本层的
         #: 会话路由。``None`` = 本进程不提供 CLI 入口。
         self.registry_api = registry_api
+        #: 集成网关：``gateway`` 是管理面（``backend.gateway.service.GatewayService``），
+        #: ``gateway_app`` 是同源 ``/v1/*`` 的调用入口。``None`` = 本部署没有网关。
+        self.gateway = gateway
+        self.gateway_app = gateway_app
+        #: 推理服务目标参数（``backend.runtime.params.ParamStore``）与只读实测函数。
+        self.param_store = param_store
+        self.param_fetch = param_fetch
         #: scoped CLI token 通道。``None`` 时建一条**关闭**的：它仍然负责带
         #: ``Authorization`` 头的请求，只是对它们一律答 401。token 的签发/撤销/审计
         #: 归 IAM Lane；在它落地之前，把通道开着就是一条没有审计的旁路。
@@ -259,6 +272,18 @@ class OpsApplication:
     def __call__(self, environ: Mapping[str, Any], start_response: Callable) -> Iterable[bytes]:
         if self._is_registry_token_request(environ):
             return self._serve_registry_api(environ, start_response)
+        if self.gateway_app is not None and (environ.get("PATH_INFO") or "").startswith("/v1/"):
+            # 同源的模型调用入口：先过同一道 Host 权威守卫，再交给网关（它只认 API 密钥，不看会话）。
+            refusal = self.check_authority(
+                host_header=environ.get("HTTP_HOST"), server_port=environ.get("SERVER_PORT")
+            )
+            if refusal is not None:
+                start_response(
+                    f"{refusal.status} {REASON_PHRASES.get(refusal.status, DEFAULT_REASON)}",
+                    list(refusal.headers),
+                )
+                return [refusal.body]
+            return self.gateway_app(environ, start_response)
         request = build_request(environ, max_body=self.cfg.max_request_bytes)
         response = self.handle(
             request,
@@ -916,6 +941,134 @@ class OpsApplication:
         except bff_integrations.InvalidIntegration as exc:
             return _error_response(400, "bff.invalid_request", str(exc))
         return _json_response(200, {"data": {"integrations": store.listing(is_admin=True)}})
+
+    # --- /api/gateway/* ------------------------------------------------------
+
+    def _gateway_call(self, request, fn, *, write: bool = False, body: bool = False):
+        self._reject_asserted_identity(request)
+        if write:
+            self._write_preflight(request)
+        principal = self._principal(request)
+        if self.gateway is None:
+            return _error_response(503, "bff.gateway_not_attached", "the gateway is not attached")
+        payload = None
+        if body:
+            payload = _json_body(request)
+            if payload is None:
+                return _error_response(400, "bff.invalid_request", "a JSON object body is required")
+        try:
+            data = fn(principal, payload) if body else fn(principal)
+        except bff_gateway_service.ManagementError as exc:
+            return _error_response(exc.status, exc.code, exc.message)
+        return _json_response(200, {"ok": True, "data": data})
+
+    def _gateway_overview(self, request):
+        return self._gateway_call(request, lambda p: self.gateway.overview(
+            p, window=request.query_one("window"), view=request.query_one("view")))
+
+    def _gateway_keys(self, request):
+        return self._gateway_call(request, lambda p: self.gateway.list_keys(p, view=request.query_one("view")))
+
+    def _gateway_key_create(self, request):
+        return self._gateway_call(request, lambda p, b: self.gateway.create_key(p, b), write=True, body=True)
+
+    def _gateway_key_revoke(self, request, key_id: str):
+        return self._gateway_call(request, lambda p: self.gateway.revoke_key(p, key_id), write=True)
+
+    def _gateway_key_update(self, request, key_id: str):
+        return self._gateway_call(request, lambda p, b: self.gateway.update_key(p, key_id, b), write=True, body=True)
+
+    def _gateway_log_detail(self, request, request_id: str):
+        return self._gateway_call(request, lambda p: self.gateway.log_detail(p, request_id))
+
+    def _gateway_models(self, request):
+        return self._gateway_call(request, lambda p: self.gateway.list_routes(p))
+
+    def _gateway_model_publish(self, request):
+        return self._gateway_call(request, lambda p, b: self.gateway.publish_route(p, b), write=True, body=True)
+
+    def _gateway_model_update(self, request, route_id: str):
+        return self._gateway_call(request, lambda p, b: self.gateway.update_route(p, route_id, b), write=True, body=True)
+
+    def _gateway_logs(self, request):
+        return self._gateway_call(request, lambda p: self.gateway.logs(
+            p, view=request.query_one("view"), model=request.query_one("model"),
+            outcome=request.query_one("outcome"), key_id=request.query_one("key_ref"),
+            limit=request.query_one("limit")))
+
+    def _gateway_playground(self, request):
+        return self._gateway_call(request, lambda p, b: self.gateway.playground(p, b), write=True, body=True)
+
+    # --- /api/v2/registry/engines/{id}/params -------------------------------
+
+    def _engine_for_params(self, principal, engine_id: str, *, write: bool):
+        policy = self.service.policy(principal.requester)
+        try:
+            engine = policy.require_engine_read(engine_id)
+        except registry_errors.NotFound:
+            # 通过网关共享给全实验室的服务，成员也能看它的参数（只读）。
+            shared = self.gateway is not None and any(
+                r.engine_id == engine_id and r.enabled and r.visibility == "all"
+                for r in self.gateway.store.routes()
+            )
+            engine = self.service.store.engine_by_id(engine_id) if shared else None
+            if engine is None:
+                raise
+        if write and engine.owner_principal != principal.principal and not principal.is_platform_admin:
+            raise registry_errors.AccessDenied("only the service owner or an administrator can change its parameters")
+        return engine
+
+    def _params_payload(self, principal, engine) -> dict:
+        framework = next((t.split(":", 1)[1] for t in (engine.tags or ()) if t.startswith("framework:")), None)
+        schema = runtime_params.schema_for(framework)
+        target = engine.target or {}
+        observed = (
+            runtime_params.observe(framework, target.get("host"), int(target.get("port")),
+                                   fetch=self.param_fetch or runtime_params.loopback_fetch)
+            if schema else {"reachable": None, "values": {}}
+        )
+        saved = self.param_store.get(engine.id) if self.param_store else None
+        desired = (saved or {}).get("values") or {}
+        return {
+            "engine_id": engine.id,
+            "engine_name": engine.name,
+            "framework": framework,
+            "supported": schema is not None,
+            "schema": [p.to_dict() for p in schema["params"]] if schema else [],
+            "observed": observed,
+            "desired": desired,
+            "desired_updated_at": (saved or {}).get("updated_at"),
+            "state": runtime_params.compare(desired, observed["values"], schema) if schema else "none",
+            "command": runtime_params.render_command(framework, desired, port=target.get("port")) if (schema and desired) else None,
+            "can_edit": engine.owner_principal == principal.principal or principal.is_platform_admin,
+            "apply": "restart_by_owner",
+        }
+
+    def _engine_params(self, request, engine_id: str):
+        self._reject_asserted_identity(request)
+        principal = self._principal(request)
+        engine = self._engine_for_params(principal, engine_id, write=False)
+        return _json_response(200, {"ok": True, "data": self._params_payload(principal, engine)})
+
+    def _engine_params_update(self, request, engine_id: str):
+        self._reject_asserted_identity(request)
+        self._write_preflight(request)
+        principal = self._principal(request)
+        if self.param_store is None:
+            return _error_response(503, "bff.params_not_attached", "service parameters are not attached")
+        engine = self._engine_for_params(principal, engine_id, write=True)
+        body = _json_body(request)
+        if body is None:
+            return _error_response(400, "bff.invalid_request", "a JSON object body is required")
+        payload = self._params_payload(principal, engine)
+        if not payload["supported"]:
+            return _error_response(400, "bff.invalid_request", "this framework has no parameter schema")
+        try:
+            values = runtime_params.validate(payload["framework"], body.get("values"))
+        except ValueError as exc:
+            return _error_response(400, "bff.invalid_request", str(exc))
+        self.param_store.put(engine.id, payload["framework"], values, principal.principal)
+        return _json_response(200, {"ok": True, "data": self._params_payload(principal, engine)})
 
     # --- POST /api/v2/registry/engines[/preflight] --------------------------
 

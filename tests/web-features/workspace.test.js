@@ -339,6 +339,19 @@ const BFF_ROUTE_CONTRACT = [
   { name: 'registry.engines.register', method: 'POST', path: '/api/v2/registry/engines', auth: 'session', kind: 'write', scope: 'registry:write' },
   { name: 'registry.discovery', method: 'GET', path: '/api/v2/registry/discovery', auth: 'session', kind: 'read', scope: 'registry:read' },
   { name: 'registry.models.register', method: 'POST', path: '/api/v2/registry/models', auth: 'session', kind: 'write', scope: 'registry:write' },
+  { name: 'gateway.overview', method: 'GET', path: '/api/gateway/overview', auth: 'session', kind: 'read', scope: null },
+  { name: 'gateway.keys', method: 'GET', path: '/api/gateway/keys', auth: 'session', kind: 'read', scope: null },
+  { name: 'gateway.keys.create', method: 'POST', path: '/api/gateway/keys/create', auth: 'session', kind: 'write', scope: null },
+  { name: 'gateway.keys.revoke', method: 'POST', path: '/api/gateway/keys/{key_id}/revoke', auth: 'session', kind: 'write', scope: null },
+  { name: 'gateway.keys.update', method: 'POST', path: '/api/gateway/keys/{key_id}/update', auth: 'session', kind: 'write', scope: null },
+  { name: 'gateway.models', method: 'GET', path: '/api/gateway/models', auth: 'session', kind: 'read', scope: null },
+  { name: 'gateway.models.publish', method: 'POST', path: '/api/gateway/models/publish', auth: 'session', kind: 'write', scope: null },
+  { name: 'gateway.models.update', method: 'POST', path: '/api/gateway/models/{route_id}/update', auth: 'session', kind: 'write', scope: null },
+  { name: 'gateway.logs', method: 'GET', path: '/api/gateway/logs', auth: 'session', kind: 'read', scope: null },
+  { name: 'gateway.logs.detail', method: 'GET', path: '/api/gateway/logs/{request_id}', auth: 'session', kind: 'read', scope: null },
+  { name: 'gateway.playground', method: 'POST', path: '/api/gateway/playground', auth: 'session', kind: 'write', scope: null },
+  { name: 'registry.engines.params', method: 'GET', path: '/api/v2/registry/engines/{engine_id}/params', auth: 'session', kind: 'read', scope: 'registry:read' },
+  { name: 'registry.engines.params.update', method: 'POST', path: '/api/v2/registry/engines/{engine_id}/params/update', auth: 'session', kind: 'write', scope: 'registry:write' },
   { name: 'ops.invoke', method: 'POST', path: '/api/v2/ops/endpoints/{endpoint_id}/invoke', auth: 'session', kind: 'write', scope: 'registry:endpoint:invoke' },
   { name: 'portal.infra_summary', method: 'GET', path: '/api/infra/summary', auth: 'session', kind: 'read', scope: 'observability:host:read' },
   { name: 'atlas.calls', method: 'GET', path: '/api/atlas/calls', auth: 'session', kind: 'read', scope: 'atlas:calls:self:read' },
@@ -371,19 +384,20 @@ test('the admin route matrix mirrors backend/bff/route_map.py exactly', () => {
   }));
   assert.ok(specs.length >= 10, 'parser found the route table');
 
-  // The mirror is pinned to the single BFF route-map contract (26 routes: the
+  // The mirror is pinned to the single BFF route-map contract (39 routes: the
   // 17 from PR #85 @ 6062ed39, `evaluation.report_download` from #92/#91,
   // `portal.events` from #110, `ops.invoke` from SEAM-1 #115, and the two
   // web-registration routes `registry.engines.{preflight,register}`, and the
   // plugin jump-address pair `portal.integrations{,.update}`, plus
-  // `registry.discovery` and `registry.models.register`). A stacked
+  // `registry.discovery` and `registry.models.register`, plus the 11 integrated
+  // gateway routes and the per-engine parameter pair). A stacked
   // checkout can predate one of those BFF PRs and carry a shorter table. Two
   // rules keep that honest — neither is a skip, and together they fail on any
   // divergence in either direction:
   //   1. every row the local Python table declares must match the mirror exactly;
   //   2. the rows the mirror has and the local table does not must be EXACTLY
   //      the pending set. Any other unexplained row fails.
-  assert.equal(BFF_ROUTES.length, 26, 'the mirror is pinned to the 26-route contract');
+  assert.equal(BFF_ROUTES.length, 39, 'the mirror is pinned to the 39-route contract');
 
   // The independent pin: every row's method/path/session/read-write/scope must
   // match the recorded contract, including the rows a stacked checkout cannot

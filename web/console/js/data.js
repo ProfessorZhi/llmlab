@@ -33,7 +33,27 @@ export const PATHS = Object.freeze({
   integrations: '/api/portal/integrations',
   discovery: '/api/v2/registry/discovery',
   registryModels: '/api/v2/registry/models',
+  gatewayOverview: '/api/gateway/overview',
+  gatewayKeys: '/api/gateway/keys',
+  gatewayKeyCreate: '/api/gateway/keys/create',
+  gatewayModels: '/api/gateway/models',
+  gatewayPublish: '/api/gateway/models/publish',
+  gatewayLogs: '/api/gateway/logs',
+  gatewayPlayground: '/api/gateway/playground',
+  // 主机系统读数与引擎实时负载：形状取自 2026-10-22 的真实快照（docs/console-snapshot-20261022）。
+  // 本部署没有这两条路由时它们是 404 ⇒ not_configured，页面就不画那一块。
+  infraSystem: '/api/infra/system',
+  engineLive: '/api/v2/engine/live',
 });
+
+/** 路径里的 id 只允许安全字符，免得拼出另一条路由。 */
+export const pathId = (id) => encodeURIComponent(String(id ?? '')).replace(/%/g, '');
+export const gatewayKeyRevoke = (id) => `/api/gateway/keys/${pathId(id)}/revoke`;
+export const gatewayKeyUpdate = (id) => `/api/gateway/keys/${pathId(id)}/update`;
+export const gatewayLogDetail = (id) => `/api/gateway/logs/${pathId(id)}`;
+export const gatewayModelUpdate = (id) => `/api/gateway/models/${pathId(id)}/update`;
+export const engineParams = (id) => `/api/v2/registry/engines/${pathId(id)}/params`;
+export const engineParamsUpdate = (id) => `/api/v2/registry/engines/${pathId(id)}/params/update`;
 
 const NOT_CONFIGURED = new Set([404, 501, 503]);
 
@@ -166,6 +186,14 @@ export async function loadIntegrations(opts) {
   if (r.state !== 'ready') return r;
   const list = r.value?.data?.integrations;
   return Array.isArray(list) ? { ...r, value: list } : { ...r, state: 'error', value: null, reason: 'bad-shape' };
+}
+
+/** ``{ok, data}`` 信封 ⇒ ``data``；形状不对就是 error。 */
+export async function loadData(path, opts) {
+  const r = await getJSON(path, opts);
+  if (r.state !== 'ready') return r;
+  const data = r.value?.data;
+  return data && typeof data === 'object' ? { ...r, value: data } : { ...r, state: 'error', value: null, reason: 'bad-shape' };
 }
 
 /** 插件的跳转地址只允许 http(s) 绝对地址或站内路径；其余一律不渲染成链接。 */

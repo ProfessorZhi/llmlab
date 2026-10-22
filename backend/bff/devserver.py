@@ -35,7 +35,11 @@ from ..evaluation import targets as eval_targets
 from ..observability import engines as obs_engines
 from ..observability import identity as obs_identity
 from ..registry.gateway import DetachedGatewayAdapter, MockGatewayAdapter
+from ..gateway.proxy import GatewayApplication, GatewayCore, parse_secret_refs
+from ..gateway.service import GatewayService
+from ..gateway.store import GatewayStore
 from ..registry.api import RegistryApplication
+from ..runtime.params import ParamStore
 from ..registry.identity import Principal, PrincipalDirectory, TrustedTokenIntrospector
 from ..registry.health import LoopbackHttpProber, LoopbackProtocolProber, StaticProber
 from ..registry.local_discovery import LocalDiscovery
@@ -102,6 +106,7 @@ def build_application(
     trusted_authorities: tuple[str, ...] = (),
     observe_local_engines: bool = False,
     model_roots: tuple[str, ...] = (),
+    engine_secret_refs: tuple[str, ...] = (),
 ) -> OpsApplication:
     """把三块拼起来。**只建对象，不开端口。**
 
@@ -167,6 +172,16 @@ def build_application(
         gateway=MockGatewayAdapter() if mock_gateway else DetachedGatewayAdapter(),
     )
 
+    # 集成网关：虚拟密钥、模型路由与调用元数据存在状态目录；上游引擎的 key 只点名位置。
+    gateway_store = GatewayStore(Path(state_dir) / "gateway.sqlite3")
+    gateway_store.initialize()
+    gateway_core = GatewayCore(
+        store=gateway_store, registry=service, secret_refs=parse_secret_refs(engine_secret_refs)
+    )
+    gateway_service = GatewayService(gateway_core)
+    param_store = ParamStore(Path(state_dir) / "runtime.sqlite3")
+    param_store.initialize()
+
     observability = build_observability_adapter(service=service, accounts=accounts)
     evaluation = build_evaluation_adapter(service=service)
 
@@ -192,6 +207,9 @@ def build_application(
         authority_policy=authority_policy,
         integrations=IntegrationStore(Path(state_dir) / "integrations.json"),
         registry_api=RegistryApplication(service),
+        gateway=gateway_service,
+        gateway_app=GatewayApplication(gateway_core),
+        param_store=param_store,
     )
 
 
@@ -417,6 +435,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--engine-secret-ref",
+        action="append",
+        default=[],
+        metavar="ENGINE=FILE:VAR",
+        help=(
+            "where the gateway reads an engine's own API key (engine name or id; the file holds "
+            "VAR=value). Only the location is configured; the key never reaches a browser or a log"
+        ),
+    )
+    parser.add_argument(
         "--synthetic-logins",
         action="store_true",
         help="print the synthetic identities (no passwords, no tokens)",
@@ -452,6 +480,7 @@ def main(argv: list[str] | None = None) -> int:
         trusted_authorities=tuple(args.trusted_authority),
         observe_local_engines=args.observe_local_engines,
         model_roots=tuple(args.model_root),
+        engine_secret_refs=tuple(args.engine_secret_ref),
     )
 
     if args.synthetic_logins:
