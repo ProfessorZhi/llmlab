@@ -53,6 +53,33 @@ export function clock(iso) {
 }
 
 /* ---------------- 指标条 ---------------- */
+const shortStamp = (iso) => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+
+/**
+ * 调用量脚注。三种状态必须分开说：
+ * 1. 有本人数字 —— 报数字与口径；
+ * 2. **接了源、但窗口内没有** —— 说「0 次」并给出日志最近一条的时间；
+ * 3. 没接线 / 读不到 —— 分别说明，都不能冒充成「0 次」。
+ */
+export function requestsNote(k) {
+  if (k.requests != null) return k.requestsScope ?? ' ';
+  const f = k.requestsFeed;
+  if (!f) return '调用数据未接入';
+  if (!f.readable) return '调用日志读不到（权限或路径）';
+  if (!f.events) return '调用日志为空 · 还没有调用';
+  const when = f.lastTs ? shortStamp(f.lastTs) : null;
+  if (f.inWindow) {
+    if (f.keysBound === 0) return `近 24 小时 ${fmtInt(f.inWindow)} 次 · 密钥无属主声明，归不到人`;
+    return `近 24 小时 ${fmtInt(f.inWindow)} 次 · 不在你的密钥上`;
+  }
+  return `近 24 小时 0 次 · 日志最近 ${when ?? '—'}`;
+}
+
 /** 顶部指标：资源与推理服务优先，调用量居末。没有读数一律显示「—」。 */
 export function kpiBar(k) {
   const pct = (v) => `${Math.round(v * 100)}%`;
@@ -60,7 +87,7 @@ export function kpiBar(k) {
   const meter = (ratio, label) => h('div', { class: 'meter', role: 'img', 'aria-label': `${label} ${Math.round(ratio * 100)}%` },
     h('div', { style: { width: `${(ratio * 100).toFixed(1)}%` } }));
   const KPI_STYLE = {
-    '显存占用': ['#5856D6', 'memory'], 'GPU 利用率': ['#FF9500', 'usage'], '推理服务': ['#34C759', 'services'], '调用量': ['#007AFF', 'requests'],
+    '显存占用': ['#5856D6', 'memory'], 'GPU 利用率': ['#FF9500', 'usage'], '登记引擎': ['#34C759', 'services'], '调用量': ['#007AFF', 'requests'],
   };
   const cell = (label, value, note) => {
     const [tint, glyph] = KPI_STYLE[label] ?? ['#007AFF', 'overview'];
@@ -76,12 +103,12 @@ export function kpiBar(k) {
     cell('GPU 利用率',
       h('div', { class: 'kpi-value' }, k.utilRatio == null ? '—' : pct(k.utilRatio)),
       k.utilRatio == null ? h('div', { class: 'kpi-note' }, '暂无 GPU 读数') : h('div', { class: 'kpi-note' }, gpuNote || ' ')),
-    cell('推理服务',
+    cell('登记引擎',
       h('div', { class: 'kpi-value' }, k.servicesOnline == null ? '—' : String(k.servicesOnline), k.servicesTotal != null ? h('small', {}, ` / ${k.servicesTotal}`) : null),
-      h('div', { class: 'kpi-note' }, k.servicesTotal == null ? '暂无登记信息' : k.servicesTotal === 0 ? '尚未登记' : '运行中 / 已登记')),
+      h('div', { class: 'kpi-note' }, k.servicesTotal == null ? '暂无可信登记' : k.servicesTotal === 0 ? '尚未登记' : '健康 / 已登记')),
     cell('调用量',
       h('div', { class: 'kpi-value' }, k.requests == null ? '—' : fmtInt(k.requests)),
-      h('div', { class: 'kpi-note' }, k.requests == null ? '暂无调用' : (k.requestsScope ?? ' '))));
+      h('div', { class: 'kpi-note' }, requestsNote(k))));
 }
 
 /** 次要数据（API 调用等）的空态：没配置、没调用都属正常，用平静的说明而不是报错。读取失败仍如实说明。 */
@@ -125,19 +152,21 @@ export function vramPanel(vram) {
   let focus = null;
   const holder = h('div', { class: 'chart-row' });
   const used = vram.parts.reduce((t, p) => t + (p.mib ?? 0), 0);
-  const free = vram.usedMiB != null ? Math.max(0, vram.totalMiB - vram.usedMiB) : Math.max(0, vram.totalMiB - used);
+  const free = vram.freeMiB != null
+    ? Math.max(0, vram.freeMiB)
+    : vram.usedMiB != null ? Math.max(0, vram.totalMiB - vram.usedMiB) : Math.max(0, vram.totalMiB - used);
   const draw = () => {
     while (holder.firstChild) holder.firstChild.remove();
     const lay = dotGridLayout({ totalMiB: vram.totalMiB, parts: vram.parts, unitMiB: 256, cols: 24 });
     const cell = 20;
-    const aria = `显存分配：${vram.parts.map((p) => `${p.label} ${fmtGiB(p.mib)} GB`).join('，')}，可用 ${fmtGiB(free)} GB`;
+    const aria = `显存状态：${vram.parts.map((p) => `${p.label} ${fmtGiB(p.mib)} GB`).join('，')}，可用 ${fmtGiB(free)} GB`;
     holder.append(
       s('svg', { class: 'dots', viewBox: `0 0 ${lay.cols * cell} ${lay.rows * cell}`, width: lay.cols * cell, height: lay.rows * cell, role: 'img', 'aria-label': aria },
         lay.cells.map((c) => s('rect', {
           x: c.col * cell + 2, y: c.row * cell + 2, width: cell - 4, height: cell - 4, rx: 4,
           fill: c.color ?? 'var(--track)', opacity: focus && c.id !== focus ? (c.id ? 0.2 : 0.5) : 1,
         }))),
-      h('div', { class: 'legend', role: 'group', 'aria-label': '按模型服务查看显存' },
+      h('div', { class: 'legend', role: 'group', 'aria-label': '显存组成与可用量' },
         vram.parts.map((p) => h('button', {
           type: 'button', class: 'legend-item', 'aria-pressed': String(focus === p.id),
           onclick: () => { focus = focus === p.id ? null : p.id; draw(); },

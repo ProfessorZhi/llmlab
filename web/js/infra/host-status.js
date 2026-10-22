@@ -2,7 +2,7 @@
  *
  *  Where the rest of the shell is synthetic by design, this panel is the one
  *  place that may show a real Dell number. It shows them only when the server
- *  has projected them from the verified Prometheus facts — and it says so, or it
+ *  has projected them from verified Prometheus or NVML facts — and it says so, or it
  *  says UNKNOWN. There is no third state and no fallback to the demo fixture:
  *  a silent 0 would be a lie about a measurement nobody took.
  *
@@ -49,6 +49,7 @@ export const HOST_STATUS_PATH = '/api/infra/summary';
 // must fail the shared-fixture test rather than silently agree with itself.
 
 export const PROJECTION_SOURCE = 'prometheus-readonly';
+export const PROJECTION_SOURCES = Object.freeze(new Set([PROJECTION_SOURCE, 'nvml-verified']));
 export const PROJECTION_VERSION = 1;
 
 /** A sample older than this is not a reading. Same threshold as the server and
@@ -75,14 +76,18 @@ export const METRIC_UNITS = Object.freeze({
   gpu_memory_used_mib: 'mib',
   gpu_memory_total_mib: 'mib',
 });
+export const OPTIONAL_METRIC_UNITS = Object.freeze({
+  gpu_memory_free_mib: 'mib',
+  gpu_memory_reserved_mib: 'mib',
+});
 
-export const SERVICE_KEYS = Object.freeze(['prometheus', 'gateway', 'grafana', 'evalscope', 'strata']);
+export const SERVICE_KEYS = Object.freeze(['prometheus', 'gateway', 'grafana', 'evalscope', 'strata', 'strata_model']);
 
 /** Upstream reasons the projection may pass through. Anything else collapses to
  *  `unknown` — a free-text "reason" would be an uncontrolled rendering channel. */
 export const UPSTREAM_REASONS = Object.freeze(new Set([
   'no-sample', 'stale', 'non-finite-sample', 'prometheus-error', 'timeout',
-  'unreachable', 'offline', 'metric-name-unconfirmed',
+  'unreachable', 'offline', 'metric-name-unconfirmed', 'invalid_response',
 ]));
 
 /** Reject codes, verbatim from the server validator so a reason read on screen
@@ -156,6 +161,8 @@ const METRIC_LABELS = Object.freeze({
   strata_up: 'Strata 引擎',
   gpu_memory_used_mib: '显存已用',
   gpu_memory_total_mib: '显存总量',
+  gpu_memory_free_mib: '显存可用',
+  gpu_memory_reserved_mib: '驱动保留显存',
 });
 const UNIT_SUFFIX = Object.freeze({ ratio: '%', celsius: '°C', watts: 'W', mib: 'MiB', bool: '' });
 
@@ -195,7 +202,7 @@ const unknownMetric = (key, reason, unit) => ({
   key,
   live: false,
   value: null,
-  unit: unit ?? METRIC_UNITS[key] ?? null,
+  unit: unit ?? METRIC_UNITS[key] ?? OPTIONAL_METRIC_UNITS[key] ?? null,
   sampleAt: null,
   ageMs: null,
   reason,
@@ -218,7 +225,7 @@ function envelopeRejection(payload) {
   // an upstream that means "not synthetic" with 0 cannot be told apart from one
   // that means "unknown" with 0.
   if (synthetic !== false) return { reason: REJECT.SYNTHETIC_SOURCE, source, version, readonly, synthetic };
-  if (source !== PROJECTION_SOURCE) return { reason: REJECT.UNTRUSTED_SOURCE, source, version, readonly, synthetic };
+  if (!PROJECTION_SOURCES.has(source)) return { reason: REJECT.UNTRUSTED_SOURCE, source, version, readonly, synthetic };
   if (readonly !== true) return { reason: REJECT.NOT_READONLY, source, version, readonly, synthetic };
   if (version !== PROJECTION_VERSION) return { reason: REJECT.WRONG_VERSION, source, version, readonly, synthetic };
   return { reason: '', source, version, readonly, synthetic };
@@ -226,10 +233,13 @@ function envelopeRejection(payload) {
 
 /** One metric, judged against the contract at an explicit `now`. */
 function metricVerdict(key, entry, { now, maxAgeMs, toleranceMs }) {
-  const expectedUnit = METRIC_UNITS[key];
+  const expectedUnit = METRIC_UNITS[key] ?? OPTIONAL_METRIC_UNITS[key];
   if (!isMapping(entry)) return unknownMetric(key, REJECT.BAD_SHAPE, expectedUnit);
 
-  if (entry.state !== 'known') {
+  // The session-protected BFF emits its validated verdict as `live`; the local
+  // collector/preview projection uses `known`. Both are accepted only inside
+  // the trusted source envelope and still pass the same unit/time checks here.
+  if (entry.state !== 'known' && entry.state !== 'live') {
     const upstream = entry.reason;
     return unknownMetric(key, UPSTREAM_REASONS.has(upstream) ? upstream : REJECT.UNKNOWN, entry.unit);
   }
@@ -266,7 +276,7 @@ function metricVerdict(key, entry, { now, maxAgeMs, toleranceMs }) {
 
 function serviceVerdict(key, entry) {
   if (!isMapping(entry)) return { key, live: false, up: null, reason: REJECT.BAD_SHAPE };
-  if (entry.state !== 'known') {
+  if (entry.state !== 'known' && entry.state !== 'live') {
     const upstream = entry.reason;
     return { key, live: false, up: null, reason: UPSTREAM_REASONS.has(upstream) ? upstream : REJECT.UNKNOWN };
   }
@@ -288,6 +298,81 @@ function serviceVerdict(key, entry) {
  * @returns {{accepted:boolean, reason:string|null, metrics:object, services:object,
  *            liveKeys:string[], anyLive:boolean, metricReasons:string[]}}
  */
+const RUNTIME_SCHEMA = 'portal-runtime/1';
+const RUNTIME_SOURCE = 'loopback-runtime-readonly';
+const RUNTIME_ID = /^[A-Za-z0-9._:/-]{1,200}$/;
+
+function unknownRuntime(reason = 'unreachable') {
+  const unknown = { state: 'unknown', checkedAt: null, reason };
+  return {
+    state: 'unknown',
+    source: RUNTIME_SOURCE,
+    engine: { name: 'Strata', ...unknown },
+    model: { id: null, vision: null, ...unknown },
+    gateway: { ...unknown },
+    route: { alias: 'strata-vision', targetModel: null, ...unknown },
+  };
+}
+
+function validateRuntimeSummary(payload, now) {
+  if (!isMapping(payload) || payload.schema_version !== RUNTIME_SCHEMA
+      || payload.source !== RUNTIME_SOURCE || payload.synthetic !== false || payload.readonly !== true) {
+    return unknownRuntime('invalid_response');
+  }
+  const observed = parseInstant(payload.observed_at);
+  if (observed === null) return unknownRuntime('invalid_response');
+  if (now - observed > MAX_SAMPLE_AGE_MS || observed - now > FUTURE_TOLERANCE_MS) return unknownRuntime('stale');
+  const rows = ['engine', 'model', 'gateway', 'route'].map((key) => payload[key]);
+  if (!rows.every(isMapping)) return unknownRuntime('invalid_response');
+
+  const checked = (item, allowed) => {
+    if (!allowed.has(item.state)) return { state: 'unknown', checkedAt: null, reason: 'invalid_response' };
+    const at = parseInstant(item.checked_at);
+    if (at === null) return { state: 'unknown', checkedAt: null, reason: 'invalid_response' };
+    if (now - at > MAX_SAMPLE_AGE_MS || at - now > FUTURE_TOLERANCE_MS) return { state: 'unknown', checkedAt: null, reason: 'stale' };
+    return { state: item.state, checkedAt: item.checked_at, reason: null };
+  };
+  const engine = checked(payload.engine, new Set(['healthy', 'degraded', 'unreachable', 'unknown']));
+  const model = checked(payload.model, new Set(['loaded', 'unloaded', 'unknown']));
+  const gateway = checked(payload.gateway, new Set(['healthy', 'unreachable', 'unknown']));
+  const route = checked(payload.route, new Set(['applied', 'not_applied', 'unknown']));
+  let id = payload.model.id;
+  if (id !== null && (typeof id !== 'string' || !RUNTIME_ID.test(id))) {
+    id = null;
+    model.state = 'unknown';
+    model.checkedAt = null;
+    model.reason = 'invalid_response';
+  }
+  if (model.state === 'loaded' && !id) {
+    model.state = 'unknown';
+    model.checkedAt = null;
+    model.reason = 'invalid_response';
+  }
+  const vision = typeof payload.model.vision === 'boolean' ? payload.model.vision : null;
+  const alias = payload.route.alias === 'strata-vision' ? payload.route.alias : 'strata-vision';
+  let targetModel = payload.route.target_model;
+  if (targetModel !== null && (typeof targetModel !== 'string' || !RUNTIME_ID.test(targetModel))) {
+    targetModel = null;
+    route.state = 'unknown';
+    route.checkedAt = null;
+    route.reason = 'invalid_response';
+  }
+  if (payload.route.alias !== alias) {
+    route.state = 'unknown';
+    route.checkedAt = null;
+    route.reason = 'invalid_response';
+  }
+  return {
+    state: [engine, model, gateway, route].some((item) => item.state !== 'unknown') ? 'known' : 'unknown',
+    source: RUNTIME_SOURCE,
+    observedAt: payload.observed_at,
+    engine: { ...engine, name: 'Strata' },
+    model: { ...model, id, vision },
+    gateway,
+    route: { ...route, alias, targetModel },
+  };
+}
+
 export function validateHostSummary(payload, {
   now = Date.now(),
   maxAgeMs = MAX_SAMPLE_AGE_MS,
@@ -314,6 +399,7 @@ export function validateHostSummary(payload, {
   }
 
   const rawMetrics = isMapping(payload) ? payload.metrics : null;
+  const runtime = validateRuntimeSummary(isMapping(payload) ? payload.runtime : null, now);
   const outcome = (metrics, services) => {
     const liveKeys = Object.keys(metrics).filter((k) => metrics[k].live).sort();
     const metricReasons = [...new Set(
@@ -322,9 +408,11 @@ export function validateHostSummary(payload, {
     return {
       accepted: accepted && services !== null,
       reason: accepted && services !== null ? null : reason,
+      source: envelope.source ?? null,
       observedAt,
       metrics,
       services: services ?? {},
+      runtime,
       liveKeys,
       anyLive: liveKeys.length > 0,
       metricReasons,
@@ -352,6 +440,12 @@ export function validateHostSummary(payload, {
     }
     metrics[key] = accepted
       ? metricVerdict(key, entry, { now, maxAgeMs, toleranceMs })
+      : unknownMetric(key, reason);
+  }
+  for (const key of Object.keys(OPTIONAL_METRIC_UNITS)) {
+    if (!(key in rawMetrics)) continue;
+    metrics[key] = accepted
+      ? metricVerdict(key, rawMetrics[key], { now, maxAgeMs, toleranceMs })
       : unknownMetric(key, reason);
   }
 
@@ -424,14 +518,14 @@ export function liveProjection(summary, verdict, { now = Date.now() } = {}) {
       state: 'known',
       value: m.value,
       unit: m.unit,
-      source: PROJECTION_SOURCE,
+      source: summary?.source ?? PROJECTION_SOURCE,
       sample_at: m.sampleAt,
       age_s: Math.max(0, (now - parseInstant(m.sampleAt)) / 1000),
     };
   }
   return {
     version: PROJECTION_VERSION,
-    source: PROJECTION_SOURCE,
+    source: summary?.source ?? PROJECTION_SOURCE,
     synthetic: false,
     readonly: true,
     state: 'known',
@@ -456,7 +550,7 @@ export function formatValue(value) {
 }
 
 const UNKNOWN_BADGE = '<span class="badge warn"><span class="dot rust"></span>UNKNOWN · NO SOURCE</span>';
-const LIVE_BADGE = '<span class="badge good"><span class="dot"></span>LIVE · Prometheus verified</span>';
+const liveBadge = (source) => `<span class="badge good"><span class="dot"></span>LIVE · ${escapeHtml(source === 'nvml-verified' ? 'NVML verified' : 'Prometheus verified')}</span>`;
 
 /**
  * Render the panel body. Pure: same input, same string, no DOM.
@@ -484,7 +578,7 @@ export function hostStatusBody(summary, {
   // one: it explains why there is no snapshot at all.
   const shownReason = live ? null : (reason ?? stateReason);
 
-  const badge = live ? LIVE_BADGE : UNKNOWN_BADGE;
+  const badge = live ? liveBadge(verdict.source) : UNKNOWN_BADGE;
   const reasonChip = live
     ? ''
     : `<span class="tiny mono" data-host-reason="${escapeHtml(String(shownReason))}">原因 ${reasonText(shownReason)}</span>`;
@@ -493,7 +587,8 @@ export function hostStatusBody(summary, {
   // narrows to what the hero does not cover (temperature, power, platform
   // health) instead of repeating them.
   const HERO_KEYS = new Set(['gpu_utilization_ratio', 'gpu_memory_used_mib', 'gpu_memory_total_mib']);
-  const keys = Object.keys(METRIC_UNITS).filter((key) => variant !== 'compute' || !HERO_KEYS.has(key));
+  const keys = [...Object.keys(METRIC_UNITS), ...Object.keys(OPTIONAL_METRIC_UNITS).filter((key) => key in verdict.metrics)]
+    .filter((key) => variant !== 'compute' || !HERO_KEYS.has(key));
 
   const tiles = keys.map((key) => {
     const m = verdict.metrics[key];
@@ -578,7 +673,7 @@ function ensureSection(doc, host, key, heading, intro, before = null) {
 export function paintInfrastructure(doc, summary) {
   const block = doc.querySelector('#view-overview .right-hardware');
   if (!block) return;
-  const live = summary?.source === PROJECTION_SOURCE && summary?.state === 'known';
+  const live = PROJECTION_SOURCES.has(summary?.source) && summary?.state === 'known';
   const svc = summary?.services ?? {};
   const label = (key, fallback) => {
     if (!live) return fallback;
@@ -594,7 +689,7 @@ export function paintInfrastructure(doc, summary) {
   const rows = [
     ['模型引擎', label('strata', '待接线'), 'Strata · 只读健康'],
     ['API Gateway', label('gateway', '待接线'), '只读健康；不代表用户数据已授权'],
-    ['GPU 遥测', live ? 'LIVE' : 'UNKNOWN', live ? 'Prometheus 只读' : '数据来源待验证'],
+    ['GPU 遥测', live ? 'LIVE' : 'UNKNOWN', live ? (summary?.source === 'nvml-verified' ? 'NVML 只读' : 'Prometheus 只读') : '数据来源待验证'],
   ];
   const values = block.querySelectorAll('.value-row');
   rows.forEach(([k, v, note], i) => {
@@ -609,11 +704,11 @@ export function paintInfrastructure(doc, summary) {
 /** Keep the shell's own status words in step with the host read-out. They must
  *  distinguish "this UI is a preview" from "the host telemetry is live" — and
  *  never announce overall production readiness. */
-function paintShellStatus(doc, live) {
+function paintShellStatus(doc, live, source) {
   const strip = doc.querySelector('[data-demo-state]');
   if (strip) {
     strip.textContent = live
-      ? '主机遥测 LIVE（Prometheus 只读）；个人调用 / 评测数据仍为演示或待授权。'
+      ? `主机遥测 LIVE（${source === 'nvml-verified' ? 'NVML' : 'Prometheus'} 只读）；个人调用 / 评测数据仍为演示或待授权。`
       : '主机遥测正在连接或不可用（UNKNOWN）；个人调用 / 评测数据仍为演示或待授权。';
   }
   const badge = doc.querySelector('[data-source-badge]');
@@ -678,7 +773,7 @@ export function mountHostStatus({
     // Placed directly under the hero: the one real number on this page must be
     // on the first screen, not below a wall of demo call data.
     const hero = overview.querySelector('.hero');
-    ensureSection(doc, overview, 'overview', '主机遥测 · Prometheus 只读', pending, hero ? hero.nextSibling : null);
+    ensureSection(doc, overview, 'overview', '主机遥测 · 固定只读来源', pending, hero ? hero.nextSibling : null);
   }
   if (compute) ensureSection(doc, compute, 'compute', '主机资源（只读）', pending);
 
@@ -722,7 +817,7 @@ export function mountHostStatus({
     }
     const projection = live ? liveProjection(display.summary, freshness.verdict, { now: at }) : null;
     paintInfrastructure(doc, projection);
-    paintShellStatus(doc, live);
+    paintShellStatus(doc, live, display.summary?.source);
     if (typeof onChange === 'function') {
       try { onChange(projection); } catch { /* a consumer must never break the shell */ }
     }

@@ -6,7 +6,7 @@
 同源、按会话鉴权的。
 
 **把这条路由接进来的价值不在转发，而在校验。** ``backend/observability/host_projection``
-已经有一份比前端更严的判定器（``source`` 必须逐字是 ``prometheus-readonly``、
+已经有一份比前端更严的判定器（``source`` 必须逐字匹配受信来源、
 ``synthetic`` 必须是 JSON ``false``、``version`` 必须是 1、每个 ``sample_at`` 必须
 带时区且落在 90 秒窗口内），但在这条路由之前它只被报告自检调用过，**没有一条
 面向浏览器的路径**在把投影下发之前用它判一次。前端那一行
@@ -34,6 +34,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import re
 from typing import Callable
 
 from ..observability import errors as observability_errors
@@ -47,6 +48,11 @@ from ..observability.host_projection import (
     validate_host_summary,
 )
 from . import scopes as bff_scopes
+
+RUNTIME_SCHEMA_VERSION = "portal-runtime/1"
+RUNTIME_PROJECTION_SOURCE = "loopback-runtime-readonly"
+RUNTIME_MAX_SAMPLE_AGE_S = 90
+_RUNTIME_MODEL_ID = re.compile(r"^[A-Za-z0-9._:/-]{1,200}$")
 
 #: 本部署没有装配主机投影来源。
 REASON_HOST_SUMMARY_NOT_ATTACHED = "host_summary_adapter_not_attached"
@@ -68,10 +74,13 @@ class HostSummaryStack:
     read: Callable[[], object] = lambda: None
     max_sample_age_s: int = DEFAULT_MAX_SAMPLE_AGE_S
     future_tolerance_s: int = DEFAULT_FUTURE_TOLERANCE_S
+    runtime_read: Callable[[], object] | None = None
 
     def __post_init__(self) -> None:
         if not callable(self.read):
             raise ValueError("read must be callable and take no request parameters")
+        if self.runtime_read is not None and not callable(self.runtime_read):
+            raise ValueError("runtime_read must be callable and take no request parameters")
         for name in ("max_sample_age_s", "future_tolerance_s"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
@@ -158,6 +167,13 @@ class ModuleHostSummaryAdapter:
         block = verdict.to_dict()
         block["schema_version"] = SCHEMA_VERSION
         block["route"] = PROJECTION_PATH
+        if self.stack.runtime_read is not None:
+            moment = now if now is not None else self._clock()
+            try:
+                runtime = self.stack.runtime_read()
+            except Exception:  # noqa: BLE001 - a runtime probe cannot break host metrics
+                runtime = None
+            block["runtime"] = validate_runtime_summary(runtime, now=moment)
         return block
 
     # --- 能力清单要的那一个事实 -------------------------------------------
@@ -216,10 +232,113 @@ class DetachedHostSummaryAdapter:
     reason = REASON_HOST_SUMMARY_NOT_ATTACHED
 
 
+def _unknown_runtime(reason: str = "unreachable") -> dict:
+    checked = {"state": "unknown", "checked_at": None, "reason": reason}
+    return {
+        "schema_version": RUNTIME_SCHEMA_VERSION,
+        "source": RUNTIME_PROJECTION_SOURCE,
+        "synthetic": False,
+        "readonly": True,
+        "state": "unknown",
+        "observed_at": None,
+        "engine": {"name": "Strata", **checked},
+        "model": {"id": None, "vision": None, **checked},
+        "gateway": dict(checked),
+        "route": {"alias": "strata-vision", "target_model": None, **checked},
+    }
+
+
+def validate_runtime_summary(payload: object, *, now: datetime) -> dict:
+    """Validate and narrow the independent engine/model/Gateway observations."""
+    if not isinstance(payload, dict):
+        return _unknown_runtime()
+    if (
+        payload.get("schema_version") != RUNTIME_SCHEMA_VERSION
+        or payload.get("source") != RUNTIME_PROJECTION_SOURCE
+        or payload.get("synthetic") is not False
+        or payload.get("readonly") is not True
+    ):
+        return _unknown_runtime("invalid_response")
+    observed = parse_instant(payload.get("observed_at"))
+    if observed is None:
+        return _unknown_runtime("invalid_response")
+    age = (now.astimezone(timezone.utc) - observed).total_seconds()
+    if age < -DEFAULT_FUTURE_TOLERANCE_S or age > RUNTIME_MAX_SAMPLE_AGE_S:
+        return _unknown_runtime("stale")
+
+    engine = payload.get("engine")
+    model = payload.get("model")
+    gateway = payload.get("gateway")
+    route = payload.get("route")
+    if not all(isinstance(item, dict) for item in (engine, model, gateway, route)):
+        return _unknown_runtime("invalid_response")
+
+    def checked(item: dict, states: set[str]) -> tuple[str, str | None]:
+        state = item.get("state")
+        sample = parse_instant(item.get("checked_at"))
+        if state not in states or sample is None:
+            return "unknown", "invalid_response"
+        sample_age = (now.astimezone(timezone.utc) - sample).total_seconds()
+        if sample_age < -DEFAULT_FUTURE_TOLERANCE_S or sample_age > RUNTIME_MAX_SAMPLE_AGE_S:
+            return "unknown", "stale"
+        return state, None
+
+    engine_state, engine_reason = checked(engine, {"healthy", "degraded", "unreachable", "unknown"})
+    model_state, model_reason = checked(model, {"loaded", "unloaded", "unknown"})
+    gateway_state, gateway_reason = checked(gateway, {"healthy", "unreachable", "unknown"})
+    route_state, route_reason = checked(route, {"applied", "not_applied", "unknown"})
+
+    model_id = model.get("id")
+    if model_id is not None and (
+        not isinstance(model_id, str) or not _RUNTIME_MODEL_ID.fullmatch(model_id)
+    ):
+        model_id = None
+        model_state, model_reason = "unknown", "invalid_response"
+    if model_state == "loaded" and model_id is None:
+        model_state, model_reason = "unknown", "invalid_response"
+    vision = model.get("vision") if isinstance(model.get("vision"), bool) else None
+    alias = route.get("alias")
+    target_model = route.get("target_model")
+    if alias != "strata-vision":
+        route_state, route_reason = "unknown", "invalid_response"
+        alias = "strata-vision"
+    if target_model is not None and (
+        not isinstance(target_model, str) or not _RUNTIME_MODEL_ID.fullmatch(target_model)
+    ):
+        target_model = None
+        route_state, route_reason = "unknown", "invalid_response"
+    if route_state == "applied" and target_model is None:
+        route_state, route_reason = "unknown", "invalid_response"
+
+    def row(item: dict, state: str, reason: str | None, **fields) -> dict:
+        sample = item.get("checked_at")
+        if reason:
+            sample = None
+        return {**fields, "state": state, "checked_at": sample, "reason": reason}
+
+    states = (engine_state, model_state, gateway_state, route_state)
+    overall = "known" if any(state != "unknown" for state in states) else "unknown"
+    return {
+        "schema_version": RUNTIME_SCHEMA_VERSION,
+        "source": RUNTIME_PROJECTION_SOURCE,
+        "synthetic": False,
+        "readonly": True,
+        "state": overall,
+        "observed_at": payload.get("observed_at"),
+        "engine": row(engine, engine_state, engine_reason, name="Strata"),
+        "model": row(model, model_state, model_reason, id=model_id, vision=vision),
+        "gateway": row(gateway, gateway_state, gateway_reason),
+        "route": row(route, route_state, route_reason, alias=alias, target_model=target_model),
+    }
+
+
 __all__ = [
     "REASON_HOST_SUMMARY_NOT_ATTACHED",
     "SCHEMA_VERSION",
+    "RUNTIME_SCHEMA_VERSION",
+    "RUNTIME_PROJECTION_SOURCE",
     "DetachedHostSummaryAdapter",
     "HostSummaryStack",
     "ModuleHostSummaryAdapter",
+    "validate_runtime_summary",
 ]

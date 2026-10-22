@@ -58,6 +58,8 @@ export function resolveRequestPath(urlPath, root = WEB_ROOT) {
   return abs;
 }
 
+const FRONT_DOOR_PATHS = new Set(['/', '', '/index.html']);
+
 export function createStaticServer({
   root = WEB_ROOT,
   env = process.env,
@@ -71,7 +73,7 @@ export function createStaticServer({
     // use it to reach anything but this process's own projection.
     let pathname = null;
     try { pathname = new URL(req.url ?? '/', 'http://127.0.0.1').pathname; } catch { pathname = null; }
-    if (pathname === INFRA_PATH) {
+    if (pathname === INFRA_PATH && !apiTarget) {
       if (req.method !== 'GET') {
         res.writeHead(405, { 'content-type': 'application/json; charset=utf-8' });
         res.end('{"error":"method not allowed"}');
@@ -102,6 +104,16 @@ export function createStaticServer({
         'x-content-type-options': 'nosniff',
       });
       res.end(body);
+      return;
+    }
+
+    // The front door is the account console. The v6 prototype page is still in
+    // the tree and still served verbatim at /qa.html, but / and /index.html —
+    // the two URLs people actually type or have bookmarked — both land on the
+    // console. That is the deployment decision: 8444 IS the console now.
+    if (FRONT_DOOR_PATHS.has(pathname) && (req.method === 'GET' || req.method === 'HEAD')) {
+      res.writeHead(302, { location: '/console/', 'content-length': 0 });
+      res.end();
       return;
     }
 

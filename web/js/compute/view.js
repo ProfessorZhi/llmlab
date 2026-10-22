@@ -70,13 +70,13 @@ export function projectComputeMetrics({ ops = null, mode = 'unavailable', state 
 
 /** The verified host contract, mirrored from web/tools/verified-infra.mjs.
  *  A payload that does not match it exactly is not a host reading. */
-export const HOST_CONTRACT = Object.freeze({ version: 1, source: 'prometheus-readonly', maxAgeS: 90 });
+export const HOST_CONTRACT = Object.freeze({ version: 1, sources: new Set(['prometheus-readonly', 'nvml-verified']), maxAgeS: 90 });
 
 /** Only a complete, non-synthetic, read-only, known projection is a host source. */
 export function isVerifiedHostSummary(summary) {
   return !!summary
     && summary.version === HOST_CONTRACT.version
-    && summary.source === HOST_CONTRACT.source
+    && HOST_CONTRACT.sources.has(summary.source)
     && summary.synthetic === false
     && summary.readonly === true
     && summary.state === 'known';
@@ -116,20 +116,20 @@ export function projectHostMetrics(summary) {
 
   const metrics = {
     gpu_utilization_pct: util
-      ? { value: `${Math.round(util.value * 1000) / 10}%`, source: HOST_CONTRACT.source, updatedAt: util.sample_at }
+      ? { value: `${Math.round(util.value * 1000) / 10}%`, source: summary.source, updatedAt: util.sample_at }
       : hostUnknown(),
     gpu_vram_used_mib: used
-      ? { value: `${Math.round(used.value * 10) / 10} MiB`, source: HOST_CONTRACT.source, updatedAt: used.sample_at }
+      ? { value: `${Math.round(used.value * 10) / 10} MiB`, source: summary.source, updatedAt: used.sample_at }
       : hostUnknown(),
     gpu_vram_total_mib: total
-      ? { value: `${Math.round(total.value * 10) / 10} MiB`, source: HOST_CONTRACT.source, updatedAt: total.sample_at }
+      ? { value: `${Math.round(total.value * 10) / 10} MiB`, source: summary.source, updatedAt: total.sample_at }
       : hostUnknown(),
   };
   const anyKnown = Object.values(metrics).some((m) => m.updatedAt !== null);
 
   return {
     mode: anyKnown ? 'host-live' : 'unverified',
-    badge: anyKnown ? 'LIVE · Prometheus（主机级）' : 'UNKNOWN · 主机遥测未验证',
+    badge: anyKnown ? `LIVE · ${summary.source === 'nvml-verified' ? 'NVML' : 'Prometheus'}（主机级）` : 'UNKNOWN · 主机遥测未验证',
     updatedAt: sample?.sample_at ?? null,
     metrics,
   };

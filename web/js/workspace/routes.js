@@ -51,6 +51,20 @@ export const BFF_ROUTES = Object.freeze([
   // the write gate still ships an empty verified-contract list.
   { name: 'ops.invoke', method: 'POST', path: '/api/v2/ops/endpoints/{endpoint_id}/invoke', auth: 'session', kind: 'write', scope: 'registry:endpoint:invoke', owner: 'Integration#49', ui: '模型与对话 · 同源调用（未启用）' },
   { name: 'portal.infra_summary', method: 'GET', path: '/api/infra/summary', auth: 'session', kind: 'read', scope: 'observability:host:read', owner: 'Data#47', ui: '概览 / 算力中心 · 主机投影' },
+  // 整机读数（2026-10-22）：BFF 直读 /proc 的 CPU/内存/交换/磁盘/网络/按用户。
+  // 与 portal.infra_summary 同一道门（observability:host:read）—— 换一种采集方式
+  // 不该放宽同一条边界。
+  { name: 'portal.system_resources', method: 'GET', path: '/api/infra/system', auth: 'session', kind: 'read', scope: 'observability:host:read', owner: 'Data#47', ui: '资源监控 · 主机与按用户' },
+  // 引擎实时读数（2026-10-22）：BFF 用**服务端**的引擎凭据代取 Strata /metrics，
+  // 只下发槽位 / 排队 / 吞吐。前端永远拿不到那把 key —— 这正是这条路由存在的理由，
+  // 也是它不叫「Strata 跳转」的原因：读数在平台里，不需要人去别处填凭据。
+  { name: 'engine.live', method: 'GET', path: '/api/v2/engine/live', auth: 'session', kind: 'read', scope: 'observability:host:read', owner: 'Data#47', ui: '推理服务 · 引擎实时负载' },
+  // 模型服务密钥（2026-10-22）：本层唯一原样下发凭据的路由，只对平台管理员开放，
+  // scope 为空是因为它不走四张词表，而在处理器里按「是否处于管理员会话」判定。
+  // 签发新密钥（2026-10-22）：写引擎环境文件 + 触发引擎重载，所以要 CSRF。
+  // scope 同样为空，门的判定在处理器里（平台管理员）。
+  { name: 'portal.model_service_key_create', method: 'POST', path: '/api/model-service/keys', auth: 'session', kind: 'write', scope: null, owner: 'Data#47', ui: 'API 密钥 · 新建密钥（管理员）' },
+  { name: 'portal.model_service_key', method: 'GET', path: '/api/model-service/key', auth: 'session', kind: 'read', scope: null, owner: 'Data#47', ui: 'API 密钥 · 模型服务接入（管理员）' },
   { name: 'atlas.calls', method: 'GET', path: '/api/atlas/calls', auth: 'session', kind: 'read', scope: 'atlas:calls:self:read', owner: 'Data#47', ui: '我的调用 / 图谱' },
   { name: 'evaluation.report_sources', method: 'GET', path: '/api/evaluation/report-sources', auth: 'session', kind: 'read', scope: 'evaluation:read', owner: 'Data#47', ui: '评测 · 报告来源' },
   { name: 'evaluation.reports', method: 'GET', path: '/api/evaluation/reports', auth: 'session', kind: 'read', scope: 'evaluation:read', owner: 'Data#47', ui: '评测 · 报告目录' },

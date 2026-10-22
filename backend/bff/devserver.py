@@ -16,6 +16,8 @@ token**：本进程没有任何真实凭据可用（PAM 后端未实现），打
 from __future__ import annotations
 
 import argparse
+import json
+import os
 from pathlib import Path
 import socketserver
 import sys
@@ -39,24 +41,56 @@ from ..registry.api import RegistryApplication
 from ..registry.identity import Principal, PrincipalDirectory, TrustedTokenIntrospector
 from ..registry.health import LoopbackHttpProber, LoopbackProtocolProber, StaticProber
 from ..registry.local_discovery import LocalDiscovery
-from ..registry.ownership import ProcNetOwnershipProver
+from ..registry.ownership import EMPTY_POLICY, ProcNetOwnershipProver, load_operator_policy
 from ..registry.registry import RegistryConfig, RegistryService
 from ..registry.store import Store
 from . import origin as bff_origin
 from . import scopes as bff_scopes
 from .account_directory import AccountAwareDirectory
+from .model_service_keys import ModelServiceKeyStore
 from .integrations import IntegrationStore
 from . import stacks as bff_stacks
 from .app import RESERVED_BIND_PORTS, OpsApplication
 from .evaluation_adapter import ModuleEvaluationAdapter
 from .observability_adapter import ModuleObservabilityAdapter, engine_registry_from_bff
+from .gateway_usage import GatewayUsageFeed, load_key_owners
+from .host_summary import HostSummaryStack, ModuleHostSummaryAdapter
 from .ops import OpsConfig
 
 ALLOWED_BIND_HOSTS = ("127.0.0.1", "::1")
 
 #: 与 ``backend.registry.devserver`` 同一份合成 uid 表。``dana`` 不在这里 ——
 #: 它**不是** ``bob`` 的别名，这一点由测试单独断言。
+#: **测试夹具**：四个机器上并不存在的合成 Linux 主体。开发与用例靠它保持确定性，
+#: 生产装配不该用它（见 ``real_host_users``）。
 HOST_USERS = (("carol", 4000), ("alice", 4001), ("dave", 4002), ("bob", 4003))
+
+#: 普通账户的 uid 起点（``/etc/login.defs`` 的 ``UID_MIN`` 默认值）。
+UID_FIRST_HUMAN = 1000
+#: ``nobody`` / ``nogroup``，以及内核保留区。
+UID_NOBODY = 65534
+
+
+def real_host_users() -> tuple[tuple[str, int], ...]:
+    """本机**真实存在**的 Linux 用户：uid 落在 [1000, 65534)，按 uid 排序。
+
+    服务账户（``llmlab`` 这类）也留下：它确实是这台机器上的一个用户，而且是网关
+    进程的属主 —— 按 uid 归属调用量时靠的就是它。把它们过滤掉只会让归属变成空白，
+    那不是更诚实，那是少了一半事实。
+    """
+    import pwd  # 只在真正要算名单时导入：本模块的其余部分不依赖 NSS。
+
+    found = [
+        (record.pw_name, record.pw_uid)
+        for record in pwd.getpwall()
+        if UID_FIRST_HUMAN <= record.pw_uid < UID_NOBODY
+    ]
+    return tuple(sorted(found, key=lambda item: item[1]))
+
+
+def resolve_host_users(*, synthetic: bool) -> tuple[tuple[str, int], ...]:
+    """``--synthetic-host-users`` 时用夹具，否则用本机真实用户。"""
+    return HOST_USERS if synthetic else real_host_users()
 
 DEFAULT_HOST_ID = "dell-test-01"
 DEFAULT_PORT = 8790
@@ -96,12 +130,18 @@ def build_application(
     host_id: str = DEFAULT_HOST_ID,
     admin_names: tuple[str, ...] = (),
     mock_gateway: bool = True,
+    registry_mode: str = "synthetic",
     prober: object | None = None,
     accounts: object | None = None,
     allowed_logins: tuple[str, ...] | None = None,
     trusted_authorities: tuple[str, ...] = (),
     observe_local_engines: bool = False,
+    live_host_summary: bool = False,
     model_roots: tuple[str, ...] = (),
+    operator_policy: object | None = None,
+    host_users: tuple[tuple[str, int], ...] = HOST_USERS,
+    gateway_state_dir: str | None = None,
+    gateway_key_owners: str | None = None,
 ) -> OpsApplication:
     """把三块拼起来。**只建对象，不开端口。**
 
@@ -131,18 +171,25 @@ def build_application(
     auth_app.initialize()
     token_service.initialize()
 
-    # 静态的合成 Linux 主体 + 管理员随时创建的平台账户（每次查询都读账户库）。
+    # 静态 Linux 主体 + 管理员随时创建的平台账户（每次查询都读账户库）。
+    # ``host_users`` 缺省是夹具；``main()`` 会传本机真实用户。
     principals = AccountAwareDirectory(
         PrincipalDirectory(
             [
                 Principal(linux_user_id(host_id, uid), name, uid, display_name=name)
-                for name, uid in HOST_USERS
+                for name, uid in host_users
             ]
         ),
         auth_app.service.accounts,
     )
 
-    config = RegistryConfig(mode="synthetic")
+    # ``operator_policy`` 是保留端口（8080 这类上游推理端口）的**唯一**放行口。
+    # 没有它，登记上游服务会以 "port reserved" 收场；有了它，命中 entry 的服务
+    # 还会拿到 operator_verified 的所有权证明。缺省空策略 = 一条都不放行。
+    config = RegistryConfig(
+        mode=registry_mode,
+        operator_policy=operator_policy or EMPTY_POLICY,
+    )
     local = {}
     if observe_local_engines:
         # 只读本机事实：回环 HTTP 探测、/v1/models、/proc/net/tcp 的监听 uid。
@@ -167,8 +214,32 @@ def build_application(
         gateway=MockGatewayAdapter() if mock_gateway else DetachedGatewayAdapter(),
     )
 
-    observability = build_observability_adapter(service=service, accounts=accounts)
-    evaluation = build_evaluation_adapter(service=service)
+    observability = build_observability_adapter(
+        service=service,
+        accounts=accounts,
+        # live 的 Registry 不许配一条编出来的调用曲线。
+        synthesize_gateway=(registry_mode != "live"),
+        host_users=host_users,
+        # 只有 live 的 Registry 才配读真实调用日志：合成的登记行配真实的调用量
+        # 等于把两半不同的现实缝在一张页面上。
+        gateway_state_dir=(gateway_state_dir if registry_mode == "live" else None),
+        key_owners_path=gateway_key_owners,
+    )
+    evaluation = build_evaluation_adapter(service=service, host_users=host_users)
+    host_summary = None
+    system_resources = None
+    model_service_keys = _model_service_keys_store(state_dir)
+    if live_host_summary:
+        from .live_sources import DellLiveSources
+
+        live_sources = DellLiveSources()
+        system_resources = live_sources.system_summary
+        host_summary = ModuleHostSummaryAdapter(
+            HostSummaryStack(
+                read=live_sources.host_summary,
+                runtime_read=live_sources.runtime_summary,
+            )
+        )
 
     linux_service = build_linux_service(
         host_id=host_id,
@@ -184,8 +255,11 @@ def build_application(
         linux_service=linux_service,
         observability=observability,
         evaluation=evaluation,
+        host_summary=host_summary,
+        system_resources=system_resources,
+        model_service_keys=model_service_keys,
         ops_config=OpsConfig(
-            registry_mode="synthetic",
+            registry_mode=registry_mode,
             gateway_adapter="mock" if mock_gateway else "detached",
             gateway_attached=mock_gateway,
         ),
@@ -211,48 +285,174 @@ def _visible_endpoints(service):
     return scope
 
 
-def build_observability_adapter(*, service, accounts, now=None):
-    """装一个**合成**的观测数据面。
+def build_observability_adapter(
+    *,
+    service,
+    accounts,
+    now=None,
+    synthesize_gateway=True,
+    host_users=HOST_USERS,
+    gateway_state_dir: str | None = None,
+    key_owners_path: str | None = None,
+):
+    """装一个观测数据面。
 
-    与 ``dev/observability_preview.py`` 同样的口径：没有真实导出口，就用明确带
-    ``fixture`` 标记的合成行；归属只来自受信 key 目录。读数因此一律 UNKNOWN
-    （来源不在前端白名单），只有曲线带 SYNTHETIC。
+    * ``synthesize_gateway=True``：夹具部署。目录与语料都**明确自称合成**，前端只把
+      它当演示，带数字的读数一律降级成 UNKNOWN。
+    * ``synthesize_gateway=False``：真部署，**不编任何调用行**。给了
+      ``gateway_state_dir`` 就读那台 Gateway 真实的 ``usage.jsonl``（经
+      :class:`~backend.bff.gateway_usage.GatewayUsageFeed` 翻译成观测契约）；
+      没给就退回空文本 —— 观测层会如实报 ``no_sample``，而那与「零次调用」是两件事。
     """
     from datetime import datetime, timezone
 
     moment = now or datetime.now(timezone.utc)
-    key_directory = obs_identity.KeyDirectory(
-        [
-            obs_identity.GatewayKeyBinding(
-                f"key-{name}", linux_user_id(host_id_of(), uid), "proj-lab", f"{name}-workload"
+    feed = None
+    feed_extra = None
+
+    if synthesize_gateway:
+        key_directory = obs_identity.KeyDirectory(
+            [
+                obs_identity.GatewayKeyBinding(
+                    f"key-{name}", linux_user_id(host_id_of(), uid), "proj-lab", f"{name}-workload"
+                )
+                for name, uid in host_users
+            ]
+        )
+        gateway_text = lambda identity: bff_stacks.demo_gateway_corpus(
+            key_directory,
+            now=moment,
+            endpoints=sorted(_visible_endpoints(service)(identity)),
+        )
+        provenance = bff_stacks.synthetic_provenance()
+    else:
+        key_directory, feed_extra = _gateway_key_directory(
+            keys_path=(
+                os.path.join(gateway_state_dir, "keys.json") if gateway_state_dir else None
+            ),
+            owners_path=key_owners_path,
+        )
+        if gateway_state_dir:
+            feed = GatewayUsageFeed(
+                os.path.join(gateway_state_dir, "usage.jsonl"),
+                endpoint_for=lambda identity: model_endpoint_map(service, identity),
             )
-            for name, uid in HOST_USERS
-        ]
-    )
+            gateway_text = feed.text
+            # 三个前端认可的来源之一。写它等于声明「这个数来自真实导出口」，
+            # 所以只在真的接了那个文件时才写。
+            provenance = bff_stacks.observation_provenance("gateway-usage-export")
+        else:
+            feed = None
+            gateway_text = lambda identity: ""
+            provenance = bff_stacks.synthetic_provenance()
+
     stack = bff_stacks.build_observability_stack(
         directory=key_directory,
         engine_registry=lambda identity: engine_registry_from_bff(
             service=service, identity=identity
         ),
-        gateway_text=lambda identity: bff_stacks.demo_gateway_corpus(
-            key_directory,
-            now=moment,
-            endpoints=sorted(_visible_endpoints(service)(identity)),
-        ),
-        provenance=bff_stacks.synthetic_provenance(),
+        gateway_text=gateway_text,
+        provenance=provenance,
         engine_probe=obs_engines.MockEngineProbe(default_up=True),
         host_report=bff_stacks.synthetic_host_report(moment),
     )
     return ModuleObservabilityAdapter(
-        stack, endpoint_scope=_visible_endpoints(service), clock=lambda: moment
+        stack,
+        endpoint_scope=_visible_endpoints(service),
+        clock=lambda: moment,
+        # 合成曲线只能挂在合成载荷上；真实来源才配得上真实曲线。
+        trends_available=(feed is not None) or synthesize_gateway,
+        feed=feed,
+        feed_extra=feed_extra,
     )
+
+
+def model_endpoint_map(service, identity) -> dict[str, str]:
+    """``model 名 -> endpoint id``，只含该会话可见的端点。
+
+    Gateway 的行里 ``model`` 是**模型名**，观测层判可见性用的是 Registry 的
+    **endpoint id**。两者之间是登记事实（endpoint → deployment → model），所以这里是
+    查表。同一个模型挂了多个 endpoint 时有歧义 —— 不映射，让那一行落进
+    ``endpoint_missing``，而不是被塞进一个猜出来的端点。
+    """
+    from ..registry import errors as registry_errors
+
+    try:
+        policy = service.policy(identity.requester)
+        models = {item.id: item.name for item in policy.visible_models()}
+        deployments = {item.id: item for item in policy.visible_deployments()}
+        endpoints = list(policy.visible_endpoints())
+    except registry_errors.RegistryError:
+        return {}
+
+    by_name: dict[str, list[str]] = {}
+    for endpoint in endpoints:
+        deployment = deployments.get(endpoint.deployment_id)
+        if deployment is None:
+            continue
+        name = models.get(deployment.model_id)
+        if not name:
+            continue
+        by_name.setdefault(name, []).append(endpoint.id)
+    return {name: ids[0] for name, ids in by_name.items() if len(ids) == 1}
+
+
+def _gateway_key_directory(*, keys_path, owners_path):
+    """用 Gateway 自己的 key 台账 + 一份**人工**属主声明建受信 key 目录。
+
+    ``keys.json`` 只有 ``id/label/note/requests…``，**没有属主字段**。``label`` 是
+    签发时写的名字，不是一条归属声明 —— 拿它去推断「这条调用是谁的」正是观测层
+    明令禁止的做法。所以归属只能来自 ``gateway-key-owners.json`` 里人写下的那一行。
+
+    没有声明的 key **不进目录**：它们的流量会落进 ``unknown_key``（管理员在诊断里
+    看得见），不会被算到任何人头上。返回 ``(目录, 计数)``。
+    """
+    empty = obs_identity.KeyDirectory([])
+    if not keys_path:
+        return empty, None
+    try:
+        with open(keys_path, "r", encoding="utf-8") as handle:
+            document = json.load(handle)
+    except (OSError, ValueError):
+        return empty, None
+    entries = document.get("keys") if isinstance(document, dict) else None
+    if not isinstance(entries, list):
+        return empty, None
+    # 声明文件缺席同样要报数：`keys_total=N, keys_bound=0` 是「有 N 把 key，
+    # 一把都没有属主」——这条事实比一句 None 有用得多。
+    owners = load_key_owners(owners_path)
+
+    bindings = []
+    seen: set[str] = set()
+    total = 0
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        total += 1
+        key_id = item.get("id")
+        if not isinstance(key_id, str) or not key_id.strip() or key_id in seen:
+            continue
+        owner = owners.get(key_id)
+        if not owner:
+            continue
+        seen.add(key_id)
+        bindings.append(
+            obs_identity.GatewayKeyBinding(
+                key_id=key_id,
+                uid=owner,
+                project="api-gateway",
+                workload=item.get("label") if isinstance(item.get("label"), str) else None,
+                revoked=bool(item.get("revoked")),
+            )
+        )
+    return obs_identity.KeyDirectory(bindings), {"keys_total": total, "keys_bound": len(bindings)}
 
 
 def host_id_of() -> str:
     return DEFAULT_HOST_ID
 
 
-def build_evaluation_adapter(*, service):
+def build_evaluation_adapter(*, service, host_users=HOST_USERS):
     """装一个**派发关闭**的评测面。
 
     目标目录在启动时是空的（此时还没有任何 deployment）。因此在这个进程里提交评测
@@ -261,17 +461,17 @@ def build_evaluation_adapter(*, service):
     重新同步目标目录。
     """
     principals, _tokens = bff_stacks.principal_directories(
-        host_id=DEFAULT_HOST_ID, users=HOST_USERS
+        host_id=DEFAULT_HOST_ID, users=host_users
     )
     projects = bff_stacks.project_directory(
         projects=(
             (
                 "proj-lab",
                 "Lab",
-                [linux_user_id(DEFAULT_HOST_ID, uid) for _name, uid in HOST_USERS],
+                [linux_user_id(DEFAULT_HOST_ID, uid) for _name, uid in host_users],
             ),
         ),
-        home=((linux_user_id(DEFAULT_HOST_ID, uid), "proj-lab") for _name, uid in HOST_USERS),
+        home=((linux_user_id(DEFAULT_HOST_ID, uid), "proj-lab") for _name, uid in host_users),
     )
     eval_stack = bff_stacks.build_evaluation_stack(
         principals=principals,
@@ -299,6 +499,16 @@ def _token_scope_policy(session) -> frozenset[str]:
     return bff_scopes.session_scopes(elevated=elevated).registry
 
 
+
+def _model_service_keys_store(state_dir: str):
+    """``<state>`` 里的模型推理密钥清单。
+
+    每次调用都重新读盘：密钥轮换是运维要能在不重启 BFF 的前提下完成的事。
+    没有清单文件时回空表（= 还没签发过），不编一把出来。
+    """
+    return ModelServiceKeyStore(state_dir)
+
+
 def _local_config(state_dir: str):
     """开发进程跑在 ``http://127.0.0.1`` 上。
 
@@ -306,7 +516,17 @@ def _local_config(state_dir: str):
     401」这种纯本地的假故障。所以这里显式关掉 ``cookie_secure``——这是本进程唯一
     偏离默认的一处，且只在环回地址上有意义。
     """
-    cfg = auth_config.AuthConfig.from_env({}, state_dir=state_dir)
+    # The devserver deliberately builds its config from an EMPTY environment so a
+    # stray LLM_LAB_* variable cannot redirect the admin hash file, the state dir
+    # or the provider list. ``TRUSTED_ORIGINS`` is the one exception, and it is
+    # the documented way to deploy behind a TLS terminator: the public origin
+    # (https://host:port) can never equal the ``http://<Host>`` this process
+    # sees, so without it every same-origin POST — login included — is refused.
+    # Only this one key is lifted out of os.environ; nothing else is read.
+    cfg = auth_config.AuthConfig.from_env(
+        {"LLM_LAB_TRUSTED_ORIGINS": os.environ.get("LLM_LAB_TRUSTED_ORIGINS", "")},
+        state_dir=state_dir,
+    )
     return replace(cfg, cookie_secure=False)
 
 
@@ -407,6 +627,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--live-host-summary",
+        action="store_true",
+        help=(
+            "serve fixed, read-only local NVML/Strata/Gateway observations from the "
+            "session-protected /api/infra/summary route"
+        ),
+    )
+    parser.add_argument(
         "--model-root",
         action="append",
         default=[],
@@ -434,6 +662,52 @@ def build_parser() -> argparse.ArgumentParser:
             "configured one'."
         ),
     )
+    parser.add_argument(
+        "--registry-mode",
+        choices=("synthetic", "live"),
+        default="synthetic",
+        help=(
+            "登记记录的诚实性声明。缺省 synthetic：这些行是夹具，控制台会把它们藏起来。"
+            " 改成 live 等于声明「每一行描述的都是本机真实在跑、且属主真实的既有服务」"
+        ),
+    )
+    parser.add_argument(
+        "--gateway-state-dir",
+        default="/srv/llm-lab/state/api-gateway",
+        metavar="DIR",
+        help=(
+            "真实 Gateway 的状态目录（usage.jsonl / keys.json）。只有 --registry-mode live "
+            "时才读；读不到就如实报「未接入」，绝不编调用行"
+        ),
+    )
+    parser.add_argument(
+        "--gateway-key-owners",
+        default=None,
+        metavar="FILE",
+        help=(
+            "key_id -> 属主主体名 的人工声明（schema gateway-key-owners/1）。"
+            "keys.json 没有属主字段，没有这份声明就归不了人"
+        ),
+    )
+    parser.add_argument(
+        "--operator-policy",
+        default=None,
+        metavar="FILE",
+        help=(
+            "a root/service-owned JSON file listing existing services an operator "
+            "admits for registration (schema registry-operator/1). This is the only "
+            "path that admits a reserved upstream port such as 8080"
+        ),
+    )
+    parser.add_argument(
+        "--synthetic-host-users",
+        action="store_true",
+        help=(
+            "受信主体目录用 carol/alice/dave/bob 这套测试夹具（uid 4000-4003）。"
+            "缺省用本机真实的 Linux 用户：夹具用户在这台机器上并不存在，"
+            "拿它当部署等于往受信目录里放四个虚构的人"
+        ),
+    )
     return parser
 
 
@@ -442,16 +716,32 @@ def main(argv: list[str] | None = None) -> int:
     host = validate_bind_host(args.host)
     port = validate_bind_port(args.port)
 
+    operator_policy = None
+    if args.operator_policy:
+        try:
+            operator_policy = load_operator_policy(args.operator_policy)
+        except Exception as exc:  # noqa: BLE001 - 策略文件不合格就不要启动
+            raise SystemExit(f"refusing to start: {exc}") from exc
+
+    # 受信主体目录：缺省是本机真实用户。夹具是测试用的，不是部署用的。
+    host_users = resolve_host_users(synthetic=args.synthetic_host_users)
+
     app = build_application(
         state_dir=args.state_dir,
         database=args.database,
         host_id=args.host_id,
         admin_names=tuple(args.platform_admin),
         mock_gateway=True,
+        registry_mode=args.registry_mode,
         prober=StaticProber() if args.with_static_prober else None,
         trusted_authorities=tuple(args.trusted_authority),
         observe_local_engines=args.observe_local_engines,
+        live_host_summary=args.live_host_summary,
         model_roots=tuple(args.model_root),
+        operator_policy=operator_policy,
+        host_users=host_users,
+        gateway_state_dir=args.gateway_state_dir,
+        gateway_key_owners=args.gateway_key_owners,
     )
 
     if args.synthetic_logins:
@@ -488,6 +778,8 @@ __all__ = [
     "DEFAULT_PORT",
     "HOST_USERS",
     "build_application",
+    "real_host_users",
+    "resolve_host_users",
     "main",
     "validate_bind_host",
     "validate_bind_port",

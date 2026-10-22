@@ -80,7 +80,9 @@ test('only GET is accepted', async () => {
 
 test('the static server keeps working beside the route', async () => {
   await withServer({ env: { ATELIER_INFRA_READONLY: '1' }, infraFetch: quietFetch() }, async (s) => {
-    const res = await fetch(`${s.origin}/index.html`);
+    // /index.html is the console's front door now; the sibling static page is
+    // /qa.html, which is what proves static serving still works beside the route.
+    const res = await fetch(`${s.origin}/qa.html`);
     assert.equal(res.status, 200);
     assert.match(res.headers.get('content-type'), /text\/html/);
     const missing = await fetch(`${s.origin}/does-not-exist`);

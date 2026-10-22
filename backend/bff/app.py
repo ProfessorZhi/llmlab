@@ -57,12 +57,14 @@ from ..auth_linux import errors as linux_errors
 from ..evaluation import api as evaluation_api
 from ..evaluation import errors as evaluation_errors
 from ..observability import errors as observability_errors
+from ..observability import identity as observability_identity
 from ..registry import api as registry_api
 from ..registry import errors as registry_errors
 from ..registry.models import VISIBILITY_ALL_APPROVED, VISIBILITY_USERS
 from . import admin_mode as bff_admin_mode
 from . import atlas_adapter as bff_atlas
 from . import capabilities as bff_capabilities
+from . import engine_live as bff_engine_live
 from . import events as bff_events
 from . import host_summary as bff_host_summary
 from . import identity as bff_identity
@@ -142,6 +144,9 @@ ENGINES_PATH = "/api/v2/ops/engines"
 #: 本轮接进来的同源只读路由。三条以前只有 module / preview，没有同源 BFF 出口；
 #: 每一条都以 503 收场，当它自己的来源没有装配时 —— 见各自 handler 的说明。
 INFRA_SUMMARY_PATH = "/api/infra/summary"
+SYSTEM_RESOURCES_PATH = "/api/infra/system"
+MODEL_SERVICE_KEY_PATH = "/api/model-service/key"
+ENGINE_LIVE_PATH = "/api/v2/engine/live"
 ATLAS_CALLS_PATH = "/api/atlas/calls"
 EVAL_REPORT_SOURCES_PATH = "/api/evaluation/report-sources"
 EVAL_REPORTS_PATH = "/api/evaluation/reports"
@@ -195,6 +200,9 @@ class OpsApplication:
         evaluation=None,
         atlas=None,
         host_summary=None,
+        system_resources=None,
+        engine_live=None,
+        model_service_keys=None,
         ops_config=None,
         links: list[dict] | None = None,
         clock: Callable[[], float] | None = None,
@@ -218,6 +226,15 @@ class OpsApplication:
         #: 主机投影来源。同样 ``None`` = 没接上，``/api/infra/summary`` 以 503
         #: 收场，而不是回一份全 UNKNOWN 的 200。
         self.host_summary = host_summary
+        #: 系统资源读取器（CPU/内存/交换区/磁盘/网络/按用户）。同样
+        #: ``None`` = 没接上，路由以 503 收场。
+        self.system_resources = system_resources
+        #: 引擎运行时读数的取数器。``None`` = 用模块默认实现（自己读环回
+        #: ``/metrics``）；测试与进程内调用可以塞一个假的进来。
+        self.engine_live = engine_live
+        #: 模型服务密钥的来源（读清单 + 签发）。与其它来源不同，它下发的
+        #: 是**凭据本身**，所以读写都只对平台管理员开放。
+        self.model_service_keys = model_service_keys
         self.ops_config = ops_config or bff_ops.OpsConfig()
         self.links = list(links or _default_links())
         self._sessions = auth_app.service.sessions
@@ -578,6 +595,145 @@ class OpsApplication:
             )
         dto = self.host_summary.summary(identity=principal)
         return _json_response(200, {"data": dto})
+
+    # --- GET /api/v2/engine/live --------------------------------------------
+
+    def _engine_live(self, request):
+        """引擎自己的运行时读数，由**本层**拿着那把 key 去取。
+
+        为什么不把这个地址直接交给浏览器：Strata 的 ``/metrics`` 要
+        ``Authorization: Bearer``，而它自带控制台要求人手填一把 key。让人把凭据
+        填进浏览器，等于把它留在历史、扩展和截屏里 —— 而一把能读引擎指标的 key
+        通常也能调用引擎。所以取数留在服务端，前端只拿到已经投影好的槽位、排队
+        与吞吐；响应体里没有、也不该有 key。
+
+        引擎读不到时**不是** 503，而是 200 + ``reachable: false``：
+        「引擎没起来」与「平台还没配凭据」都是这幅图要显示的东西，把它们讲成
+        「这条接口不存在」只会让人去查错地方。此时所有数值字段都是 ``None``。
+        """
+        self._reject_asserted_identity(request)
+        self._principal(request)
+        reader = self.engine_live or bff_engine_live.read_engine_live
+        try:
+            dto = reader()
+        except Exception as exc:  # noqa: BLE001 - 读不到就是读不到
+            return _error_response(
+                503,
+                "bff.engine_live_unavailable",
+                "the engine live reader failed: " + type(exc).__name__,
+            )
+        return _json_response(200, {"data": dto})
+
+    # --- GET /api/model-service/key -----------------------------------------
+
+    def _model_service_admin(self, request):
+        """密钥两条路由共用的门：只认会话里的平台管理员。
+
+        ``is_platform_admin`` 只看 ``elevated``，不看 ``role`` —— 这里不重复
+        判断角色，免得写出一个「看起来更严、实际更松」的条件。
+        """
+        self._reject_asserted_identity(request)
+        principal = self._principal(request)
+        if not bff_scopes.is_platform_admin(elevated=principal.elevated):
+            return None, _error_response(
+                403, "bff.access_denied", "a platform administrator is required"
+            )
+        if self.model_service_keys is None:
+            return None, _error_response(
+                503,
+                "bff.model_service_key_not_attached",
+                "the model service key store is not attached",
+            )
+        return principal, None
+
+    def _model_service_key(self, request):
+        """调用本机推理引擎用的密钥（完整明文，整份清单）。
+
+        这是本层**唯一**一条把凭据原样下发给前端的路由。产品要求管理台能点开
+        看完整密钥 —— 运维要把它填进客户端，一个只剩前六位的掩码帮不上忙。
+        代价因此写在这里：这条路由必须比其它路由更窄，只对平台管理员开放。
+
+        没有密钥时回 200 + 空清单，而不是 404：「这一页能打开、只是还没发过」
+        和「这条路不存在」对使用者是两件事。
+        """
+        principal, error = self._model_service_admin(request)
+        if error is not None:
+            return error
+        try:
+            keys = self.model_service_keys.list()
+        except Exception as exc:  # noqa: BLE001 - 读不到就是读不到
+            return _error_response(
+                503,
+                "bff.model_service_key_unavailable",
+                "the model service key store failed: " + type(exc).__name__,
+            )
+        primary = keys[0] if keys else {"key": None}
+        return _json_response(200, {"data": {**primary, "keys": keys}})
+
+    def _model_service_key_create(self, request):
+        """签发一把新密钥。
+
+        响应里带着 ``restart``：密钥写进引擎的环境文件之后引擎必须重载才会
+        认它。把「已签发」和「已生效」混成一句话，是这一页最容易撒的谎。
+        """
+        principal, error = self._model_service_admin(request)
+        if error is not None:
+            return error
+        body = _json_body(request)
+        if body is None:
+            return _error_response(
+                400, "bff.invalid_request", "a JSON object body is required"
+            )
+        label = body.get("label")
+        if label is not None and not isinstance(label, str):
+            return _error_response(400, "bff.invalid_request", "label must be a string")
+        try:
+            record, restart = self.model_service_keys.mint(label)
+        except Exception as exc:  # noqa: BLE001 - 写不进去就是写不进去
+            return _error_response(
+                503,
+                "bff.model_service_key_unwritable",
+                "the model service key store failed: " + type(exc).__name__,
+            )
+        return _json_response(201, {"data": {**record, "restart": restart}})
+
+    # --- GET /api/infra/system ----------------------------------------------
+
+    def _system_resources(self, request):
+        """本机的 CPU / 内存 / 交换区 / 磁盘读写 / 网络带宽 / 按用户。
+
+        与 ``/api/infra/summary`` 走**同一道门**（``observability:host:read``）：
+        两份都是整机共享量，不该有一条比另一条更宽的路。差别只在来源 ——
+        summary 是 Prometheus/NVML 的指标投影，这里是 BFF 直读 ``/proc``
+        （这台机没有 node_exporter，装一个要 root）。
+
+        未装配 ⇒ 503；读失败 ⇒ 503；读到 ⇒ 200。**没有**「读不到就给一份
+        全 0」的降级：0 B/s 是一个测量结果，不能拿来替「没量到」。
+        """
+        self._reject_asserted_identity(request)
+        principal = self._principal(request)
+        granted = bff_scopes.observability_scopes_for(getattr(principal, "effective_role", None))
+        if observability_identity.SCOPE_HOST_READ not in granted:
+            return _error_response(
+                403,
+                "bff.access_denied",
+                "missing required scope " + observability_identity.SCOPE_HOST_READ,
+            )
+        if self.system_resources is None:
+            return _error_response(
+                503,
+                "bff.system_resources_not_attached",
+                "the system resource reader is not attached",
+            )
+        try:
+            data = self.system_resources()
+        except Exception as exc:  # noqa: BLE001 - 读不到就是读不到，不伪造
+            return _error_response(
+                503,
+                "bff.system_resources_unavailable",
+                "the system resource reader failed: " + type(exc).__name__,
+            )
+        return _json_response(200, {"data": data})
 
     # --- GET /api/atlas/calls -----------------------------------------------
 
@@ -1457,6 +1613,8 @@ __all__ = [
     "EVAL_REPORT_SOURCES_PATH",
     "EVENTS_PATH",
     "INFRA_SUMMARY_PATH",
+    "SYSTEM_RESOURCES_PATH",
+    "MODEL_SERVICE_KEY_PATH",
     "INVOKE_PATH_PREFIX",
     "LOGOUT_PATH",
     "SERVICES_PATH",

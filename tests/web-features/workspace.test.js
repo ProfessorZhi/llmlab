@@ -341,6 +341,10 @@ const BFF_ROUTE_CONTRACT = [
   { name: 'registry.models.register', method: 'POST', path: '/api/v2/registry/models', auth: 'session', kind: 'write', scope: 'registry:write' },
   { name: 'ops.invoke', method: 'POST', path: '/api/v2/ops/endpoints/{endpoint_id}/invoke', auth: 'session', kind: 'write', scope: 'registry:endpoint:invoke' },
   { name: 'portal.infra_summary', method: 'GET', path: '/api/infra/summary', auth: 'session', kind: 'read', scope: 'observability:host:read' },
+  { name: 'portal.system_resources', method: 'GET', path: '/api/infra/system', auth: 'session', kind: 'read', scope: 'observability:host:read' },
+  { name: 'engine.live', method: 'GET', path: '/api/v2/engine/live', auth: 'session', kind: 'read', scope: 'observability:host:read' },
+  { name: 'portal.model_service_key_create', method: 'POST', path: '/api/model-service/keys', auth: 'session', kind: 'write', scope: null },
+  { name: 'portal.model_service_key', method: 'GET', path: '/api/model-service/key', auth: 'session', kind: 'read', scope: null },
   { name: 'atlas.calls', method: 'GET', path: '/api/atlas/calls', auth: 'session', kind: 'read', scope: 'atlas:calls:self:read' },
   { name: 'evaluation.report_sources', method: 'GET', path: '/api/evaluation/report-sources', auth: 'session', kind: 'read', scope: 'evaluation:read' },
   { name: 'evaluation.reports', method: 'GET', path: '/api/evaluation/reports', auth: 'session', kind: 'read', scope: 'evaluation:read' },
@@ -383,7 +387,7 @@ test('the admin route matrix mirrors backend/bff/route_map.py exactly', () => {
   //   1. every row the local Python table declares must match the mirror exactly;
   //   2. the rows the mirror has and the local table does not must be EXACTLY
   //      the pending set. Any other unexplained row fails.
-  assert.equal(BFF_ROUTES.length, 26, 'the mirror is pinned to the 26-route contract');
+  assert.equal(BFF_ROUTES.length, 30, 'the mirror is pinned to the 30-route contract');
 
   // The independent pin: every row's method/path/session/read-write/scope must
   // match the recorded contract, including the rows a stacked checkout cannot

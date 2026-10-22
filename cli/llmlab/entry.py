@@ -95,11 +95,23 @@ def build_parser() -> argparse.ArgumentParser:
     register_engine.add_argument("--description")
     register_engine.add_argument("--tag", action="append", help="可重复")
     register_engine.add_argument("--idempotency-key", help="重试时给同一个键即可安全重放")
+    register_engine.add_argument(
+        "--engine-mode",
+        choices=["user", "system_existing"],
+        default="user",
+        help=(
+            "user = 我自己启动的服务（默认）；system_existing = 登记一台运维已经承认的"
+            "既有服务，需要 registry:admin:manage 且命中运维策略条目"
+        ),
+    )
     preflight_engine = engines_sub.add_parser(
         "preflight", parents=[common], help="登记前只读检查：端口、运行用户、接口兼容、名称"
     )
     preflight_engine.add_argument("--name", required=True)
     preflight_engine.add_argument("--target-url", required=True)
+    preflight_engine.add_argument(
+        "--engine-mode", choices=["user", "system_existing"], default="user"
+    )
     engines_sub.add_parser("get", parents=[common], help="查看一个 engine").add_argument("object_id")
     engines_sub.add_parser("verify", parents=[common], help="触发一次验证").add_argument("object_id")
 

@@ -129,7 +129,11 @@ def cmd_engines(client: ApiClient, args: argparse.Namespace, as_json: bool) -> i
         return EXIT_OK
 
     if args.engines_command == "register":
-        body: dict = {"name": args.name, "target_url": args.target_url}
+        body: dict = {
+            "name": args.name,
+            "target_url": args.target_url,
+            "engine_mode": getattr(args, "engine_mode", "user") or "user",
+        }
         if args.protocol:
             body["protocol"] = args.protocol
         if args.description:
@@ -155,7 +159,14 @@ def cmd_engines(client: ApiClient, args: argparse.Namespace, as_json: bool) -> i
         return EXIT_OK
 
     if args.engines_command == "preflight":
-        envelope = client.post("/engines/preflight", {"name": args.name, "target_url": args.target_url})
+        envelope = client.post(
+            "/engines/preflight",
+            {
+                "name": args.name,
+                "target_url": args.target_url,
+                "engine_mode": getattr(args, "engine_mode", "user") or "user",
+            },
+        )
 
         def render_preflight(data: dict) -> None:
             for key, check in (data.get("checks") or {}).items():

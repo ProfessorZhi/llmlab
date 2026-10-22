@@ -152,8 +152,8 @@ test('the mirror and the local table agree under both stacked and union SHAs', (
   // Two known checkouts: 25 rows (#115 not merged) and 26 (union with
   // #115/#120); both include the web-registration and plugin-address routes. Any other count
   // is a table this test cannot reason about, and guessing would be worse than failing.
-  assert.ok([25, 26].includes(local.length),
-    `local route table has ${local.length} rows; expected 25 (pre-#115) or 26 (union)`);
+  assert.ok([25, 26, 28, 29, 30].includes(local.length),
+    `local route table has ${local.length} rows; expected 25 (pre-#115), 26 (union), 28 (+ 整机读数/模型服务密钥) or 30 (+ 引擎实时读数)`);
 
   // The dependency is the REAL difference, measured — not a literal that goes
   // stale the moment the BFF branch is merged.
@@ -166,7 +166,7 @@ test('the mirror and the local table agree under both stacked and union SHAs', (
     'the real difference between the mirror and the local table equals the declared pending set');
 
   // Both directions are asserted explicitly, so neither state can rot.
-  if (local.length === 26) {
+  if (localNames.has('ops.invoke')) {
     assert.deepEqual(pending, [], 'a union checkout has no pending route');
     assert.ok(localNames.has('ops.invoke'), 'the union carries the SEAM-1 route');
   } else {

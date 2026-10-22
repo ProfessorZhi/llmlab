@@ -425,6 +425,10 @@ def build_harness(
     with_atlas: bool = True,
     with_host_summary: bool = True,
     host_projection: object = None,
+    #: 引擎实时读数的取数器。默认 ``None`` = 应用用模块默认实现（真去读环回的
+    #: ``/metrics``）。测试必须显式塞一个假的进来：一次单测不该依赖本机有没有
+    #: 引擎、有没有那份 key 文件。
+    engine_live: object = None,
     with_admin_mode: bool = True,
     admin_mode_configured: bool = True,
     admin_mode_ttl_seconds: int = bff_admin_mode.DEFAULT_TTL_SECONDS,
@@ -650,6 +654,7 @@ def build_harness(
         evaluation=evaluation,
         atlas=atlas,
         host_summary=host_summary,
+        engine_live=engine_live,
         # 应用自己的时钟也钉在 harness 的 ``resolved_now`` 上。
         #
         # 不传它的时候 ``OpsApplication._now()`` 回的是**真实墙钟**，而同一份 harness
