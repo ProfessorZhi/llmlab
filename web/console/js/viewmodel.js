@@ -69,6 +69,8 @@ const ENGINE_STATUS = Object.freeze({
 export function servicesFromOps(ops) {
   const reg = ops?.registry;
   if (!reg || reg.adapter_attached === false) return null;
+  // Registry demo rows are fixtures, not deployed engines or routes.
+  if (ops.synthetic === true) return [];
   const list = (reg.engines ?? []).map((e) => ({
     id: e.engine_id,
     kind: 'engine',
@@ -131,6 +133,8 @@ export function servicesFromOps(ops) {
 export function modelsFromOps(ops) {
   const reg = ops?.registry;
   if (!reg || reg.adapter_attached === false) return null;
+  // Do not present fixture catalog entries as models installed on this host.
+  if (ops.synthetic === true) return [];
   return (reg.models ?? []).map((m) => ({
     id: m.model_id,
     name: m.name,
@@ -174,11 +178,15 @@ export function hostFacts(host) {
   return {
     vramUsedMiB: val('gpu_memory_used_mib'),
     vramTotalMiB: val('gpu_memory_total_mib'),
+    vramFreeMiB: val('gpu_memory_free_mib'),
+    vramReservedMiB: val('gpu_memory_reserved_mib'),
     utilRatio: val('gpu_utilization_ratio'),
     tempC: val('gpu_temperature_celsius'),
     powerW: val('gpu_power_watts'),
     services,
     observedAt: host.observedAt ?? null,
+    source: host.source ?? null,
+    runtime: host.runtime ?? null,
   };
 }
 
@@ -245,7 +253,21 @@ export function overviewModel({ ops = null, host = null, log = null, demo = null
   const vramTotal = hf?.vramTotalMiB ?? toMiB(metricValue(ops, 'device.gpu.memory.total_bytes'));
   const vramUsed = hf?.vramUsedMiB ?? toMiB(metricValue(ops, 'device.gpu.memory.used_bytes'));
   const window = ops?.metrics?.window === '24h' ? '近 24 小时' : null;
-  const online = services ? services.filter((x) => x.runtime?.tone === 'ok').length : null;
+  // 调用源本身：路径 / 行数 / 最后一条 / 窗口内条数。没有这一段就是「没接线」。
+  const feed = ops?.gateway_feed ?? null;
+  const requestsFeed = feed
+    ? {
+      readable: feed.readable !== false,
+      events: finite(feed.events) ? feed.events : null,
+      inWindow: finite(feed.in_window) ? feed.in_window : null,
+      lastTs: typeof feed.last_event_ts === 'string' ? feed.last_event_ts : null,
+      unmapped: finite(feed.unmapped) ? feed.unmapped : null,
+      keysBound: finite(feed.keys_bound) ? feed.keys_bound : null,
+      keysTotal: finite(feed.keys_total) ? feed.keys_total : null,
+    }
+    : null;
+  const engines = services?.filter((x) => x.kind === 'engine') ?? null;
+  const online = engines ? engines.filter((x) => x.runtime?.tone === 'ok').length : null;
 
   const modelNames = [
     ...(cf?.models ?? []).map((m) => m.id),
@@ -261,9 +283,18 @@ export function overviewModel({ ops = null, host = null, log = null, demo = null
       .map((x) => ({ id: x.id, label: x.label, owner: x.owner, engine: x.engine, mib: x.vramMiB, color: colors.get(x.label) ?? '#8E8E93' }));
     const attributed = parts.reduce((t, p) => t + p.mib, 0);
     if (finite(vramUsed) && vramUsed - attributed > 1) {
-      parts.push({ id: '__other', label: parts.length ? '其他进程' : '已使用', owner: null, engine: null, mib: vramUsed - attributed, color: '#8E8E93' });
+      parts.push({ id: '__other', label: parts.length ? '其他进程' : '已分配（进程未归因）', owner: null, engine: null, mib: vramUsed - attributed, color: '#8E8E93' });
     }
-    vram = { totalMiB: vramTotal, usedMiB: finite(vramUsed) ? vramUsed : null, parts };
+    if (finite(hf?.vramReservedMiB) && hf.vramReservedMiB > 0) {
+      parts.push({ id: '__reserved', label: '驱动保留', owner: null, engine: null, mib: hf.vramReservedMiB, color: '#B8B8BD' });
+    }
+    vram = {
+      totalMiB: vramTotal,
+      usedMiB: finite(vramUsed) ? vramUsed : null,
+      freeMiB: finite(hf?.vramFreeMiB) ? hf.vramFreeMiB : null,
+      reservedMiB: finite(hf?.vramReservedMiB) ? hf.vramReservedMiB : null,
+      parts,
+    };
   }
 
   return {
@@ -271,8 +302,9 @@ export function overviewModel({ ops = null, host = null, log = null, demo = null
     kpis: {
       requests: finite(reqs) ? reqs : cf ? cf.count : null,
       requestsScope: finite(reqs) ? (window ? `本人 · ${window}` : '本人') : cf ? '本人 · 最近记录' : null,
+      requestsFeed,
       servicesOnline: online,
-      servicesTotal: services ? services.length : null,
+      servicesTotal: engines ? engines.length : null,
       vramUsedMiB: finite(vramUsed) ? vramUsed : null,
       vramTotalMiB: finite(vramTotal) ? vramTotal : null,
       utilRatio: hf?.utilRatio ?? null,

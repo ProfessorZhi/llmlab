@@ -74,10 +74,16 @@ test('serves files over loopback and rejects everything else', async () => {
   try {
     assert.match(server.origin, /^http:\/\/127\.0\.0\.1:\d+$/, 'must bind loopback only');
 
-    const page = await fetch(`${server.origin}/index.html`);
+    // / and /index.html are the console's front door (deployment decision);
+    // /qa.html is the sibling static page that proves static serving still works.
+    const frontDoor = await fetch(`${server.origin}/index.html`, { redirect: 'manual' });
+    assert.equal(frontDoor.status, 302);
+    assert.equal(frontDoor.headers.get('location'), '/console/');
+
+    const page = await fetch(`${server.origin}/qa.html`);
     assert.equal(page.status, 200);
     assert.equal(page.headers.get('content-type'), 'text/html; charset=utf-8');
-    assert.match(await page.text(), /Dell LLM Lab/);
+    assert.match(await page.text(), /<html/i);
 
     const mod = await fetch(`${server.origin}/js/app.js`);
     assert.equal(mod.status, 200);

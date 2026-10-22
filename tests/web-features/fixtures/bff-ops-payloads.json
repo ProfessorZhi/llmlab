@@ -66,6 +66,7 @@
         "reason": "admin_dispatch_disabled"
       }
     },
+    "gateway_feed": null,
     "keys": [],
     "links": [
       {
@@ -637,6 +638,7 @@
         "reason": "admin_dispatch_disabled"
       }
     },
+    "gateway_feed": null,
     "keys": [],
     "links": [
       {
@@ -988,6 +990,7 @@
         "reason": "admin_dispatch_disabled"
       }
     },
+    "gateway_feed": null,
     "keys": [],
     "links": [
       {

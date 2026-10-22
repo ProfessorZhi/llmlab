@@ -119,6 +119,9 @@ class ModuleObservabilityAdapter:
         clock: Callable[[], datetime] | None = None,
         window_hours: int = DEFAULT_WINDOW_HOURS,
         bucket: str = DEFAULT_BUCKET,
+        trends_available: bool = True,
+        feed: object | None = None,
+        feed_extra: dict | None = None,
     ) -> None:
         self.stack = stack
         #: 已授权可见的 Endpoint 集合。由 BFF 用 Registry 的 ACL 注入 —— 观测层
@@ -127,6 +130,12 @@ class ModuleObservabilityAdapter:
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.window_hours = window_hours
         self.bucket = bucket
+        #: False = 本部署没有可画的曲线来源（例如 Registry 已 live 但读不到调用明细）。
+        self.trends_available = trends_available
+        #: 真实导出口本身（有 ``summary()`` 的那种）。没有接线就是 ``None`` ——
+        #: 页面据此区分「没接」与「接了但窗口内没有调用」。
+        self._feed = feed
+        self._feed_extra = dict(feed_extra or {})
 
     # --- 主体桥接 ---------------------------------------------------------
 
@@ -254,7 +263,14 @@ class ModuleObservabilityAdapter:
     # --- trends -----------------------------------------------------------
 
     def trends(self, *, identity, is_admin: bool, window: str) -> dict | None:
-        """时间线。合成来源时按契约带 ``synthetic: true`` + 原因。"""
+        """时间线。合成来源时按契约带 ``synthetic: true`` + 原因。
+
+        ``trends_available=False`` 的部署（例如 Registry 已是 live、但读不到
+        Gateway 调用明细）**不给曲线**：合成曲线只能挂在合成载荷上，而把整页降回
+        演示态又是另一种谎。空态是这里唯一站得住的答案。
+        """
+        if not self.trends_available:
+            return None
         try:
             return self._trends(identity=identity, is_admin=is_admin, window=window)
         except ObservabilityError:
@@ -378,6 +394,25 @@ class ModuleObservabilityAdapter:
         )
 
     # --- 小工具 -----------------------------------------------------------
+
+    def feed_summary(self) -> dict | None:
+        """观测源本身的状况：路径、行数、最后一条时间、窗口内条数。
+
+        **不含任何按人的数字**，所以对任何会话都一样。没接线时返回 ``None``，
+        而不是一份全 0 的假摘要。
+        """
+        summary = getattr(self._feed, "summary", None)
+        if not callable(summary):
+            return None
+        try:
+            value = summary()
+        except Exception:  # noqa: BLE001 - 诊断面不许把整页拖垮
+            return None
+        if not isinstance(value, dict):
+            return None
+        block = dict(value)
+        block.update(self._feed_extra)
+        return block
 
     def _text(self, identity) -> str:
         text = self.stack.gateway_text(identity)

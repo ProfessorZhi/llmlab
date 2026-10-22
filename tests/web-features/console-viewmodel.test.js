@@ -11,6 +11,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { sunburstLayout, dotGridLayout, barsLayout, fmtInt, fmtGiB } from '../../web/console/js/charts.js';
+import { requestsNote } from '../../web/console/js/ui.js';
 import {
   percentile, servicesFromOps, modelsFromOps, hourlyFromOps, callsFacts, overviewModel, preflightChecks,
 } from '../../web/console/js/viewmodel.js';
@@ -87,7 +88,12 @@ test('overview from the real BFF payloads: unknown metrics stay null', () => {
 });
 
 test('services: engines first, then owned/all/shared rows, without inventing runtime state', () => {
-  const admin = servicesFromOps(PAYLOADS.admin_private);
+  // 夹具是 synthetic 的，而 viewmodel 现在明确规定「合成负载不呈现为已部署的
+  // 引擎/路由」。这里要验的是**映射**，所以显式关掉 synthetic；synthetic 那条
+  // 规则单独在下面断言，别让两件事互相隐身。
+  const admin = servicesFromOps({ ...PAYLOADS.admin_private, synthetic: false });
+  assert.deepEqual(servicesFromOps(PAYLOADS.admin_private), [],
+    'a synthetic payload presents no engines or deployments');
   assert.deepEqual(admin.map((x) => x.kind), ['engine', 'deployment']);
   const [engine, deployment] = admin;
   assert.equal(engine.label, 'engine-alice');
@@ -98,7 +104,7 @@ test('services: engines first, then owned/all/shared rows, without inventing run
   assert.equal(deployment.label, 'model-alice');
   assert.equal(deployment.runtime.text, '状态未知');
   assert.equal(deployment.vramMiB, null);
-  const shared = servicesFromOps(PAYLOADS.grantee_shared);
+  const shared = servicesFromOps({ ...PAYLOADS.grantee_shared, synthetic: false });
   assert.equal(shared.filter((x) => x.sharedToMe).length, 1);
   assert.equal(servicesFromOps({ registry: { adapter_attached: false } }), null);
 });
@@ -204,4 +210,60 @@ test('models: owner name and weight path come straight from the payload', () => 
   ] } });
   assert.deepEqual(list.map((m) => [m.name, m.owner, m.self, m.weightPath]), [['qwen', '张伟', true, '/data/qwen'], ['bge', '李娜', false, null]]);
   assert.equal(modelsFromOps({ registry: { adapter_attached: false } }), null);
+});
+
+test('调用量脚注：没有源就说没接，接了就说日志里有什么', () => {
+  // 1. 完全没有 gateway_feed —— 这一行部署没接线。
+  assert.equal(requestsNote({ requests: null, requestsFeed: null }), '调用数据未接入');
+
+  // 2. 有 feed 但读不到文件：不是「0 次」，是「看不见」。
+  assert.match(
+    requestsNote({ requests: null, requestsFeed: { readable: false, events: null, inWindow: null } }),
+    /读不到/,
+  );
+
+  // 3. 读到了，日志是空的。
+  assert.match(
+    requestsNote({ requests: null, requestsFeed: { readable: true, events: 0, inWindow: 0 } }),
+    /为空/,
+  );
+
+  // 4. 读到了、窗口内 0 条 —— 必须说「0 次」并交出最近一条的时间作证据。
+  const idle = requestsNote({
+    requests: null,
+    requestsFeed: { readable: true, events: 173, inWindow: 0, lastTs: '2026-10-15T01:37:43Z' },
+  });
+  assert.match(idle, /^近 24 小时 0 次/);
+  assert.match(idle, /日志最近/);
+
+  // 5. 窗口内有调用、但没有一把 key 声明过属主 —— 归不到人，不能假装是自己。
+  const unowned = requestsNote({
+    requests: null,
+    requestsFeed: { readable: true, events: 173, inWindow: 12, keysBound: 0, lastTs: '2026-10-15T01:37:43Z' },
+  });
+  assert.match(unowned, /12 次/);
+  assert.match(unowned, /归不到人/);
+
+  // 6. 有本人数字时不解释来源，照旧报口径。
+  assert.equal(requestsNote({ requests: 7, requestsScope: '本人 · 近 24 小时' }), '本人 · 近 24 小时');
+});
+
+test('概览视图模型把 gateway_feed 折成 requestsFeed，没有就不编', () => {
+  const withFeed = overviewModel({
+    ops: {
+      synthetic: false,
+      metrics: { window: '24h', items: [] },
+      gateway_feed: {
+        feed: 'gateway-usage-export', readable: true, events: 173, unmapped: 0,
+        in_window: 0, last_event_ts: '2026-10-15T01:37:43Z', keys_total: 16, keys_bound: 0,
+      },
+    },
+  });
+  assert.deepEqual(withFeed.kpis.requestsFeed, {
+    readable: true, events: 173, inWindow: 0, lastTs: '2026-10-15T01:37:43Z',
+    unmapped: 0, keysBound: 0, keysTotal: 16,
+  });
+
+  const without = overviewModel({ ops: { synthetic: false, metrics: { window: '24h', items: [] } } });
+  assert.equal(without.kpis.requestsFeed, null);
 });
