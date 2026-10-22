@@ -20,6 +20,10 @@ export const PATHS = Object.freeze({
   changePassword: '/auth/account/password',
   ops: '/api/v2/ops',
   host: '/api/infra/summary',
+  system: '/api/infra/system',
+  engineLive: '/api/v2/engine/live',
+  modelKey: '/api/model-service/key',
+  modelKeys: '/api/model-service/keys',
   calls: '/api/atlas/calls',
   tokens: '/auth/tokens',
   tokenRevoke: '/auth/tokens/revoke',
@@ -40,10 +44,6 @@ export const PATHS = Object.freeze({
   gatewayPublish: '/api/gateway/models/publish',
   gatewayLogs: '/api/gateway/logs',
   gatewayPlayground: '/api/gateway/playground',
-  // 主机系统读数与引擎实时负载：形状取自 2026-10-22 的真实快照（docs/console-snapshot-20261022）。
-  // 本部署没有这两条路由时它们是 404 ⇒ not_configured，页面就不画那一块。
-  infraSystem: '/api/infra/system',
-  engineLive: '/api/v2/engine/live',
 });
 
 /** 路径里的 id 只允许安全字符，免得拼出另一条路由。 */
@@ -149,8 +149,58 @@ export async function loadOps(opts) {
 export async function loadHost(opts) {
   const r = await getJSON(PATHS.host, opts);
   if (r.state !== 'ready') return r;
-  const verdict = validateHostSummary(r.value);
+  const verdict = validateHostSummary(r.value?.data ?? r.value);
   return verdict.accepted ? { ...r, value: verdict } : { ...r, state: 'error', value: null, reason: verdict.reason ?? 'contract' };
+}
+
+export async function loadSystem(opts) {
+  const r = await getJSON(PATHS.system, opts);
+  if (r.state !== 'ready') return r;
+  const data = r.value?.data ?? r.value;
+  // 只认这一份契约的两个锚点：来源标记与采样窗口。缺任何一个就说明拿到的
+  // 不是这份投影，宁可报契约错误也不要把别的 JSON 当资源读数渲染出去。
+  if (!data || typeof data !== 'object' || data.source !== 'proc-verified'
+      || !Array.isArray(data.per_user)) {
+    return { ...r, state: 'error', value: null, reason: 'contract' };
+  }
+  return { ...r, value: data };
+}
+
+/**
+ * 引擎实时读数。取数由 BFF 代做（它拿着引擎自己的凭据），这里只收投影后的结果，
+ * 所以浏览器全程不见 key —— 这也是这条读数不再需要人去 Strata 设置里填密钥的原因。
+ *
+ * 两条口径写死在加载器里：
+ * - ``reachable: false`` 是**合法**结果，不是错误：引擎没起来、凭据没配，都是要显示的现状；
+ * - 认不出的 schema 才判契约错误，宁可空着，也不要把别的 JSON 当引擎读数渲染。
+ */
+export async function loadEngineLive(opts) {
+  // BFF 代理在本机环回上；2 秒拿不到就说明引擎没在答，等满 8 秒只是让页面更卡。
+  const r = await getJSON(PATHS.engineLive, { timeoutMs: 6000, ...opts });
+  if (r.state !== 'ready') return r;
+  const data = r.value?.data ?? r.value;
+  if (!data || typeof data !== 'object' || typeof data.reachable !== 'boolean'
+      || data.schema_version !== 'engine-live/1') {
+    return { ...r, state: 'error', value: null, reason: 'contract' };
+  }
+  return { ...r, value: data };
+}
+
+export async function loadModelKeys(opts) {
+  const r = await getJSON(PATHS.modelKey, opts);
+  if (r.state !== 'ready') return r;
+  const data = r.value?.data ?? r.value;
+  // 清单为空是**合法**结果（还没签发过），只有「形状不对」才算契约错误。
+  const keys = Array.isArray(data?.keys) ? data.keys
+    : (data && typeof data.key === 'string' && data.key ? [data] : null);
+  if (!keys || keys.some((k) => !k || typeof k.key !== 'string' || !k.key)) {
+    return { ...r, state: 'error', value: null, reason: 'contract' };
+  }
+  return { ...r, value: keys };
+}
+
+export async function createModelKey(label, opts) {
+  return send(PATHS.modelKeys, { label: label || null }, opts);
 }
 
 export async function loadCalls(opts) {

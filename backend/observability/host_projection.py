@@ -3,11 +3,11 @@
 背景
 ----
 
-``web/tools/verified-infra.mjs`` 把 Dell 主机上的**只读** Prometheus 事实投影成一个
+Dell 主机上的**只读** Prometheus 或 NVIDIA NVML 事实投影成一个
 固定形状的小契约；浏览器端 ``web/js/infra/host-status.js`` 只在三条同时成立时，才把
 数字画成 LIVE：
 
-    source === "prometheus-readonly" && version === 1 && synthetic === false
+    source in {"prometheus-readonly", "nvml-verified"} && version === 1 && synthetic === false
 
 那是一条**客户端**防线。一个被中间人改写、由旧版本工具生成、或者干脆伪造的响应，
 只要能过浏览器那一行 ``if``，就会被画成 LIVE。服务端在把投影下发给浏览器之前必须
@@ -21,7 +21,7 @@
 
 * **``synthetic`` 必须是 JSON ``false``** —— 不是 ``0``、不是 ``"false"``、不是缺省。
   合成数据永远不得进入 LIVE 分支：一个合成数字被画成实测值，正是本仓库一路拒绝的事。
-* **``source`` 必须逐字等于 ``prometheus-readonly``**，``readonly`` 必须为 ``true``，
+* **``source`` 必须逐字匹配受信白名单**，``readonly`` 必须为 ``true``，
   ``version`` 必须为 ``1``。任何一条不成立，整份响应的**每一个**指标都降级为 UNKNOWN
   —— 不是「只降级出错的那个字段」：一份来路不明信封里的其它字段同样不可信。
 * **``sample_at`` 是信任的充要条件。** ``state == "known"`` 的指标必须带**带时区**的
@@ -52,8 +52,10 @@ __all__ = [
     "DEFAULT_FUTURE_TOLERANCE_S",
     "DEFAULT_MAX_SAMPLE_AGE_S",
     "HOST_METRIC_UNITS",
+    "HOST_METRIC_OPTIONAL_UNITS",
     "PROJECTION_PATH",
     "PROJECTION_SOURCE",
+    "PROJECTION_SOURCES",
     "PROJECTION_VERSION",
     "REJECT_BAD_OBSERVED_AT",
     "REJECT_BAD_SAMPLE_AT",
@@ -83,8 +85,9 @@ __all__ = [
 #: 投影端点。校验器不认识别的路径 —— 契约只有一个。
 PROJECTION_PATH = "/api/infra/summary"
 
-#: 唯一被信任的来源标识。逐字比较，不做大小写/空白归一化。
+#: 受信来源逐字比较，不做大小写/空白归一化。
 PROJECTION_SOURCE = "prometheus-readonly"
+PROJECTION_SOURCES = frozenset({PROJECTION_SOURCE, "nvml-verified"})
 
 #: 唯一被信任的契约版本。
 PROJECTION_VERSION = 1
@@ -110,6 +113,16 @@ HOST_METRIC_UNITS: Mapping[str, str] = MappingProxyType(
     }
 )
 
+# Optional gauges are emitted by direct NVML readers. Their absence does not
+# invalidate older Prometheus projections, but a present value is validated
+# under the same freshness and unit rules as the required host metrics.
+HOST_METRIC_OPTIONAL_UNITS: Mapping[str, str] = MappingProxyType(
+    {
+        "gpu_memory_free_mib": "mib",
+        "gpu_memory_reserved_mib": "mib",
+    }
+)
+
 #: 投影端会随 UNKNOWN 一起给出的上游原因码。校验器**只透传这些**，别的一律
 #: 归到 ``unknown`` —— 一个自由文本「原因」会变成一条不受控的渲染通道。
 UPSTREAM_REASONS = frozenset(
@@ -122,6 +135,7 @@ UPSTREAM_REASONS = frozenset(
         "unreachable",
         "offline",
         "metric-name-unconfirmed",
+        "invalid_response",
     }
 )
 
@@ -304,7 +318,7 @@ def _envelope_rejection(payload: Any) -> tuple[str, str | None, int | None, bool
     # 一个用 0 表示「非合成」的上游，和一个用 0 表示「未知」的上游，无法区分。
     if synthetic is not False:
         return REJECT_SYNTHETIC_SOURCE, source, version, readonly
-    if source != PROJECTION_SOURCE:
+    if source not in PROJECTION_SOURCES:
         return REJECT_UNTRUSTED_SOURCE, source, version, readonly
     if readonly is not True:
         return REJECT_NOT_READONLY, source, version, readonly
@@ -314,16 +328,20 @@ def _envelope_rejection(payload: Any) -> tuple[str, str | None, int | None, bool
     return "", source, version, readonly
 
 
-def _unknown_metric(key: str, unit: str | None, reason: str) -> MetricVerdict:
+def _unknown_metric(
+    key: str, unit: str | None, reason: str, *, source: str | None = None
+) -> MetricVerdict:
     return MetricVerdict(
         key=key,
         live=False,
         value=None,
-        unit=unit if unit in set(HOST_METRIC_UNITS.values()) else HOST_METRIC_UNITS.get(key),
+        unit=unit if unit in set(HOST_METRIC_UNITS.values()) else (
+            HOST_METRIC_UNITS.get(key) or HOST_METRIC_OPTIONAL_UNITS.get(key)
+        ),
         sample_at=None,
         age_seconds=None,
         reason=reason,
-        source=PROJECTION_SOURCE,
+        source=source if source in PROJECTION_SOURCES else PROJECTION_SOURCE,
     )
 
 
@@ -334,29 +352,30 @@ def _metric_verdict(
     now: datetime,
     max_sample_age_s: int,
     future_tolerance_s: int,
+    source: str | None = None,
 ) -> MetricVerdict:
-    expected_unit = HOST_METRIC_UNITS[key]
+    expected_unit = HOST_METRIC_UNITS.get(key) or HOST_METRIC_OPTIONAL_UNITS[key]
 
     if not isinstance(entry, Mapping):
-        return _unknown_metric(key, expected_unit, REJECT_BAD_SHAPE)
+        return _unknown_metric(key, expected_unit, REJECT_BAD_SHAPE, source=source)
 
     if entry.get("state") != "known":
         upstream = entry.get("reason")
         reason = upstream if upstream in UPSTREAM_REASONS else REASON_UNKNOWN
-        return _unknown_metric(key, entry.get("unit"), reason)
+        return _unknown_metric(key, entry.get("unit"), reason, source=source)
 
     value = entry.get("value")
     if not _is_finite_number(value):
-        return _unknown_metric(key, entry.get("unit"), REJECT_NON_FINITE_VALUE)
+        return _unknown_metric(key, entry.get("unit"), REJECT_NON_FINITE_VALUE, source=source)
 
     unit = entry.get("unit")
     if unit != expected_unit:
-        return _unknown_metric(key, expected_unit, REJECT_UNIT_MISMATCH)
+        return _unknown_metric(key, expected_unit, REJECT_UNIT_MISMATCH, source=source)
 
     # 状态量只可能是 0/1。别的值不算「未知」，是**数据错位**：一个 0.4 的
     # ``strata_up`` 既不是 up 也不是 down，把它按阈值解释就是在编。
     if expected_unit == "bool" and value not in (0, 1):
-        return _unknown_metric(key, expected_unit, REJECT_BAD_STATE_VALUE)
+        return _unknown_metric(key, expected_unit, REJECT_BAD_STATE_VALUE, source=source)
 
     raw_sample_at = entry.get("sample_at")
     # 空白字符串等同于「没有给出时间戳」：一个 ``"   "`` 的样本时间既不新也不旧，
@@ -364,17 +383,17 @@ def _metric_verdict(
     if raw_sample_at is None or (
         isinstance(raw_sample_at, str) and not raw_sample_at.strip()
     ):
-        return _unknown_metric(key, expected_unit, REJECT_MISSING_SAMPLE_AT)
+        return _unknown_metric(key, expected_unit, REJECT_MISSING_SAMPLE_AT, source=source)
     sample_at = parse_instant(raw_sample_at)
     if sample_at is None:
-        return _unknown_metric(key, expected_unit, REJECT_BAD_SAMPLE_AT)
+        return _unknown_metric(key, expected_unit, REJECT_BAD_SAMPLE_AT, source=source)
 
     age = (now - sample_at).total_seconds()
     if age < -future_tolerance_s:
         # 未来时间戳是数据质量问题，不是「非常新」。
-        return _unknown_metric(key, expected_unit, REJECT_FUTURE_SAMPLE_AT)
+        return _unknown_metric(key, expected_unit, REJECT_FUTURE_SAMPLE_AT, source=source)
     if age > max_sample_age_s:
-        verdict = _unknown_metric(key, expected_unit, REJECT_STALE_SAMPLE_AT)
+        verdict = _unknown_metric(key, expected_unit, REJECT_STALE_SAMPLE_AT, source=source)
         return MetricVerdict(
             key=verdict.key,
             live=False,
@@ -383,7 +402,7 @@ def _metric_verdict(
             sample_at=raw_sample_at,
             age_seconds=age,
             reason=REJECT_STALE_SAMPLE_AT,
-            source=PROJECTION_SOURCE,
+            source=source if source in PROJECTION_SOURCES else PROJECTION_SOURCE,
         )
 
     return MetricVerdict(
@@ -394,7 +413,7 @@ def _metric_verdict(
         sample_at=raw_sample_at,
         age_seconds=max(0.0, age),
         reason=None,
-        source=PROJECTION_SOURCE,
+        source=source if source in PROJECTION_SOURCES else PROJECTION_SOURCE,
     )
 
 
@@ -461,7 +480,7 @@ def validate_host_summary(
             version=version,
             observed_at=observed_at,
             metrics={
-                key: _unknown_metric(key, unit, rejected_reason)
+                key: _unknown_metric(key, unit, rejected_reason, source=source)
                 for key, unit in HOST_METRIC_UNITS.items()
             },
             services={},
@@ -472,10 +491,12 @@ def validate_host_summary(
         if entry is None:
             # 契约要求「始终是完整形状」：一个**缺键**的响应是残缺的，不是「这项
             # 没数据」。缺键意味着我们根本不知道投影端跑的是哪个版本。
-            metrics[key] = _unknown_metric(key, expected_unit, REJECT_UNKNOWN_METRIC_KEY)
+            metrics[key] = _unknown_metric(
+                key, expected_unit, REJECT_UNKNOWN_METRIC_KEY, source=source
+            )
             continue
         if not envelope_ok:
-            metrics[key] = _unknown_metric(key, expected_unit, reason)
+            metrics[key] = _unknown_metric(key, expected_unit, reason, source=source)
             continue
         metrics[key] = _metric_verdict(
             key,
@@ -483,11 +504,27 @@ def validate_host_summary(
             now=now,
             max_sample_age_s=max_sample_age_s,
             future_tolerance_s=future_tolerance_s,
+            source=source,
+        )
+
+    for key, expected_unit in HOST_METRIC_OPTIONAL_UNITS.items():
+        if key not in raw_metrics:
+            continue
+        if not envelope_ok:
+            metrics[key] = _unknown_metric(key, expected_unit, reason, source=source)
+            continue
+        metrics[key] = _metric_verdict(
+            key,
+            raw_metrics[key],
+            now=now,
+            max_sample_age_s=max_sample_age_s,
+            future_tolerance_s=future_tolerance_s,
+            source=source,
         )
 
     raw_services = payload.get("services")
     if isinstance(raw_services, Mapping):
-        for key in ("prometheus", "gateway", "grafana", "evalscope", "strata"):
+        for key in ("prometheus", "gateway", "grafana", "evalscope", "strata", "strata_model"):
             entry = raw_services.get(key)
             if entry is None:
                 continue

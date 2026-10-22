@@ -354,6 +354,10 @@ const BFF_ROUTE_CONTRACT = [
   { name: 'registry.engines.params.update', method: 'POST', path: '/api/v2/registry/engines/{engine_id}/params/update', auth: 'session', kind: 'write', scope: 'registry:write' },
   { name: 'ops.invoke', method: 'POST', path: '/api/v2/ops/endpoints/{endpoint_id}/invoke', auth: 'session', kind: 'write', scope: 'registry:endpoint:invoke' },
   { name: 'portal.infra_summary', method: 'GET', path: '/api/infra/summary', auth: 'session', kind: 'read', scope: 'observability:host:read' },
+  { name: 'portal.system_resources', method: 'GET', path: '/api/infra/system', auth: 'session', kind: 'read', scope: 'observability:host:read' },
+  { name: 'engine.live', method: 'GET', path: '/api/v2/engine/live', auth: 'session', kind: 'read', scope: 'observability:host:read' },
+  { name: 'portal.model_service_key_create', method: 'POST', path: '/api/model-service/keys', auth: 'session', kind: 'write', scope: null },
+  { name: 'portal.model_service_key', method: 'GET', path: '/api/model-service/key', auth: 'session', kind: 'read', scope: null },
   { name: 'atlas.calls', method: 'GET', path: '/api/atlas/calls', auth: 'session', kind: 'read', scope: 'atlas:calls:self:read' },
   { name: 'evaluation.report_sources', method: 'GET', path: '/api/evaluation/report-sources', auth: 'session', kind: 'read', scope: 'evaluation:read' },
   { name: 'evaluation.reports', method: 'GET', path: '/api/evaluation/reports', auth: 'session', kind: 'read', scope: 'evaluation:read' },
@@ -397,7 +401,9 @@ test('the admin route matrix mirrors backend/bff/route_map.py exactly', () => {
   //   1. every row the local Python table declares must match the mirror exactly;
   //   2. the rows the mirror has and the local table does not must be EXACTLY
   //      the pending set. Any other unexplained row fails.
-  assert.equal(BFF_ROUTES.length, 39, 'the mirror is pinned to the 39-route contract');
+  // 合并后只有一个 checkout：39（上游 PR#20 的网关/参数路由）+ 30 那版里上游没有的
+  // 引擎实时读数与模型服务密钥，去掉重复项实际 43 条。镜像与 route_map 必须一致。
+  assert.equal(BFF_ROUTES.length, 43, 'the mirror is pinned to the 43-route contract');
 
   // The independent pin: every row's method/path/session/read-write/scope must
   // match the recorded contract, including the rows a stacked checkout cannot

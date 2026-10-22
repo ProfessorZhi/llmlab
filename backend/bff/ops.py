@@ -283,10 +283,23 @@ def deployment_record(
     }
 
 
+#: bootstrap 本机管理员的主体前缀。由 ``local:<摘要>`` 组成，**不在**受信目录里
+#: （它既不是 Linux 用户，也不是平台账户），所以查目录查不到名字。
+BOOTSTRAP_ADMIN_PREFIX = "local:"
+
+#: 那个身份在页面上叫「本机管理员」。这是**显示**标签，不参与任何判定。
+BOOTSTRAP_ADMIN_LABEL = "本机管理员"
+
+
 def principal_name(principals, principal: str) -> str:
-    """主体 id ⇒ 给人看的名字（平台账户是显示名，Linux 主体是登录名）。查不到原样返回。"""
+    """主体 id ⇒ 给人看的名字（平台账户是显示名，Linux 主体是登录名）。查不到原样返回。
+
+    唯一的例外是 bootstrap 本机管理员：它的 id 是一串摘要，原样印在页面上只会像乱码。
+    """
     record = principals.lookup(principal) if principals is not None else None
     if record is None:
+        if isinstance(principal, str) and principal.startswith(BOOTSTRAP_ADMIN_PREFIX):
+            return BOOTSTRAP_ADMIN_LABEL
         return principal
     return record.display_name or record.linux_user or principal
 
@@ -653,6 +666,13 @@ def build_ops(
             "window": config.window,
             **({"expires_at": metric_expiries} if metric_expiries else {}),
         },
+        # 调用源本身的状况（路径 / 行数 / 最后一条 / 窗口内条数）。
+        # 没接线的适配器没有这个方法 —— 那就没有这一段，页面说「未接入」。
+        "gateway_feed": (
+            observability.feed_summary()
+            if callable(getattr(observability, "feed_summary", None))
+            else None
+        ),
         "trends": observability.trends(
             identity=principal, is_admin=is_admin, window=config.window
         ),

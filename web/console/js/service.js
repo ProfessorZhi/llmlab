@@ -2,7 +2,7 @@
  *  参数因引擎而异，表单完全由后端返回的参数表（schema）生成。 */
 import { h, toast, put } from './dom.js';
 import { fmtInt, fmtGiB } from './charts.js';
-import { PATHS, loadData, loadOps, send, engineParams, engineParamsUpdate } from './data.js';
+import { PATHS, loadData, loadEngineLive, loadOps, send, engineParams, engineParamsUpdate } from './data.js';
 import { servicesFromOps, engineLabel } from './viewmodel.js';
 import { demoServices, demoParams, demoGateway } from './demo.js';
 import { SNAP_ENGINE_LIVE } from './snapshot.js';
@@ -155,7 +155,7 @@ export async function detail(ctx, engineId) {
     // 实时负载目前只有 Strata 的只读代理（部署里没有这条路由就是 404 ⇒ 不画）。
     const framework = p.value?.framework ?? svc?.engine;
     if (framework === 'strata') {
-      const l = await loadData(PATHS.engineLive);
+      const l = await loadEngineLive();
       if (l.state === 'ready' && l.value.reachable) live = l.value;
     }
   }

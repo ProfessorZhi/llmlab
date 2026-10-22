@@ -30,6 +30,7 @@ from backend.observability.host_projection import (  # noqa: E402
     DEFAULT_MAX_SAMPLE_AGE_S,
     HOST_METRIC_UNITS,
     PROJECTION_SOURCE,
+    PROJECTION_SOURCES,
     PROJECTION_VERSION,
     REJECT_BAD_OBSERVED_AT,
     REJECT_BAD_SAMPLE_AT,
@@ -558,7 +559,17 @@ class ProjectionConstantParityTest(unittest.TestCase):
             f"export const PROJECTION_VERSION = {PROJECTION_VERSION};",
             self.host_status,
         )
-        self.assertRegex(self.host_status, r"\bsource\s*!==\s*PROJECTION_SOURCE\b")
+        # 来源是**一组**受信值（Prometheus 与 NVML 都是核实过的来源），浏览器
+        # 必须接受与服务器完全相同的那一组：多一个就是放行没核实过的自报来源，
+        # 少一个就是把人家的真实读数判成 UNKNOWN。
+        set_line = next(
+            line for line in self.host_status.splitlines() if "PROJECTION_SOURCES =" in line
+        )
+        declared = set(re.findall(r"'([^']+)'", set_line))
+        if "PROJECTION_SOURCE" in set_line:
+            declared.add(PROJECTION_SOURCE)
+        self.assertEqual(declared, set(PROJECTION_SOURCES), set_line)
+        self.assertRegex(self.host_status, r"\bPROJECTION_SOURCES\.has\(\s*source\s*\)")
         self.assertRegex(self.host_status, r"\bversion\s*!==\s*PROJECTION_VERSION\b")
         self.assertRegex(self.host_status, r"\bsynthetic\s*!==\s*false\b")
 

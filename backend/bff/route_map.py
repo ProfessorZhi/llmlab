@@ -63,7 +63,7 @@ SOURCE_SESSION = "session"
 SOURCE_REGISTRY = "registry"
 #: 数据的权威在观测模块（``backend/observability``，经 Data Lane 的 adapter）。
 SOURCE_OBSERVABILITY = "observability"
-#: 固定来源的主机投影（``prometheus-readonly``），服务端按
+#: 固定来源的主机投影（Prometheus 或 NVML），服务端按
 #: ``backend.observability.host_projection`` 严格校验后才下发。
 SOURCE_HOST_SUMMARY = "host_summary"
 #: 数据的权威在 Calls/Atlas 模块（``backend/atlas``）的 Gateway 调用元数据。
@@ -79,6 +79,13 @@ SOURCE_PORTAL = "portal"
 SOURCE_AUDIT = "audit"
 #: 数据的权威在集成网关（``backend/gateway``）：虚拟密钥、模型路由与它自己记的调用元数据。
 SOURCE_GATEWAY = "gateway"
+#: 数据的权威是「平台签发、给调用方用的模型服务凭据」。与其它来源分开，
+#: 因为它是唯一会原样下发密钥的一支，读代码的人应当一眼看出来。
+SOURCE_MODEL_SERVICE = "model_service"
+#: 数据的权威是**正在运行的推理引擎自己**报出来的运行时状态（Strata 的
+#: ``GET /metrics``）。与 ``host_summary`` 分开：那份是主机侧的投影（Prometheus /
+#: NVML），这一份是引擎进程内部的槽位、排队与吞吐，只有引擎自己知道。
+SOURCE_ENGINE = "engine"
 
 SOURCES = (
     SOURCE_SESSION,
@@ -90,6 +97,8 @@ SOURCES = (
     SOURCE_PORTAL,
     SOURCE_AUDIT,
     SOURCE_GATEWAY,
+    SOURCE_MODEL_SERVICE,
+    SOURCE_ENGINE,
 )
 
 # --- 归属 -------------------------------------------------------------------
@@ -471,7 +480,65 @@ ROUTES: tuple[RouteSpec, ...] = (
         # 整机读数是共享量、有自己的一道门；那道门由适配器自己判（它知道自己的
         # scope 词表），这里记录的是「该去验什么」。
         scope=observability_identity.SCOPE_HOST_READ,
-        note="固定 prometheus-readonly 投影；未装配时 503，不是一份全 UNKNOWN 的 200。",
+        note="固定 Prometheus/NVML 只读投影；未装配时 503，不是一份全 UNKNOWN 的 200。",
+    ),
+    RouteSpec(
+        name="portal.model_service_key_create",
+        methods=("POST",),
+        path="/api/model-service/keys",
+        auth=AUTH_SESSION,
+        kind=KIND_WRITE,
+        csrf=True,
+        source=SOURCE_MODEL_SERVICE,
+        owner=LANE_DATA,
+        handler="_model_service_key_create",
+        note="签发一把新的模型推理密钥；写入引擎环境文件并触发引擎重载，因此响应里带 restart。",
+    ),
+    RouteSpec(
+        name="portal.system_resources",
+        methods=("GET",),
+        path="/api/infra/system",
+        auth=AUTH_SESSION,
+        kind=KIND_READ,
+        csrf=False,
+        source=SOURCE_HOST_SUMMARY,
+        owner=LANE_DATA,
+        handler="_system_resources",
+        # 与 /api/infra/summary 同一道门：整机读数是共享量，不因为「换了个
+        # 采集方式」就放宽。
+        scope=observability_identity.SCOPE_HOST_READ,
+        note="BFF 直读 /proc 的整机读数（CPU/内存/交换/磁盘/网络/按用户）；未装配时 503。",
+    ),
+    RouteSpec(
+        name="engine.live",
+        methods=("GET",),
+        path="/api/v2/engine/live",
+        auth=AUTH_SESSION,
+        kind=KIND_READ,
+        csrf=False,
+        source=SOURCE_ENGINE,
+        owner=LANE_DATA,
+        handler="_engine_live",
+        # 引擎读数和整机读数一样是**共享量**：所有人看到的是同一份，用它不需要
+        # 额外授权。这里再借一次 ``SCOPE_HOST_READ``，而不是为一处用法造一个新的
+        # scope —— 多一个词条就多一处会漂移的权限声明。
+        scope=observability_identity.SCOPE_HOST_READ,
+        note=(
+            "BFF 代取引擎 /metrics 的窄投影（槽位/排队/吞吐）。引擎凭据只在服务端，"
+            "响应体里没有 key；读不到时是 200 + reachable:false，不是 503。"
+        ),
+    ),
+    RouteSpec(
+        name="portal.model_service_key",
+        methods=("GET",),
+        path="/api/model-service/key",
+        auth=AUTH_SESSION,
+        kind=KIND_READ,
+        csrf=False,
+        source=SOURCE_MODEL_SERVICE,
+        owner=LANE_DATA,
+        handler="_model_service_key",
+        note="下发给平台管理员的模型服务密钥（完整明文）；未签发时 200 + 空清单，不是 404。",
     ),
     RouteSpec(
         name="atlas.calls",

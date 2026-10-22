@@ -65,6 +65,8 @@ LLMLAB_DEV_API=http://127.0.0.1:8790 npm run serve
 
 模型调用走控制台自带的网关（同源 `/v1`，OpenAI 兼容）：在「网关 → 模型路由」把自己的推理服务发布成模型名，在「网关 → API 密钥」建自己的 `sk-lab-…` 密钥。引擎自身的密钥用 `--engine-secret-ref ENGINE=FILE:VAR` 只留在服务端。日志以密钥为单位，正文默认不记录。详见 [docs/gateway.md](docs/gateway.md)。
 
+另有一类**模型服务密钥**（`sk-qwen-…`，仅平台管理员可签发）：它不经过网关，直接拿去调本机推理引擎。签发会写引擎环境文件并触发引擎重载，因此响应里会如实说明密钥何时生效；详见 [docs/gateway.md](docs/gateway.md)。
+
 CLI / Agent：在「我的账户 → 命令行 / Agent 令牌」创建令牌（只显示一次），令牌拥有与该账户相同的资源权限：
 
 ```bash

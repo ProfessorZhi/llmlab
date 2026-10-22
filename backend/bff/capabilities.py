@@ -213,7 +213,7 @@ SOURCE_SEAMS: tuple[SourceSeam, ...] = (
         # 90 秒取自 host_projection 自己的 DEFAULT_MAX_SAMPLE_AGE_S，不重抄。
         ttl_seconds=host_max_sample_age_s,
         adapter_attribute="host_summary",
-        note="固定 Prometheus 只读投影，服务端按 prometheus-readonly 严格校验。",
+        note="固定 Prometheus/NVML 只读投影，服务端严格校验来源与样本时间。",
     ),
     SourceSeam(
         source="atlas_calls",

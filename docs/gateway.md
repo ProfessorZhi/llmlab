@@ -31,6 +31,24 @@
 | `GET /api/gateway/logs?[view=all][&key_ref=][&model=][&outcome=][&limit=]` · `GET /api/gateway/logs/{request_id}` | 简要日志与单次详情（按密钥筛选的参数叫 `key_ref`：`key_id` 在 BFF 的身份守卫里是保留字） |
 | `POST /api/gateway/playground` | 在线体验（会话身份、非流式、最多 1024 输出 Token），照常记账 |
 
+## 模型服务密钥（平台签发给调用方）
+
+网关密钥（`sk-lab-…`）用来**经过网关**调用模型；模型服务密钥（`sk-qwen-…`）是另一件事：
+由平台管理员签发，**直接**填进客户端去调本机推理引擎（Strata），不经过网关，因此也没有
+网关那套按密钥的限流、日志与撤权。代码在 `backend/bff/model_service_keys.py`。
+
+| 事实 | 做法 |
+| --- | --- |
+| 谁能看、谁能发 | 只对平台管理员开放（`GET /api/model-service/key`、`POST /api/model-service/keys`，写操作要 CSRF + 同源）。成员得到 403，不是一份掩码清单。 |
+| 为什么是明文 | 运维要把整串填进客户端，掩码帮不上忙。这是 BFF 唯一会把凭据原样下发给前端的路由，因此它比别的路由窄。 |
+| 存在哪 | `<state-dir>/model-service-keys.json`，0600；旧版单数文件 `model-service-key.json` 仍会读取，升级后已发出去的密钥不会消失。 |
+| 写引擎环境文件 | **只追加，不覆盖**。`~/.config/strata/api-key.env` 里第一条是网关自己在用的 key，覆盖它等于把网关上游打断，而报错会出现在另一个组件里。 |
+| 什么时候生效 | 引擎只在启动时读一次环境文件，所以签发会触发 `systemctl --user restart strata.service`。响应里的 `restart` 如实反映重载有没有被触发：`triggered:false` + 原因（例如 unit 不存在），此时密钥已写入但还不可用。 |
+| 地址 | 对外交付地址是**部署事实**，不进源码（内网与 tailnet 地址属于具体机器）。部署时用 `LLMLAB_MODEL_SERVICE_{PUBLIC,EXTERNAL,LAN}_ENDPOINT` 声明，没声明的就不记录；页面据此不显示调用地址，而不是显示一个猜出来的地址。 |
+
+引擎自身的凭据仍然只在服务端（`docs/gateway.md` 上一节与 `--engine-secret-ref`）；这条路由下发的是
+**给调用方用的**那一把，两者的权限范围不同。
+
 ## 推理服务参数
 
 推理服务详情页（`#/services/<engine_id>`）的「运行参数」由后端参数表生成，每个框架不同

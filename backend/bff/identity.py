@@ -492,7 +492,12 @@ def _account_principal(user, auth_service) -> Principal:
         raise PasswordChangeRequired("set a new password before using the portal")
     elevated = user.is_admin
     role = bff_scopes.session_role(elevated=elevated)
-    granted = bff_scopes.session_scopes(elevated=elevated)
+    # 平台管理员 = 运维身份：管理员词表 **+** ``registry:admin:manage``。
+    # 这一项管的是「登记一台已经在跑的既有服务」（准入证据是 operator-policy 那条
+    # entry，不是 uid）。成员账户照旧只拿成员词表。
+    granted = (
+        bff_scopes.operator_scopes() if elevated else bff_scopes.session_scopes(elevated=False)
+    )
     return Principal(
         user=user,
         principal=user.id,
@@ -515,12 +520,18 @@ def _account_principal(user, auth_service) -> Principal:
 def _local_admin_principal(user) -> Principal:
     """bootstrap 建立的本机 ``admin`` 会话 ⇒ 管理员视图主体。
 
-    它是用来管理账户的那一个身份：能看全实验室（管理员词表），但它不是任何
-    Linux 用户、也不在主体目录里，所以它名下登记不了服务——日常使用请用管理员
-    为自己创建的平台账户。
+    它是用来管理账户的那一个身份：能看全实验室（管理员词表），并且持有
+    ``registry:admin:manage``——登记一台既有系统服务（例如 8080 上已经在跑的
+    Strata）是运维动作，准入证据是 ``operator-policy.json`` 那一条 entry，而不是
+    Linux uid：它既不是 Linux 用户，也不在主体目录里，所以它的所有权证明写的是
+    ``operator_verified``，不是某个 uid。
+
+    平台管理员（``_account_principal`` 里 ``is_admin`` 为真的那些）现在拿的是**同一
+    套**运维词表 —— 谁在跑这台机器上的服务，谁就该有权登记它。
     """
     role = bff_scopes.session_role(elevated=True)
-    granted = bff_scopes.session_scopes(elevated=True)
+    # 运维词表 = 管理员 + registry:admin:manage。平台管理员拿的也是这一套。
+    granted = bff_scopes.operator_scopes()
     return Principal(
         user=user,
         principal=user.id,
