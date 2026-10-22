@@ -3,7 +3,8 @@
 import { h, put } from './dom.js';
 import { fmtInt, fmtGiB } from './charts.js';
 import {
-  PATHS, loadOps, loadHost, loadUsers, loadIntegrations, loadDiscovery, loadTokens, loadData, safeJumpUrl, send,
+  PATHS, loadOps, loadHost, loadUsers, loadIntegrations, loadDiscovery, loadTokens, loadSystem, loadData,
+  safeJumpUrl, send,
 } from './data.js';
 import {
   overviewModel, servicesFromOps, modelsFromOps, hostFacts, engineLabel, modelColorMap, preflightChecks,
@@ -574,7 +575,7 @@ export async function usage(ctx) {
   let model; let hostState = 'ready'; let opsState = 'ready'; let sys = null;
   if (ctx.demo) { model = demoOverview(); sys = SNAP_SYSTEM; }
   else {
-    const [ops, host, system] = await Promise.all([loadOps(), loadHost(), loadData(PATHS.infraSystem)]);
+    const [ops, host, system] = await Promise.all([loadOps(), loadHost(), loadSystem()]);
     hostState = host.state; opsState = ops.state;
     model = overviewModel({ ops: ops.value, host: host.value });
     sys = system.state === 'ready' && system.value.cpu ? system.value : null;

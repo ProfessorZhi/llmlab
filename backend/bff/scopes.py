@@ -163,19 +163,25 @@ ROLE_SCOPES: dict[str, RoleScopes] = {
     auth_store.ROLE_ADMIN: _ADMIN,
 }
 
+
 def operator_scopes() -> RoleScopes:
     """运维词表 = 管理员词表 + ``registry:admin:manage``。
 
     为什么单独开一档，而不是把它并进 ``_ADMIN``：``registry:admin:manage`` 是
     **登记一台既有系统服务**的准入（``RegistryService._engine_target_for``），它必须
     与 ``operator-policy.json`` 这份运维承认文件配套——而那份文件写在本机、由运维
-    维护。平台管理员的职责是「看见全部」，不是「把任意端口上的服务收进目录」，
-    所以那档词表保持原样。
+    维护。单独一档让「管理员能看全部」与「管理员能收编既有系统服务」成为两个可以
+    分别断言的事实，而不是一次隐式扩权。
 
-    唯一使用这份词表的是 :func:`_local_admin_principal`：bootstrap 的本机 admin
-    是由磁盘上的管理口令造出来的运维身份，它没有 Linux 账号、也不在主体目录里，
-    因此它的所有权证明不来自 Linux uid，而来自运维策略那一条 entry
-    （``operator_verified``）。
+    使用这份词表的有两种身份，它们的共同点是**都没有可核对的 Linux uid**：
+
+    * :func:`_local_admin_principal`：bootstrap 的本机 admin，由磁盘上的管理口令
+      造出来，不在主体目录里；
+    * :func:`_account_principal` 里 ``is_admin`` 为真的平台账户：它们是平台身份，
+      不是「跑着那个服务的 Linux 用户」。
+
+    因此它们的登记所有权证明都来自 ``operator-policy.json`` 那一条 entry
+    （``operator_verified``），而不是某个 uid。成员账户拿的仍是成员词表。
     """
     return RoleScopes(
         portal=_ADMIN.portal,

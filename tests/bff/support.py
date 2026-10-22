@@ -429,6 +429,11 @@ def build_harness(
     #: ``/metrics``）。测试必须显式塞一个假的进来：一次单测不该依赖本机有没有
     #: 引擎、有没有那份 key 文件。
     engine_live: object = None,
+    #: 模型服务密钥仓库。默认 ``None`` = 本部署**没有装配**这一支（两条路由回 503）。
+    #: 路由测试必须塞一个指向临时目录、且钉住引擎环境文件路径的仓库：默认值会去碰
+    #: 真实用户的 ``~/.config/strata/api-key.env``，那是这台机器上的运行事实，
+    #: 不是一次单测可以改的东西。
+    model_service_keys: object = None,
     with_admin_mode: bool = True,
     admin_mode_configured: bool = True,
     admin_mode_ttl_seconds: int = bff_admin_mode.DEFAULT_TTL_SECONDS,
@@ -655,6 +660,7 @@ def build_harness(
         atlas=atlas,
         host_summary=host_summary,
         engine_live=engine_live,
+        model_service_keys=model_service_keys,
         # 应用自己的时钟也钉在 harness 的 ``resolved_now`` 上。
         #
         # 不传它的时候 ``OpsApplication._now()`` 回的是**真实墙钟**，而同一份 harness

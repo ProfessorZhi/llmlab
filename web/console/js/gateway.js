@@ -5,6 +5,7 @@ import { h, toast, put } from './dom.js';
 import { fmtInt, colorAt } from './charts.js';
 import {
   PATHS, loadData, loadOps, send, gatewayKeyRevoke, gatewayKeyUpdate, gatewayModelUpdate, gatewayLogDetail,
+  loadModelKeys, createModelKey,
 } from './data.js';
 import { servicesFromOps, engineLabel, modelColorMap } from './viewmodel.js';
 import { demoGateway, demoServices } from './demo.js';
@@ -259,10 +260,76 @@ export async function models(ctx) {
 const KEY_STATE = { active: { tone: 'ok', text: '有效' }, revoked: { tone: 'off', text: '已撤销' }, expired: { tone: 'warn', text: '已过期' } };
 const TTL = [['永不过期', null], ['7 天', 7], ['30 天', 30], ['90 天', 90], ['1 年', 365]];
 
+/* 模型服务密钥：签发、复制、以及「已签发 ≠ 已生效」的如实说明。
+ *
+ * 这一块与网关密钥是两件事，所以分开画：
+ *   - 网关密钥（sk-lab-…）经过网关，有限流、有调用日志、可随时撤销；
+ *   - 模型服务密钥（sk-qwen-…）**直连本机引擎**，网关看不到它，也就没有那些保障。
+ * 后者的完整明文只对平台管理员可见 —— 运维要把整串填进客户端，掩码帮不上忙。
+ */
+function restartText(restart) {
+  if (!restart) return null;
+  if (restart.triggered) return '引擎正在重载，约 1 分钟后这把密钥生效。';
+  return `密钥已写入，但引擎重载没有触发：${restart.detail ?? '原因未知'}。在重载成功前它还不可用。`;
+}
+
+function modelServicePanel(ctx, mst, { mint, copy }) {
+  if (!ctx.isAdmin()) return null;
+  if (ctx.demo) {
+    return section('模型服务接入', h('div', { class: 'group' }, quietEmpty('ready', {
+      title: '演示模式不签发真实凭据',
+      body: '模型服务密钥会写进引擎的环境文件并触发引擎重载，因此只在真实部署里可用。',
+    })));
+  }
+  const keys = mst.keys ?? [];
+  const row = (k) => h('tr', {},
+    h('td', {}, h('div', { style: { 'font-weight': 500 } }, k.label ?? '未命名'),
+      h('div', { class: 'muted', style: { 'font-size': '12px' } },
+        [k.model, k.created_at ? new Date(k.created_at).toLocaleString() : null].filter(Boolean).join(' · '))),
+    h('td', {}, h('div', { style: { display: 'flex', gap: '8px', 'align-items': 'center' } },
+      h('code', { class: 'mono', style: { 'font-size': '12.5px', 'word-break': 'break-all' } }, k.key),
+      h('button', { type: 'button', class: 'linkbtn', 'aria-label': `复制 ${k.label ?? '这把密钥'}`, onclick: () => copy(k.key) }, '复制'))),
+    h('td', { class: 'mono muted', style: { 'font-size': '12.5px' } },
+      k.external_endpoint ?? k.lan_endpoint ?? k.endpoint ?? '—'));
+  // 读不到（403 / 503 / 网络）与「还没签发过」是两件事：前者不能画成后者。
+  const body = !keys.length
+    ? h('div', { class: 'group' }, mst.state === 'ready'
+      ? quietEmpty('ready', {
+        title: '还没有签发过模型服务密钥',
+        body: '签发一把之后，把它填进客户端就能直接调用本机推理引擎。',
+      })
+      : emptyState(mst.state))
+    : h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
+      h('thead', {}, h('tr', {}, ['用途 / 模型', '密钥', '调用地址'].map((t) => h('th', { scope: 'col' }, t)))),
+      h('tbody', {}, keys.map(row))));
+
+  const restart = mst.issued ? restartText(mst.issued.restart) : null;
+  return section('模型服务接入',
+    h('div', { class: 'group' },
+      restart ? h('div', { class: 'reveal', role: 'status' },
+        h('div', { class: 'reveal-head' }, h('strong', {}, '已签发一把模型服务密钥')),
+        h('p', { class: 'muted', style: { margin: 0, 'font-size': '13px' } }, restart)) : null,
+      body,
+      // 接口没接上时不给按钮：签发必然失败，摆一个按了会错的按钮只会误导。
+      mst.state === 'ready' ? h('div', { class: 'cell', style: { gap: '8px', 'align-items': 'flex-end' } },
+        h('label', { class: 'cell', style: { flex: '1 1 auto' } },
+          h('span', { class: 'fieldname' }, '用途'),
+          h('input', {
+            placeholder: '例如 外部评估、笔记本客户端', maxlength: 64, value: mst.label,
+            style: { width: '280px' }, oninput: (e) => { mst.label = e.target.value; },
+          })),
+        h('button', { type: 'button', class: 'btn primary', disabled: mst.busy, onclick: mint },
+          mst.busy ? '正在签发…' : '签发新密钥')) : null,
+      mst.msg ? h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, mst.msg) : null),
+    '这条密钥**不经过网关**：直接调用本机引擎，因此没有网关的限流、调用日志与按密钥撤销。完整密钥只对管理员可见。');
+}
+
 export async function keys(ctx) {
   const root = h('div', { class: 'page' });
   const st = { view: 'mine', list: null, state: 'ready', routes: [], issued: null, msg: null, busy: false, showRevoked: false,
     form: { label: '', models: [], rpm: 60, concurrency: 2, ttl: 30, log_bodies: false } };
+  // 模型服务密钥（仅管理员）：与网关密钥分开展示，所以状态也分开存。
+  const mst = { state: 'ready', keys: null, issued: null, busy: false, label: '', msg: null };
 
   async function refresh() {
     if (ctx.demo) {
@@ -270,13 +337,33 @@ export async function keys(ctx) {
       st.routes = demo().routes;
       return;
     }
-    const [r, m] = await Promise.all([
+    // 成员不去请求这两条管理员路由：为了一块自己看不到的面板触发一次 403，
+    // 只会让「没有权限」和「接口坏了」在日志里长得一样。
+    const modelKeys = ctx.isAdmin() ? loadModelKeys() : Promise.resolve({ state: 'ready', value: [] });
+    const [r, m, mk] = await Promise.all([
       loadData(st.view === 'all' ? `${PATHS.gatewayKeys}?view=all` : PATHS.gatewayKeys),
       loadData(PATHS.gatewayModels),
+      modelKeys,
     ]);
     st.state = r.state;
     st.list = r.state === 'ready' ? r.value.keys : null;
     st.routes = m.state === 'ready' ? m.value.routes : [];
+    mst.state = mk.state;
+    mst.keys = mk.state === 'ready' ? mk.value : null;
+  }
+
+  async function mintModelKey() {
+    mst.busy = true; mst.msg = null; draw();
+    const r = await createModelKey(mst.label.trim() || null);
+    mst.busy = false;
+    if (!r.ok) { mst.msg = failText(r, '签发'); draw(); return; }
+    mst.issued = r.data;
+    mst.label = '';
+    await refresh(); draw();
+  }
+
+  function copyKey(text) {
+    navigator.clipboard?.writeText(text).then(() => toast('已复制'), () => toast('请手动复制'));
   }
 
   async function create() {
@@ -378,8 +465,8 @@ export async function keys(ctx) {
       st.issued ? issuedCard() : null,
       table(),
       st.msg ? h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.msg) : null,
-      st.view === 'mine' ? createForm() : null);
-  }
+      st.view === 'mine' ? createForm() : null,
+      modelServicePanel(ctx, mst, { mint: mintModelKey, copy: copyKey }));
   await refresh();
   draw();
   return root;

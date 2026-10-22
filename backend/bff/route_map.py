@@ -538,7 +538,7 @@ ROUTES: tuple[RouteSpec, ...] = (
         source=SOURCE_MODEL_SERVICE,
         owner=LANE_DATA,
         handler="_model_service_key",
-        note="下发给平台管理员的模型服务密钥（完整明文）；未签发时 404。",
+        note="下发给平台管理员的模型服务密钥（完整明文）；未签发时 200 + 空清单，不是 404。",
     ),
     RouteSpec(
         name="atlas.calls",

@@ -128,6 +128,29 @@ class DerivationTests(unittest.TestCase):
         self.assertIn(registry_identity.SCOPE_ADMIN_READ, admin.registry)
         self.assertNotIn(registry_identity.SCOPE_ADMIN_MANAGE, admin.registry)
 
+    def test_the_operator_table_is_the_admin_table_plus_manage(self):
+        """运维词表只多出 ``registry:admin:manage`` 一项，其余逐项相同。
+
+        它是「登记一台已经在跑的既有服务」的准入，与 ``operator-policy.json``
+        （按目标地址放行）配套。把它并进角色表会让「管理员 = 能看全部」悄悄变成
+        「管理员 = 能收编任意端口」，所以两条路径必须分得开。
+        """
+        operator = bff_scopes.operator_scopes()
+        admin = bff_scopes.role_scopes(auth_store.ROLE_ADMIN)
+        self.assertEqual(
+            operator.registry,
+            admin.registry | {registry_identity.SCOPE_ADMIN_MANAGE},
+        )
+        self.assertEqual(operator.portal, admin.portal)
+        self.assertEqual(operator.observability, admin.observability)
+        self.assertEqual(operator.evaluation, admin.evaluation)
+        # 角色表本身没有因此变宽。
+        self.assertNotIn(registry_identity.SCOPE_ADMIN_MANAGE, admin.registry)
+
+    def test_a_member_never_gets_the_operator_table(self):
+        member = bff_scopes.session_scopes(elevated=False)
+        self.assertNotIn(registry_identity.SCOPE_ADMIN_MANAGE, member.registry)
+
     def test_an_unknown_role_grants_nothing(self):
         for role in ("root", "superuser", "", None, 42, ["platform_admin"]):
             granted = bff_scopes.role_scopes(role)

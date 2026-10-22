@@ -20,13 +20,29 @@ from pathlib import Path
 #: 与本机引擎对齐的默认值。前端只展示，不再让用户填这些。
 DEFAULT_MODEL = "qwen3.8-flash-next-iq2_xs"
 DEFAULT_ENDPOINT = "http://127.0.0.1:8080/v1/chat/completions"
-DEFAULT_PUBLIC_ENDPOINT = "http://fj-nj-ser-1009.tail3d8b76.ts.net:8080/v1/chat/completions"
-#: 公网交付地址：tailscale funnel（:8443）→ 本机 :8081 的白名单代理 → Strata。
-#: 与 :8080 那条不同，这条**不要求对方在同一 tailnet**，拿到密钥就能调。
-DEFAULT_EXTERNAL_ENDPOINT = "https://fj-nj-ser-1009.tail3d8b76.ts.net:8443/v1/chat/completions"
-#: 内网交付地址：同一局域网里不带 tailscale 的机器直接连这个（白名单代理的 LAN 口）。
-DEFAULT_LAN_ENDPOINT = "http://192.168.32.179:8081/v1/chat/completions"
 DEFAULT_CONCURRENCY = 2
+
+#: 对外的交付地址是**部署事实**，不进源码：tailnet 主机名与内网地址属于具体机器，
+#: 写进公开仓等于把内网拓扑发给所有人。部署时用环境变量给出；没给就不记录，
+#: 页面据此不显示「在哪里调用」，而不是显示一个猜出来的地址。
+ENDPOINT_ENV = {
+    "public_endpoint": "LLMLAB_MODEL_SERVICE_PUBLIC_ENDPOINT",
+    "external_endpoint": "LLMLAB_MODEL_SERVICE_EXTERNAL_ENDPOINT",
+    "lan_endpoint": "LLMLAB_MODEL_SERVICE_LAN_ENDPOINT",
+}
+
+#: 环回地址不是拓扑信息，作为 ``endpoint`` 的缺省值留下。
+ENDPOINT_DEFAULTS = {"endpoint": DEFAULT_ENDPOINT}
+
+
+def deployment_endpoints() -> dict[str, str]:
+    """本进程所在部署愿意公开的调用地址（只取有值的那些）。"""
+    out = dict(ENDPOINT_DEFAULTS)
+    for field, variable in ENDPOINT_ENV.items():
+        value = (os.environ.get(variable) or "").strip()
+        if value:
+            out[field] = value
+    return out
 
 #: 清单文件（复数）。单数 ``model-service-key.json`` 是上一版留下的，仍然读，
 #: 这样升级不会让已经发出去的那把密钥从页面上消失。
@@ -93,14 +109,15 @@ class ModelServiceKeyStore:
     def list(self) -> list[dict]:
         """新签发的排在最前 —— 页面上第一眼该看到的是刚发出去的那把。
 
-        早于公网入口签发的记录里没有 ``external_endpoint``，但**同一把密钥确实
-        能从公网调**（funnel 转发到同一台引擎），所以在读出时补上这个地址，而
-        不是让页面以为那些密钥只能在内网用。
+        读出的记录只补**本部署这一次声明过的**地址。地址没变过，旧记录就不缺；
+        部署换了地址，旧记录读到的是新地址，而不是签发当时那一份 —— 因为地址描述
+        的是「现在从哪里能调到这台引擎」，不是密钥的属性。
         """
+        endpoints = deployment_endpoints()
         keys = self._load()
         for key in keys:
-            key.setdefault("external_endpoint", DEFAULT_EXTERNAL_ENDPOINT)
-            key.setdefault("lan_endpoint", DEFAULT_LAN_ENDPOINT)
+            for field, value in endpoints.items():
+                key.setdefault(field, value)
         keys.sort(key=lambda k: str(k.get("created_at") or ""), reverse=True)
         return keys
 
@@ -166,10 +183,7 @@ class ModelServiceKeyStore:
             "label": (label or "").strip() or "平台签发 · 模型推理",
             "key": key,
             "model": model or DEFAULT_MODEL,
-            "endpoint": DEFAULT_ENDPOINT,
-            "public_endpoint": DEFAULT_PUBLIC_ENDPOINT,
-            "external_endpoint": DEFAULT_EXTERNAL_ENDPOINT,
-            "lan_endpoint": DEFAULT_LAN_ENDPOINT,
+            **deployment_endpoints(),
             "concurrency": concurrency or DEFAULT_CONCURRENCY,
             "engine": "strata (fjd 用户态服务)",
             "created_at": self._clock(),

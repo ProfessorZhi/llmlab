@@ -13,6 +13,8 @@ import unittest
 from backend.auth import store as auth_store
 from backend.auth_linux.handoff import linux_user_id
 from backend.bff import identity as bff_identity
+from backend.bff import scopes as bff_scopes
+from backend.registry import identity as registry_identity
 from tests.bff import support as S
 
 
@@ -98,6 +100,76 @@ class SessionResolutionTests(unittest.TestCase):
         response = S.fetch_ops(client)
         self.assertEqual(response.status, 403)
         self.assertEqual(response.error_code(), "account_disabled")
+
+
+class _FakeAccount:
+    must_change_password = False
+    username = "alice"
+
+
+class _FakeAccounts:
+    def __init__(self, account=None):
+        self._account = account if account is not None else _FakeAccount()
+
+    def account_for(self, user):
+        return self._account
+
+
+class _FakeAuthService:
+    def __init__(self, account=None):
+        self.accounts = _FakeAccounts(account)
+
+
+class _FakePlatformUser:
+    id = "account:4f2a"
+
+    def __init__(self, *, is_admin):
+        self.is_admin = is_admin
+
+
+class PlatformAccountPrincipalTests(unittest.TestCase):
+    """平台账户的会话 ⇒ 主体。权限只由账户角色决定，不经过 Linux 目录。
+
+    管理员账户拿**运维**词表（管理员 + ``registry:admin:manage``）：它们没有可以
+    核对的 Linux uid，登记既有系统服务的所有权证明是 ``operator_verified``；
+    成员账户仍是成员词表，一项不多。
+    """
+
+    def test_an_admin_account_gets_the_operator_table(self):
+        principal = bff_identity._account_principal(  # noqa: SLF001
+            _FakePlatformUser(is_admin=True), _FakeAuthService()
+        )
+        self.assertTrue(principal.elevated)
+        self.assertIn(registry_identity.SCOPE_ADMIN_MANAGE, principal.requester.scopes)
+        self.assertIn(bff_scopes.PORTAL_ADMIN_READ, principal.portal_scopes)
+
+    def test_a_member_account_gets_no_operator_scope(self):
+        principal = bff_identity._account_principal(  # noqa: SLF001
+            _FakePlatformUser(is_admin=False), _FakeAuthService()
+        )
+        self.assertFalse(principal.elevated)
+        self.assertNotIn(registry_identity.SCOPE_ADMIN_MANAGE, principal.requester.scopes)
+        self.assertNotIn(bff_scopes.PORTAL_ADMIN_READ, principal.portal_scopes)
+
+    def test_a_missing_account_is_not_a_principal(self):
+        class _Missing:
+            def account_for(self, user):
+                return None
+
+        service = _FakeAuthService()
+        service.accounts = _Missing()
+        with self.assertRaises(bff_identity.NoSession):
+            bff_identity._account_principal(  # noqa: SLF001
+                _FakePlatformUser(is_admin=True), service
+            )
+
+    def test_a_password_change_is_required_before_anything_else(self):
+        account = _FakeAccount()
+        account.must_change_password = True
+        with self.assertRaises(bff_identity.PasswordChangeRequired):
+            bff_identity._account_principal(  # noqa: SLF001
+                _FakePlatformUser(is_admin=True), _FakeAuthService(account)
+            )
 
 
 class NonLinuxSessionTests(unittest.TestCase):

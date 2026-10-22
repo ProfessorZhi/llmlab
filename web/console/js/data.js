@@ -44,10 +44,6 @@ export const PATHS = Object.freeze({
   gatewayPublish: '/api/gateway/models/publish',
   gatewayLogs: '/api/gateway/logs',
   gatewayPlayground: '/api/gateway/playground',
-  // 主机系统读数与引擎实时负载：形状取自 2026-10-22 的真实快照（docs/console-snapshot-20261022）。
-  // 本部署没有这两条路由时它们是 404 ⇒ not_configured，页面就不画那一块。
-  infraSystem: '/api/infra/system',
-  engineLive: '/api/v2/engine/live',
 });
 
 /** 路径里的 id 只允许安全字符，免得拼出另一条路由。 */

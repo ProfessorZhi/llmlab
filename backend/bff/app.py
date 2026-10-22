@@ -701,6 +701,9 @@ class OpsApplication:
         响应里带着 ``restart``：密钥写进引擎的环境文件之后引擎必须重载才会
         认它。把「已签发」和「已生效」混成一句话，是这一页最容易撒的谎。
         """
+        # 这是一次写入，而且写的是凭据：CSRF/同源必须在**签发之前**过。路由表里的
+        # ``csrf=True`` 只是声明，真正的校验在每条写路由自己这里调用。
+        self._write_preflight(request)
         principal, error = self._model_service_admin(request)
         if error is not None:
             return error
