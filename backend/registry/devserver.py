@@ -45,6 +45,8 @@ from .identity import (
     TokenBinding,
     TokenDirectory,
 )
+from .ingest_runner import IngestRunner
+from .ingest_scheduler import IngestScheduler
 from .ownership import (
     EMPTY_POLICY,
     OWNERSHIP_PROVER_KINDS,
@@ -121,7 +123,9 @@ class SyntheticIdentities:
             "=" * 72,
         ]
         for principal, token, scopes in self.issued:
-            lines.append(f"{principal:<10} uid={dict(HOST_USERS)[principal]:<5} token={token}")
+            bound = self.principals.lookup(principal)
+            uid = bound.uid if bound is not None else None
+            lines.append(f"{principal:<10} uid={uid!s:<5} token={token}")
             lines.append(f"{'':<10} scopes={' '.join(scopes)}")
         lines.append("=" * 72)
         lines.append("把这些 token 给 LLMLAB_TOKEN 使用，例如：")
@@ -148,6 +152,46 @@ def build_synthetic_identities() -> SyntheticIdentities:
         tokens=TokenDirectory(bindings),
         issued=tuple(issued),
     )
+
+
+def rebound_identities(
+    identities: SyntheticIdentities, overrides: dict[str, int]
+) -> SyntheticIdentities:
+    """把合成账户绑到**本机真实 uid** 上。
+
+    默认的 4000–4003 不对应任何主机账户，这对登录测试是对的（不许把登录名折叠
+    成某个真实用户），但自动接入要回答的是「这个端口属于哪个账户」——那必须用
+    真正的 uid 才能命中 ``/proc`` 里的属主。token 不变，只换 uid 绑定。
+    """
+
+    principals = PrincipalDirectory(
+        [Principal(name, name, overrides.get(name, uid)) for name, uid in HOST_USERS]
+    )
+    return SyntheticIdentities(
+        principals=principals, tokens=identities.tokens, issued=identities.issued
+    )
+
+
+def parse_uid_bindings(items: list[str]) -> dict[str, int]:
+    """``NAME=UID`` 列表 -> ``{name: uid}``。写错直接起不来，不静默忽略。"""
+
+    known = {name for name, _uid in HOST_USERS}
+    overrides: dict[str, int] = {}
+    for raw in items or []:
+        name, sep, uid_text = str(raw).partition("=")
+        name, uid_text = name.strip(), uid_text.strip()
+        if not sep or not name or not uid_text:
+            raise SystemExit(f"--bind-uid expects NAME=UID, got {raw!r}")
+        if name not in known:
+            raise SystemExit(f"--bind-uid: unknown account {name!r}; known: {sorted(known)}")
+        try:
+            uid = int(uid_text)
+        except ValueError:
+            raise SystemExit(f"--bind-uid: uid must be an integer, got {uid_text!r}") from None
+        if uid < 0:
+            raise SystemExit(f"--bind-uid: uid must be >= 0, got {uid}")
+        overrides[name] = uid
+    return overrides
 
 
 def build_service_from_env(
@@ -313,11 +357,34 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="打开所有权强制与协议验证（本地开发默认关闭）",
     )
+    parser.add_argument(
+        "--auto-ingest",
+        action="store_true",
+        help="每轮扫 /proc/net/tcp，把本机账户上正在跑的 OpenAI 兼容服务接进账本（§4.1）。"
+        "默认关闭：它会读全机的回环监听端口，不是每个开发场景都想要",
+    )
+    parser.add_argument(
+        "--ingest-interval",
+        type=float,
+        default=30.0,
+        help="自动接入的周期秒数（默认 30，与设计文档一致；调小只是为了演示）",
+    )
     parser.add_argument("--json", action="store_true", help="以 JSON 输出身份清单")
+    parser.add_argument(
+        "--bind-uid",
+        action="append",
+        default=[],
+        metavar="NAME=UID",
+        help="把合成账户绑到本机真实 uid（可重复）。默认的 4000–4003 在 /proc 里不存在，"
+        "自动接入看不见任何东西；把它绑成本机 uid 才能真的接上正在跑的服务",
+    )
     args = parser.parse_args(argv)
 
     host = validate_bind_host(args.host)
     identities = build_synthetic_identities()
+    uid_overrides = parse_uid_bindings(args.bind_uid)
+    if uid_overrides:
+        identities = rebound_identities(identities, uid_overrides)
 
     if args.command == "print-identities":
         if args.json:
@@ -326,7 +393,12 @@ def main(argv: list[str] | None = None) -> int:
                     {
                         "synthetic": True,
                         "identities": [
-                            {"principal": p, "uid": dict(HOST_USERS)[p], "token": t, "scopes": list(s)}
+                            {
+                                "principal": p,
+                                "uid": getattr(identities.principals.lookup(p), "uid", None),
+                                "token": t,
+                                "scopes": list(s),
+                            }
                             for p, t, s in identities.issued
                         ],
                     },
@@ -358,6 +430,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     application = create_app(service)
     print(identities.render(), file=sys.stderr)
+
+    # §4.1 的循环。默认不挂：它读全机回环端口，是一个应该有意识打开的开关。
+    scheduler = None
+    if args.auto_ingest:
+        if args.ingest_interval <= 0:
+            raise SystemExit("--ingest-interval must be positive")
+        scheduler = IngestScheduler(
+            runner=IngestRunner(store=service.store, directory=service.principals),
+            interval_seconds=args.ingest_interval,
+        )
+        scheduler.start()
+        print(
+            f"  auto_ingest=on  interval={args.ingest_interval:g}s  "
+            f"uids={sorted(service.principals.uids())}  "
+            "（只认目录里绑定了 uid 的账户；未映射 uid 的端口不探测）",
+            file=sys.stderr,
+        )
     print(
         f"\n临时 Registry 监听 http://{host}:{args.port}/api/v2/registry\n"
         f"  mode={service.config.mode}  prober={'on' if service.prober else 'off'}  "
@@ -385,6 +474,9 @@ def main(argv: list[str] | None = None) -> int:
             server.serve_forever()
         except KeyboardInterrupt:
             print("\n已停止。", file=sys.stderr)
+        finally:
+            if scheduler is not None:
+                scheduler.shutdown()
     return 0
 
 
