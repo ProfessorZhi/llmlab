@@ -467,6 +467,8 @@ export async function keys(ctx) {
       st.msg ? h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.msg) : null,
       st.view === 'mine' ? createForm() : null,
       modelServicePanel(ctx, mst, { mint: mintModelKey, copy: copyKey }));
+  }
+
   await refresh();
   draw();
   return root;
