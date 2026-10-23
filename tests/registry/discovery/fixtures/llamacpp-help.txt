@@ -1,0 +1,38 @@
+usage: llama-server [options]
+
+----- common params -----
+
+-c,    --ctx-size N                     size of the prompt context (default: 0, 0 = loaded from model)
+                                        (env: LLAMA_ARG_CTX_SIZE)
+-n,    --predict, --n-predict N         number of tokens to predict (default: -1, -1 = infinity)
+-ngl,  --gpu-layers, --n-gpu-layers N   max. number of layers to store in VRAM, either an exact number,
+                                        'auto', or 'all' (default: auto)
+-fa,   --flash-attn [on|off|auto]       set Flash Attention use ('on', 'off', or 'auto', default: 'auto')
+--perf, --no-perf                       whether to enable internal libllama performance timings (default:
+                                        false)
+-e,    --escape, --no-escape            whether to process escapes sequences (\n, \r, \t, \', \", \\)
+                                        (default: true)
+-ctk,  --cache-type-k TYPE              KV cache data type for K
+                                        allowed values: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1
+                                        (default: f16)
+-sm,   --split-mode {none,layer,row,tensor}
+                                        how to split the model across multiple GPUs, one of:
+-ks,   --keep N                         number of tokens to keep from the initial prompt (default: 0, -1 =
+                                        all)
+
+----- sampling params -----
+
+    --temp N                            sampling temperature (default: 0.800000)
+    --top-p N                           top-p sampling (default: 0.950000)
+-m,    --model FNAME                    model path to load (default: models/7B/ggml-model-f16.gguf)
+
+----- server params -----
+
+    --host HOST                         ip address to listen on (default: 127.0.0.1)
+    --port PORT                         port to listen on (default: 8080)
+    --metrics                           enable prometheus compatible metrics endpoint (default: false)
+-h,    --help, --usage                  print usage and exit
+
+----- short-only params -----
+
+-ub,   N                                unroll batch size (no long alias) (default: 512)
