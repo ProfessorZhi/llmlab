@@ -1,0 +1,34 @@
+usage: vllm serve [model_tag] [options]
+
+positional arguments:
+  model_tag             The model tag to serve
+
+options:
+  -h, --help            show this help message and exit
+  --host HOST           Host name for the server (default: None)
+  --port PORT           Port number for the server (default: 8000)
+  --max-model-len MAX_MODEL_LEN
+                        Model context length. If unspecified, will be
+                        automatically derived from the model config.
+                        (default: None)
+  --dtype {auto,bfloat16,float,float16,half}
+                        Data type for model weights and activations. The
+                        "auto" option will use FP16 precision for FP32 and
+                        FP16 models, and BF16 precision for BF16 models.
+                        (default: auto)
+  --tensor-parallel-size TENSOR_PARALLEL_SIZE
+                        Number of tensor parallel replicas. (default: 1)
+  --max-num-seqs MAX_NUM_SEQS
+                        Maximum number of sequences per iteration.
+                        (default: 256)
+  --gpu-memory-utilization GPU_MEMORY_UTILIZATION
+                        The fraction of GPU memory to be used for the model
+                        executor, ranging from 0 to 1. (default: 0.9)
+  --enforce-eager       Always use eager-mode PyTorch. If False, will use
+                        eager mode only for the first profiling run and
+                        otherwise use cudagraph. (default: False)
+  --enable-prefix-caching, --no-enable-prefix-caching
+                        If set to True, the prefix caching is enabled.
+                        Otherwise, it is disabled. (default: None)
+  --swap-space SWAP_SPACE
+                        CPU swap space size (GiB) per GPU. (default: 4)
