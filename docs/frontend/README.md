@@ -30,3 +30,5 @@ This directory is the **frontend-design and implementation handoff** for Claude 
 - New work must use an isolated branch, preserve V5, keep CPU-only tests honest and be uploaded to GitHub in an independently reviewable **Draft PR**.
 
 Related: [full architecture](../architecture.md) · [nine-page DoD #56](https://github.com/ProfessorZhi/llm-lab-portal/issues/56) · [Phase B PR #60](https://github.com/ProfessorZhi/llm-lab-portal/pull/60).
+
+- **[控制台数据可视化设计（2026-10-23）](data-visualization-design-2026-10-23.md)** — 图表组件库、已校验色板、历史数据层与各页面图表方案。
