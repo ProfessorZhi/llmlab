@@ -89,7 +89,7 @@ class GatewayTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.engine = ThreadingHTTPServer(("127.0.0.1", 0), FakeEngine)
         self.engine_port = self.engine.server_address[1]
-        threading.Thread(target=self.engine.serve_forever, daemon=True).start()
+        threading.Thread(target=self.engine.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
         self.addCleanup(self.engine.server_close)
         self.addCleanup(self.engine.shutdown)
         secret_file = Path(self.tmp) / "engine.env"
@@ -104,7 +104,7 @@ class GatewayTests(unittest.TestCase):
         )
         self.server = wsgiref.simple_server.make_server("127.0.0.1", 0, self.app, server_class=_Server, handler_class=_Quiet)
         self.host = f"127.0.0.1:{self.server.server_address[1]}"
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
         self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
 

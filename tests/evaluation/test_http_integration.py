@@ -238,7 +238,7 @@ class PreviewHostGuardTests(unittest.TestCase):
         )
         cls.port = int(cls.server.server_address[1])
         cls.app.bind_port(cls.port)
-        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         cls.thread.start()
         cls.assembly = assembly
 

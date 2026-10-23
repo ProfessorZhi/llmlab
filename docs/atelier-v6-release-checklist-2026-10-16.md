@@ -55,10 +55,10 @@
 | 新旧信任边界差异 | `docs/atelier-v6-legacy-trust-boundary-2026-10-16.md` | 只读审计 |
 | 受控托管 / 版本 pin / 回滚 | `docs/atelier-v6-service-hosting-and-rollback-2026-10-16.md` | 计划，不执行 |
 | 发布判据（本文） | 本文件 | 计划，不执行 |
-| CPU-only CI 门禁 | `.github/workflows/atelier-v6-release-gates.yml` | 新增工作流 |
-| 发布验收裁决（fail-closed） | `.github/workflows/release-gate-verdict.sh` | 新增脚本，裁决只在退出码 |
-| 门禁不变量测试 | `tests/release/test_release_gates.py` | 新增测试 |
-| 裁决逻辑回归测试 | `tests/release/test_release_gate_verdict.py` | 新增测试（passed/skipped/failed/detector-errored） |
+| CPU-only CI 门禁 | ~~`.github/workflows/atelier-v6-release-gates.yml`~~ → `.github/workflows/ci.yml` | 2026-10-23 并入唯一入口工作流（历史记录保留） |
+| 发布验收裁决（fail-closed） | ~~`.github/workflows/release-gate-verdict.sh`~~ → `ci.yml` 的 `browser` job | 2026-10-23 删除；fail-closed 现由该 job 的退出码表达 |
+| 门禁不变量测试 | `tests/release/test_release_gates.py` | 新增测试（已随上述合并改写） |
+| 裁决逻辑回归测试 | ~~`tests/release/test_release_gate_verdict.py`~~ | 2026-10-23 随脚本一同删除 |
 | 回滚演练（打印计划） | `tests/release/drill-preview-rollback.sh` + `preview-rollback-plan.txt` | 只打印，`--execute` 被拒 |
 
 ### 2.1 审查修正：浏览器缺失不再可能产生绿色发布门禁（已修）

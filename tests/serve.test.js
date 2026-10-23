@@ -2,8 +2,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { request } from 'node:http';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { resolve, sep } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 
 import { resolveRequestPath, startServer, WEB_ROOT } from '../web/tools/serve.mjs';
 
@@ -100,6 +102,28 @@ test('serves files over loopback and rejects everything else', async () => {
     assert.doesNotMatch(escaped.body ?? '', /Atelier/, 'no file from above the root may be served');
   } finally {
     await server.close();
+  }
+});
+
+test('a root without a console keeps its own front door', async () => {
+  // Regression guard. The / -> /console/ redirect is a property of the console
+  // *deployment*, but it used to be applied to whatever root the server was
+  // pointed at. A packaged release bundle has its own index.html and no
+  // console/, so /index.html answered 302 -> /console/ -> 404: the bundle smoke
+  // then waited for __ATELIER__ on a page that never loaded, and reported a
+  // JavaScript failure that was really a routing decision.
+  const dir = await mkdtemp(join(tmpdir(), 'llmlab-frontdoor-'));
+  const server = await startServer({ root: dir, port: 0 });
+  try {
+    await writeFile(join(dir, 'index.html'), '<!doctype html><title>bundle</title>');
+    for (const path of ['/index.html', '/']) {
+      const res = await fetch(`${server.origin}${path}`, { redirect: 'manual' });
+      assert.equal(res.status, 200, `${path} must serve the root's own index.html`);
+      assert.equal(res.headers.get('location'), null, `${path} must not redirect away`);
+    }
+  } finally {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
   }
 });
 

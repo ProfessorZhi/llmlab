@@ -1,0 +1,168 @@
+# The single source-level CI entry point.
+#
+# Three jobs, three questions, no overlap:
+#
+#   unit    — the stdlib Python suites. No Node, no browser, no Chrome.
+#             The packaged-bundle smoke used to sit inside `unittest discover`
+#             and start a real Chrome from `setUpClass`, which turned a ~40 s
+#             suite into ~6 minutes and made a browser failure present itself as
+#             a Python failure. Anything that needs a real browser is in
+#             `browser` now, and nowhere else.
+#   node    — the front-end / BFF contract suites, the generated-output checks
+#             and the frozen-design digests. Read-only: nothing here may rewrite
+#             web/ or prototypes/.
+#   browser — the real-browser acceptance suites and the packaged static bundle
+#             smoke. FAIL-CLOSED: no Chrome/Chromium means the job fails, not
+#             skips. A skipped browser job has never been evidence of anything.
+#
+# A green run is source-level only. It is not a Dell host, GPU, PAM, Gateway or
+# production acceptance.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run per ref: a superseded push is cancelled instead of stacking another
+# full Python/Node/browser pass on the same box.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CUDA_VISIBLE_DEVICES: ""
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Python. Browser-free by construction: no Node setup, no browser probe, and
+  # no test in tests/ may spawn one. If a future test needs a real browser it
+  # belongs in the browser job — a ``skip`` here would be a silent green.
+  # ---------------------------------------------------------------------------
+  unit:
+    name: Python unit suite (browser-free)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Node is not a browser dependency: the packaging tests under
+      # tests/release/ shell out to the bundler and the deploy-manifest tool,
+      # and they hard-fail (FileNotFoundError, not a skip) when `node` is
+      # missing. Pinned here instead of relying on the runner image.
+      - name: Node 22 for the packaging tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Full stdlib unit suite
+        run: python -m unittest discover -s tests -t .
+
+  # ---------------------------------------------------------------------------
+  # Node: contract suites plus the design-provenance chain
+  # prototypes/v5 (frozen) -> prototypes/v6 -> web/. Every link is recomputed,
+  # not asserted; the checks must not write to the tree.
+  # ---------------------------------------------------------------------------
+  node:
+    name: Node contract suites and generated outputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Front-end and BFF contract tests
+        run: npm test
+      # `npm test` globs tests/*.test.js + tests/web-features + tests/infra, so
+      # the Linux-login contract suites under tests/auth-ui/ are not covered by
+      # it. Only browser.auth-ui.test.mjs needs a browser; these three are pure
+      # logic, which is why they are listed file by file rather than as
+      # `node --test tests/auth-ui/`.
+      - name: Linux login contract suites (browser-free)
+        run: >-
+          node --test
+          tests/auth-ui/auth-core.test.mjs
+          tests/auth-ui/auth-linux-readiness.test.mjs
+          tests/auth-ui/mock-server.test.mjs
+      # Literal digests, in a file, deliberately NOT computed here: a gate that
+      # recomputes its own expectation agrees with whatever the tree contains.
+      - name: Frozen design sources are byte-identical
+        run: sha256sum -c prototypes/FROZEN.sha256
+      - name: V6 is exactly V5 plus the committed additions
+        run: node prototypes/v6/derive-from-v5.mjs --check
+      - name: web/ is exactly the generator output for prototypes/v6
+        run: node web/tools/extract-from-prototype.mjs --check
+      - name: Generated files were not rewritten by the checks
+        run: |
+          set -euo pipefail
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::the derivation checks wrote to the worktree; they must be read-only"
+            git status --porcelain
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Browser. FAIL-CLOSED: missing browser is a failure, never a skip and never a
+  # green check. This job owns both halves that need a real browser — the
+  # packaged artifact smoke and the CDP acceptance suites.
+  # ---------------------------------------------------------------------------
+  browser:
+    name: Browser acceptance and packaged bundle smoke (fail-closed)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Node 24 for built-in WebSocket and CDP
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Require preinstalled Chrome or Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHROME_PATH="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          if [[ -z "$CHROME_PATH" ]]; then
+            echo "::error::Chrome/Chromium unavailable. Real-browser checks are NOT_VERIFIED; do not silently skip."
+            exit 1
+          fi
+          "$CHROME_PATH" --version
+          echo "CHROME_PATH=$CHROME_PATH" >> "$GITHUB_ENV"
+      # The packaged artifact is built from the release allowlist closure, then
+      # driven in a real browser. The static checks prove what is *in* the
+      # bundle; only the smoke proves what it *does*.
+      - name: Build the packaged static bundle
+        run: node tools/release/build_static_bundle.mjs --out "$RUNNER_TEMP/bundle" --json
+      - name: Smoke the packaged bundle over CDP
+        run: node tools/release/smoke_static_bundle.mjs "$RUNNER_TEMP/bundle" --json
+      - name: Run real browser suite, one CDP browser test file at a time
+        shell: bash
+        env:
+          ATELIER_INFRA_READONLY: "0"
+        run: |
+          set -euo pipefail
+          node --version
+          node --test --test-concurrency=1 tests/browser/*.test.js
+      # The browser half of the Linux-login contract lives in tests/auth-ui/,
+      # not tests/browser/, so the glob above does not reach it.
+      - name: Linux login browser acceptance
+        run: node --test tests/auth-ui/browser.auth-ui.test.mjs

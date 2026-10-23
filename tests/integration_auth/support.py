@@ -254,7 +254,12 @@ class PreviewServer:
 
         self._server = preview.make_server(self.app, port=0)
         self.port = int(self._server.server_address[1])
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        # `poll_interval` is the loop granularity of `serve_forever`, and
+        # `shutdown()` waits up to one interval. At the default 0.5 s every
+        # test that builds a preview server paid half a second on teardown
+        # alone (~100 s across this suite) for no coverage. Same pattern as
+        # tests/auth/test_wsgi_socket.py.
+        self._thread = threading.Thread(target=self._server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         self._thread.start()
 
     @property

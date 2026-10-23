@@ -83,7 +83,7 @@ class LoopbackSimulator:
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.port = int(self.server.server_address[1])
         self.handler = handler
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
 
     def stop(self) -> None:
         self.server.shutdown()
