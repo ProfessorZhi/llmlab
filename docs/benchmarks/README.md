@@ -6,6 +6,7 @@ repository. Only conclusions and aggregate numbers are published.
 | Run | Directory | Contents |
 |---|---|---|
 | 2026-10-10 IQ2_XS low-RAM 32K | `2026-10-10_iq2xs_lowram_32k/` | `summary.md` plus three aggregate JSON files: `bench_summary.json`, `loadtest_summary.json`, `quality_summary.json` |
+| 2026-10-23 IQ2_XS NVMe vs HDD | `2026-10-23_iq2xs_nvme_vs_hdd/` | `summary.md` plus `storage_summary.json` (aggregates) |
 
 ## What is here
 
@@ -30,6 +31,12 @@ paths are placeholders or removed.
 
 ## Reproducing
 
-These runs required the specific quantization and the node's memory ceiling.
-They are historical measurements, not a benchmark harness — there is no runner
-in this repository. Treat the numbers as context, not as a regression gate.
+The 2026-10-10 run required the specific quantization and the node's memory
+ceiling; it is a historical measurement with no runner.
+
+The 2026-10-23 NVMe/HDD comparison ships with the harness that produced it:
+`tools/bench/strata_storage_compare/`. It stops the engine service, evicts page
+cache and starts one manual instance per storage root, so run it in a
+maintenance window and use `--dry-run` first.
+
+Treat all numbers here as context, not as a regression gate.
