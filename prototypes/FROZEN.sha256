@@ -1,0 +1,15 @@
+# Frozen design sources — the authority for the provenance chain
+#   prototypes/v5 (frozen)  ->  prototypes/v6 (derived)  ->  web/ (generated)
+#
+# These are byte-level pins of the committed files, kept as a literal file and
+# deliberately NOT computed by the tools that also pin them: a gate that
+# recomputes its own expectation agrees with whatever the tree happens to
+# contain.
+#
+# Verify from the repository root:
+#   sha256sum -c prototypes/FROZEN.sha256
+#
+# `tests/release/test_release_gates.py` carries an independent copy of the same
+# two digests, so editing one without the others fails.
+04003f5c4788a1a52849afd14266941b0e5458f28e059cb602dc53adae95c7bf  prototypes/v5/index.html
+b05e754453edfb5238249957dd1e622d452bbff57cbdf951eb7d4ee5fa7f4573  prototypes/v6/index.html

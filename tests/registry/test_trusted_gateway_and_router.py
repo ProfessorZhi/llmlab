@@ -165,7 +165,7 @@ class SyntheticGateway:
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.port = int(self.server.server_address[1])
         self.base_url = f"http://127.0.0.1:{self.port}"
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
 
     def _allowed(self, endpoint: dict, owner: str) -> bool:
         acl = endpoint.get("acl") or {}
@@ -224,7 +224,7 @@ class DecoyUpstream:
 
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.port = int(self.server.server_address[1])
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
 
     def stop(self) -> None:
         self.server.shutdown()
@@ -1043,7 +1043,7 @@ class _OneShotGateway:
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.port = int(self.server.server_address[1])
         self.base_url = f"http://127.0.0.1:{self.port}"
-        self._thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self._thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
 
     def __enter__(self) -> str:
         self._thread.start()

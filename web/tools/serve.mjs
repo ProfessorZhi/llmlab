@@ -14,6 +14,7 @@
  *      (see dev-api-proxy.mjs). Without that variable nothing is proxied.
  */
 import { createServer } from 'node:http';
+import { existsSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -67,6 +68,11 @@ export function createStaticServer({
 } = {}) {
   // Validated up front so a bad target fails at start, not on the first request.
   const apiTarget = devApiTarget(env);
+  // The front-door redirect is a property of the *console deployment*, not of
+  // every directory this server can be pointed at. A packaged release bundle
+  // (tools/release/build_static_bundle.mjs) has its own index.html and no
+  // console/, so redirecting it would send the artifact to a 404.
+  const consoleFrontDoor = existsSync(join(resolve(root), 'console', 'index.html'));
   return createServer(async (req, res) => {
     // The one non-static route. It is dark unless the operator turned it on, and
     // even then it is GET-only, query-less and same-origin: the browser cannot
@@ -111,7 +117,7 @@ export function createStaticServer({
     // the tree and still served verbatim at /qa.html, but / and /index.html —
     // the two URLs people actually type or have bookmarked — both land on the
     // console. That is the deployment decision: 8444 IS the console now.
-    if (FRONT_DOOR_PATHS.has(pathname) && (req.method === 'GET' || req.method === 'HEAD')) {
+    if (consoleFrontDoor && FRONT_DOOR_PATHS.has(pathname) && (req.method === 'GET' || req.method === 'HEAD')) {
       res.writeHead(302, { location: '/console/', 'content-length': 0 });
       res.end();
       return;

@@ -82,7 +82,7 @@ class CliE2ETestCase(unittest.TestCase):
             ("127.0.0.1", 0), _FakeEngine
         )
         self.engine_port = int(self.engine.server_address[1])
-        threading.Thread(target=self.engine.serve_forever, daemon=True).start()
+        threading.Thread(target=self.engine.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
 
         self.identities = build_synthetic_identities()
         self.gateway = MockGatewayAdapter()
@@ -109,7 +109,7 @@ class CliE2ETestCase(unittest.TestCase):
             server_class=_ThreadingWSGIServer, handler_class=_QuietHandler,
         )
         self.port = int(self.server.server_address[1])
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
 
         self.tmp = tempfile.TemporaryDirectory()
         self.tokens = {principal: token for principal, token, _s in self.identities.issued}

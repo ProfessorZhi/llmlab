@@ -62,9 +62,9 @@ HOSTING_AND_ROLLBACK = (
 )
 RELEASE_CHECKLIST = REPO / "docs" / "atelier-v6-release-checklist-2026-10-16.md"
 
-RELEASE_GATE_WORKFLOW = WORKFLOWS / "atelier-v6-release-gates.yml"
+CI_WORKFLOW = WORKFLOWS / "ci.yml"
+FROZEN_FILE = REPO / "prototypes" / "FROZEN.sha256"
 DRILL_SCRIPT = LANE_DIR / "drill-preview-rollback.sh"
-VERDICT_SCRIPT = WORKFLOWS / "release-gate-verdict.sh"
 ROLLBACK_PLAN = LANE_DIR / "preview-rollback-plan.txt"
 
 STATUS_TOKENS = ("READY", "PARTIAL", "BLOCKED", "UNKNOWN")
@@ -91,6 +91,26 @@ class FrozenDesignChainTests(unittest.TestCase):
     def test_v6_prototype_matches_its_pinned_digest(self):
         self.assertEqual(
             lf_sha256(REPO / "prototypes" / "v6" / "index.html"), FROZEN_V6_SHA256
+        )
+
+    def test_the_committed_sha256_file_pins_the_same_two_digests(self):
+        """The CI gate reads ``prototypes/FROZEN.sha256`` via ``sha256sum -c``.
+
+        That file is a third, independent copy of the two literals. If it is not
+        cross-checked here it can drift from this module and from the tools, and
+        the gate would then fail for a reason nobody can locate.
+        """
+        lines = [
+            line.split()
+            for line in FROZEN_FILE.read_text("utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(
+            lines,
+            [
+                [FROZEN_V5_SHA256, "prototypes/v5/index.html"],
+                [FROZEN_V6_SHA256, "prototypes/v6/index.html"],
+            ],
         )
 
     def test_both_tools_pin_the_same_frozen_v5_digest(self):
@@ -178,57 +198,72 @@ class WorkflowHygieneTests(unittest.TestCase):
                     self.assertRegex(ref, r"^[\w.-]+/[\w.-]+@v\d+$")
 
 
-class ReleaseGateWorkflowTests(unittest.TestCase):
-    """The lane's own workflow says what it claims to say."""
+class CiWorkflowTests(unittest.TestCase):
+    """There is exactly one entry workflow, and it splits the work by dependency.
+
+    Two workflows that both ran ``unittest discover`` + ``npm test`` + the
+    browser suite produced three copies of the same signal and one of them
+    triggered on a branch that no longer exists. The replacement keeps the
+    properties that mattered and pins the split that makes a failure locatable.
+    """
 
     def setUp(self):
         self.assertTrue(
-            RELEASE_GATE_WORKFLOW.is_file(),
-            f"missing {RELEASE_GATE_WORKFLOW.relative_to(REPO)}",
+            CI_WORKFLOW.is_file(), f"missing {CI_WORKFLOW.relative_to(REPO)}"
         )
-        self.text = RELEASE_GATE_WORKFLOW.read_text("utf-8")
+        self.text = CI_WORKFLOW.read_text("utf-8")
 
-    def test_triggers_on_the_integration_branch_and_on_pull_requests(self):
-        self.assertIn("integration/v6-operations-linux-auth-20261016", self.text)
+    def test_it_is_the_only_entry_workflow(self):
+        self.assertEqual(
+            sorted(p.name for p in WORKFLOWS.glob("*.yml")), ["ci.yml"]
+        )
+
+    def test_it_runs_on_main_pushes_and_pull_requests(self):
         self.assertIn("pull_request:", self.text)
+        self.assertIn("branches: [main]", self.text)
 
-    def test_is_pinned_cpu_only(self):
+    def test_it_is_pinned_cpu_only(self):
         self.assertIn('CUDA_VISIBLE_DEVICES: ""', self.text)
 
-    def test_carries_the_frozen_digests_independently_of_the_tools(self):
-        self.assertIn(FROZEN_V5_SHA256, self.text)
-        self.assertIn(FROZEN_V6_SHA256, self.text)
+    def test_the_three_jobs_exist_and_are_named_for_their_dependency(self):
+        for job in ("unit:", "node:", "browser:"):
+            with self.subTest(job=job):
+                self.assertRegex(self.text, rf"(?m)^  {re.escape(job)}$")
+
+    def test_unit_job_has_no_browser_or_node_dependency(self):
+        """The split exists because one Chrome test made the unit job 6 minutes.
+
+        A browser import in ``unit`` is not a style problem: it turns a fast
+        signal into a slow one and makes a Python failure look like an
+        environment failure.
+        """
+        unit = self.text.split("  unit:", 1)[1].split("\n  node:", 1)[0]
+        self.assertIn("unittest discover -s tests -t .", unit)
+        for browser_marker in ("Chrome", "chromium", "CHROME_PATH", "smoke_static_bundle"):
+            with self.subTest(marker=browser_marker):
+                self.assertNotIn(browser_marker, unit)
+
+    def test_browser_job_is_fail_closed_without_chrome(self):
+        browser = self.text.split("  browser:", 1)[1]
+        self.assertIn("Chrome/Chromium unavailable", browser)
+        self.assertIn("exit 1", browser)
+        self.assertIn("::error::", browser)
+
+    def test_browser_job_runs_the_packaged_bundle_smoke(self):
+        browser = self.text.split("  browser:", 1)[1]
+        self.assertIn("build_static_bundle.mjs", browser)
+        self.assertIn("smoke_static_bundle.mjs", browser)
+
+    def test_frozen_digests_are_checked_with_sha256sum(self):
+        self.assertIn("sha256sum -c prototypes/FROZEN.sha256", self.text)
 
     def test_runs_both_derivation_checks(self):
         self.assertIn("derive-from-v5.mjs --check", self.text)
         self.assertIn("extract-from-prototype.mjs --check", self.text)
 
-    def test_runs_the_python_and_node_suites(self):
-        self.assertIn("unittest discover -s tests -t .", self.text)
-        self.assertIn("npm test", self.text)
-
-    def test_browser_job_is_gated_on_a_detected_browser(self):
-        self.assertIn("needs.browser-available.outputs.chrome == 'true'", self.text)
-
-    def test_a_missing_browser_is_reported_as_not_a_pass(self):
-        """The distinction the whole conditional job exists for.
-
-        The wording moved with the decision: the verdict was extracted into
-        release-gate-verdict.sh so that its *exit code* — not prose in a job
-        summary — is what decides. The exit codes themselves are asserted in
-        tests/release/test_release_gate_verdict.py; what is checked here is that
-        a skipped browser still cannot be described as a pass anywhere.
-        """
-        script = (WORKFLOWS / "release-gate-verdict.sh").read_text("utf-8")
-        self.assertIn("SKIPPED", script)
-        self.assertIn("not a pass", script)
-        self.assertIn("::error::", script)
-
-    def test_the_verdict_is_delegated_to_the_script_in_both_modes(self):
-        """The workflow must not decide inline any more."""
-        self.assertIn("--mode cpu", self.text)
-        self.assertIn("--mode release", self.text)
-        self.assertIn("release-gate-verdict.sh", self.text)
+    def test_no_job_is_allowed_to_continue_on_error(self):
+        """A red job must stay red; the only suppression is the absence of one."""
+        self.assertNotIn("continue-on-error", self.text)
 
     def test_concurrency_is_bounded(self):
         self.assertIn("concurrency:", self.text)
@@ -240,8 +275,10 @@ class LaneOwnedArtefactTests(unittest.TestCase):
 
     # Every shell script this lane ships is checked, not just the obvious one:
     # a guard that only looks at the drill would miss a privileged command added
-    # to a helper beside it.
-    LANE_SCRIPTS = (DRILL_SCRIPT, VERDICT_SCRIPT)
+    # to a helper beside it. (``release-gate-verdict.sh`` used to be the second
+    # entry; it was removed with the duplicate release-gates workflow — the
+    # fail-closed property it encoded now lives in the browser job's exit code.)
+    LANE_SCRIPTS = (DRILL_SCRIPT,)
 
     FORBIDDEN_COMMANDS = (
         "systemctl",
@@ -346,12 +383,11 @@ class LaneOwnedDocumentTests(unittest.TestCase):
             TRUST_BOUNDARY,
             HOSTING_AND_ROLLBACK,
             RELEASE_CHECKLIST,
-            RELEASE_GATE_WORKFLOW,
-            VERDICT_SCRIPT,
+            CI_WORKFLOW,
+            FROZEN_FILE,
             DRILL_SCRIPT,
             ROLLBACK_PLAN,
             LANE_DIR / "test_release_gates.py",
-            LANE_DIR / "test_release_gate_verdict.py",
         ]
         for path in owned:
             text = path.read_text("utf-8")

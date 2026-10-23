@@ -82,10 +82,8 @@ node tools/release/build_static_bundle.mjs --out /tmp/atelier-v1-bundle
 # 2) 静态门禁（17 项，无网络、无浏览器、秒级）
 python3 -m unittest tests.release.test_v1_static_bundle -v
 
-# 3) 浏览器 smoke（真 Chrome + CDP，27 项；无 Chrome 时 skip，不冒充通过）
-python3 -m unittest tests.release.test_v1_static_bundle_smoke -v
-
-# 4) 或直接跑 smoke 取 JSON
+# 3) 浏览器 smoke（真 Chrome + CDP，27 项）：CI 里由 browser job 直接执行，
+#    无 Chrome 时该 job 失败（fail-closed），不再有 skip 通道
 node tools/release/smoke_static_bundle.mjs /tmp/atelier-v1-bundle --json
 ```
 

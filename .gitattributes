@@ -1,0 +1,6 @@
+# The frozen design sources are pinned byte-for-byte in prototypes/FROZEN.sha256
+# and checked in CI with `sha256sum -c`. A clone with core.autocrlf=true would
+# rewrite those bytes on checkout and report drift that is not in the
+# repository, so both files are pinned to LF here.
+prototypes/v5/index.html text eol=lf
+prototypes/v6/index.html text eol=lf
