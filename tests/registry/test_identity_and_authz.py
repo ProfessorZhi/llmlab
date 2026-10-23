@@ -167,6 +167,25 @@ class AuthenticationTest(unittest.TestCase):
                 [Principal("a", "a", 4001), Principal("b", "b", 4001)]
             )
 
+    def test_the_directory_can_answer_which_principal_owns_a_uid(self) -> None:
+        """§4.1：自动接入必须能把一个监听端口归到某个账户。
+
+        反向查找只认目录里**显式绑定**的 uid；没有绑定 uid 的账户（``account:<id>``
+        这类跨机身份）永远查不到，它们没有本机进程可归属。
+        """
+
+        directory = PrincipalDirectory(
+            [
+                Principal("alice", "alice", 4001),
+                Principal("bob", "bob", 4002),
+                Principal("account:42", "team", None, kind="account"),
+            ]
+        )
+
+        self.assertEqual(directory.by_uid(4001).principal, "alice")
+        self.assertIsNone(directory.by_uid(9999))
+        self.assertEqual(directory.uids(), frozenset({4001, 4002}))
+
 
 class DefaultPrivateTest(unittest.TestCase):
     """默认私有：未共享的东西**连存在性**都不泄漏。"""
