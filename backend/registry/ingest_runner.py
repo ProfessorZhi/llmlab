@@ -12,7 +12,16 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable
 
-from .ingest import ATTACH, OFFLINE_ACTION, RECOVER, IngestRound, TrackedService, ingest_round, service_key
+from .ingest import (
+    ATTACH,
+    DROP,
+    OFFLINE_ACTION,
+    RECOVER,
+    IngestRound,
+    TrackedService,
+    ingest_round,
+    service_key,
+)
 from .ingest_probe import probe_port, read_seen_ports
 from .lab_settings import visibility_for_new_service
 from .local_discovery import Fetch, loopback_fetch
@@ -20,6 +29,11 @@ from .models import utc_now
 from .observed_services import attach_observed, mark_observed_offline, mark_observed_online
 from .ownership import ProcNetListenerTable
 from .store import Store
+
+#: 一个端口被判「不是推理服务」之后，隔多少轮再看一眼。30 s 一轮，即 1 分钟。
+DROP_COOLDOWN_ROUNDS = 2
+#: 冷却上限：同一个端口反复失败时按倍数退避，最多半小时看一次。
+MAX_COOLDOWN_ROUNDS = 60
 
 
 @dataclass
@@ -41,16 +55,30 @@ class IngestRunner:
     last_problem: str | None = None
     #: 本轮因为预算没轮到的端口数，下一轮优先（顺序由端口号决定，天然公平）。
     deferred_probes: int = 0
+    #: 被判「不是推理服务」的端口还能冷却几轮。状态机丢弃之后**忘记**它，下一轮
+    #: 就又是一个新端口、又探三次——一个 API 服务、一个 ssh 转发口会这样被永远
+    #: 反复敲。这里按指数退避记着，避免这种没有尽头的探测。
+    cooldowns: dict[str, int] = field(default_factory=dict)
 
     def tick(self) -> IngestRound:
         ports, problem = read_seen_ports(self.table, include_wildcard=self.include_wildcard)
         self.last_problem = problem
         now = self.clock()
 
+        known = self.directory.uids()
         probes = {}
         deferred = 0
         deadline = self.monotonic() + self.probe_budget_seconds
         for item in ports:
+            # 先按 uid 过滤再探测：这些端口接下来会被 IGNORE，没必要为它们发
+            # HTTP。这一条把「全机的回环监听」缩成「平台账户的监听」——在开发机
+            # 上是几十个端口和两三个的区别。
+            if item.uid not in known:
+                continue
+            if self.cooldowns.get(service_key(item.uid, item.port), 0) > 0:
+                # 刚判定过「不是推理服务」。不探测 = 状态机这轮拿不到结果，端口
+                # 保持 SEEN 不动，冷却结束后会再试一次。
+                continue
             if self.monotonic() >= deadline:
                 # 预算用完：这一轮不探。状态机把「没有探测结果」当作「没探测」，
                 # 不会因此累计失败次数。
@@ -63,12 +91,32 @@ class IngestRunner:
             self.tracked,
             ports,
             probes,
-            known_uids=self.directory.uids(),
+            known_uids=known,
             now=now.isoformat(),
         )
         self.tracked = round_result.tracked
+        self._update_cooldowns(round_result, probes)
         self._apply(round_result, now)
         return round_result
+
+    def _update_cooldowns(self, round_result: IngestRound, probes: dict) -> None:
+        """维护端口冷却：判定不是推理服务就退避，探测成功就清掉。"""
+
+        for key in list(self.cooldowns):
+            remaining = self.cooldowns[key] - 1
+            if remaining > 0:
+                self.cooldowns[key] = remaining
+            else:
+                del self.cooldowns[key]
+
+        for action in round_result.actions:
+            key = action.service.key
+            if action.kind == DROP and action.reason == "连续探测失败":
+                previous = self.cooldowns.get(key, 0)
+                self.cooldowns[key] = min(max(previous * 2, DROP_COOLDOWN_ROUNDS), MAX_COOLDOWN_ROUNDS)
+            elif probes.get(key) is not None and probes[key].ok:
+                # 认出来了：之前的退避作废，别再让它拖着。
+                self.cooldowns.pop(key, None)
 
     # -- 动作执行 ---------------------------------------------------------
 

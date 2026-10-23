@@ -1041,14 +1041,25 @@ health 类路径（`/healthz` 等）**不足以**判定 `verified`：一个 200 
 |---|---|---|
 | 元数据进了库 | `registered: true` | 登记者 |
 | 一次真实的探测成功过 | `verified` / `verified_transport` / `verified_protocol` | Registry 的探测（由本部署的 prober 提供） |
-| **进程真的在跑** | `running` | **恒为 `null`** —— 平台不启动进程，也没有观测源 |
+| **进程真的在跑** | `running` | **恒为 `null`** —— 平台不启动、也不托管进程 |
+| 发现循环最近看见它在不在 | `state` | 自动接入（§4.1），仅在启用时；`null` = 还没被观测过 |
 | 是不是这个部署声明的模型服务 | `verification.protocol` | 协议探测（只读模型清单） |
 | 这个引擎的进程属于谁 | `ownership` | 运维策略，或（可选、真实主机待验证的）`/proc/net` uid 证明 |
 
 **多条 Model 记录 ≠ 同时真实运行。** 一个 principal 可以登记多个 Model、
 多个 Deployment、多个 Endpoint（没有数量上限，唯一的约束是「同一 owner 下名字
-不重复」），但「同时运行着几个」这件事**平台完全不知道**：它既不启动也不观测
-进程。所以 `running` 是 `null` 而不是 `true`/`false`。
+不重复」），但「同时运行着几个」这件事平台**不管**：它既不启动也不托管进程。
+所以 `running` 是 `null` 而不是 `true`/`false`。
+
+`state` 与 `running` 不是同一件事，也不能互相代替：
+
+* `running` 回答「平台管不管得着这个进程」——管不着，恒为 `null`。
+* `state` 回答「发现循环最近一次看到它在不在」——`attached` / `offline` /
+  `seen`，未启用自动接入或还没扫到时为 `null`。
+
+`state=offline` **不删除**登记：服务停了两轮之后行还在，只是调用返回
+`service_offline`（503）；服务回来时复用同一行、同一路由。这是「停掉」与
+「丢弃」的区别——丢弃只发生在从未识别成功的端口上。
 
 真正的 start/stop/restart、CUDA 加载与 GPU 准入属于一个**独立的受限 owner-agent**，
 不在这条路径上（也超出了本仓库的部署边界：`docs/access-boundaries.md` §6

@@ -308,6 +308,10 @@ class Engine:
             "verified_transport": bool((self.verification or {}).get("transport_verified")),
             "verified_protocol": bool((self.verification or {}).get("protocol_verified")),
             "running": None,  # 由平台外的 owner-agent 负责；这里恒为未观测
+            # 观测到的运行时状态，与上面的 ``running`` 是两件事：``running`` 说的是
+            # 「平台管不管得着这个进程」（管不着，恒为 None），``state`` 说的是
+            # 「发现循环最近看到它在不在」（attached / offline / None=还没看过）。
+            "state": self.state,
             "mode": self.mode,
             "ownership": dict(self.ownership or {}),
             "verification": self.verification_block(),

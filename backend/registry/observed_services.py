@@ -4,8 +4,12 @@
 证明与 scope 检查，观测不需要——内核已经告诉我们这个端口的属主 uid。两者最终
 写出的行用 ``source`` 区分（``auto`` vs ``client_registered``），审计时一眼可辨。
 
-服务身份用 ``(uid, port)``，所以 id 是确定性的 ``auto:<uid>:<port>``：进程重启
+服务身份用 ``(uid, port)``，所以 id 是确定性的 ``auto-<uid>-<port>``：进程重启
 换了 pid 也不会在账本里多出一行，下一轮观测直接更新同一行。
+
+id 里用连字符而不是冒号，是因为 HTTP 路由的 id 语法是
+``[A-Za-z0-9_-]{1,64}``（``api._ID``）——带冒号的 id 在列表里看得到、却打不开
+详情页，这种「看得见取不到」的资源比没有更糟。
 """
 
 from __future__ import annotations
@@ -23,15 +27,26 @@ from .models import (
 )
 from .store import Store
 
-AUTO_ID_PREFIX = "auto:"
+AUTO_ID_PREFIX = "auto-"
 
 
 def auto_engine_id(uid: int, port: int) -> str:
-    return f"{AUTO_ID_PREFIX}{int(uid)}:{int(port)}"
+    return f"{AUTO_ID_PREFIX}{int(uid)}-{int(port)}"
+
+
+def parse_auto_engine_id(engine_id: str) -> tuple[int, int] | None:
+    """``auto-<uid>-<port>`` -> ``(uid, port)``；不是自动 id 就是 ``None``。"""
+
+    if not engine_id.startswith(AUTO_ID_PREFIX):
+        return None
+    uid_text, sep, port_text = engine_id[len(AUTO_ID_PREFIX):].partition("-")
+    if not sep or not uid_text.isdigit() or not port_text.isdigit():
+        return None
+    return int(uid_text), int(port_text)
 
 
 def is_auto_engine(engine_id: str) -> bool:
-    return engine_id.startswith(AUTO_ID_PREFIX)
+    return parse_auto_engine_id(engine_id) is not None
 
 
 def _target(port: int) -> dict:

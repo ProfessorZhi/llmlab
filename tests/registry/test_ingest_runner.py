@@ -8,10 +8,12 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
 
+from backend.registry import api
 from backend.registry.identity import Principal, PrincipalDirectory
 from backend.registry.ingest_runner import IngestRunner
 from backend.registry.lab_settings import ALL, PRIVATE, set_default_visibility
@@ -20,7 +22,11 @@ from backend.registry.models import (
     ENGINE_RUNTIME_OFFLINE,
     SOURCE_AUTO,
 )
-from backend.registry.observed_services import auto_engine_id, observed_engines
+from backend.registry.observed_services import (
+    auto_engine_id,
+    observed_engines,
+    parse_auto_engine_id,
+)
 from backend.registry.ownership import ListeningSocket
 from backend.registry.store import Store
 
@@ -98,6 +104,21 @@ class AttachTests(RunnerTestCase):
         self.assertEqual(engine.owner_principal, "alice")
         self.assertEqual(engine.target["url"], "http://127.0.0.1:8013")
         self.assertEqual(engine.launch["model_ids"], ["qwen3-4b"])
+
+    def test_the_generated_id_is_addressable_by_the_http_route(self):
+        """列表里看得见、却打不开详情的资源，比看不见更糟。
+
+        自动 id 必须满足 ``api._ID`` 的语法（``[A-Za-z0-9_-]{1,64}``）；原来的
+        ``auto:<uid>:<port>`` 带冒号，``GET /engines/auto:1000:18123`` 直接 404。
+        """
+
+        pattern = re.compile(rf"^{api._ID}$")
+
+        engine_id = auto_engine_id(ALICE_UID, 18123)
+
+        self.assertRegex(engine_id, pattern)
+        self.assertEqual(parse_auto_engine_id(engine_id), (ALICE_UID, 18123))
+        self.assertIsNone(parse_auto_engine_id("eng_deadbeefdeadbeef"))
 
     def test_the_second_round_does_not_create_a_second_row(self):
         self.serve()
@@ -198,6 +219,52 @@ class LifecycleTests(RunnerTestCase):
         self.assertTrue(round_result.of_kind("attach"))
         self.assertEqual(self.engine().launch["visibility"], PRIVATE)
         self.assertEqual(len(observed_engines(self.store)), 1)
+
+
+class CooldownTests(RunnerTestCase):
+    def test_a_port_that_is_not_an_engine_is_not_probed_forever(self):
+        """丢弃只是忘掉它；端口还在，下一轮就又被当成新端口探三次。
+
+        开发机上这样的端口不少（API 自己、ssh 转发口、任何 HTTP 服务）。不冷却
+        的话，探测会以「每轮三次」的节奏永远打下去。
+        """
+
+        self.table.listen(9000)
+        probed: list[int] = []
+
+        def counting_fetch(port: int, _path: str):
+            probed.append(port)
+            return None
+
+        self.runner.fetch = counting_fetch
+        for _ in range(3):
+            self.runner.tick()
+        self.assertIn(9000, probed)
+        after_drop = len(probed)
+
+        self.runner.tick()
+
+        self.assertEqual(len(probed), after_drop, "冷却期内不该再敲这个端口")
+        self.assertGreater(self.runner.cooldowns.get("1001:9000", 0), 0)
+
+    def test_a_cooldown_ends_and_the_port_is_tried_again(self):
+        """退避不是拉黑：判定错了（服务起得慢）还得能翻案。"""
+
+        self.table.listen(9000)
+        self.runner.fetch = lambda _port, _path: None
+        for _ in range(3):
+            self.runner.tick()
+
+        for _ in range(5):
+            self.runner.tick()
+        self.runner.fetch = self.fetch
+        self.serve(port=9000)
+
+        for _ in range(4):
+            self.runner.tick()
+
+        self.assertIsNotNone(self.engine(9000))
+        self.assertNotIn("1001:9000", self.runner.cooldowns)
 
 
 class BudgetTests(RunnerTestCase):
