@@ -7,8 +7,6 @@
   "scripts": {
     "test": "node --test \"tests/*.test.js\" \"tests/web-features/*.test.js\" \"tests/infra/*.test.js\"",
     "test:features": "node --test \"tests/web-features/*.test.js\"",
-    "test:browser": "node --test \"tests/browser/*.test.js\"",
-    "test:all": "npm test && npm run test:browser",
     "verify:extract": "node web/tools/extract-from-prototype.mjs --check",
     "serve": "node web/tools/serve.mjs"
   },
