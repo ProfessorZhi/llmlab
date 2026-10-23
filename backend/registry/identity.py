@@ -260,12 +260,28 @@ class PrincipalDirectory:
             if principal.uid is not None:
                 seen_uids[principal.uid] = principal.principal
         self._by_principal = by_principal
+        self._by_uid = dict(seen_uids)
         self._approved = frozenset(
             p.principal for p in by_principal.values() if p.approved
         )
 
     def lookup(self, principal: str) -> Principal | None:
         return self._by_principal.get(principal)
+
+    def by_uid(self, uid: int) -> Principal | None:
+        """``uid -> Principal``。服务自动接入用它把监听端口归到账户（§4.1）。
+
+        只有目录里**显式绑定**了 uid 的主体才会命中；``account:<id>`` 这类不带
+        uid 的账户永远查不到——它们没有本机进程可归属。
+        """
+
+        principal = self._by_uid.get(uid)
+        return self._by_principal.get(principal) if principal else None
+
+    def uids(self) -> frozenset[int]:
+        """目录里所有被绑定的 uid。自动接入拿它决定哪些端口值得探测。"""
+
+        return frozenset(self._by_uid)
 
     def require(self, principal: str) -> Principal:
         found = self.lookup(principal)

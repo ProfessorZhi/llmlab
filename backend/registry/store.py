@@ -28,25 +28,35 @@ from typing import Callable, Iterable, Iterator, Sequence
 
 from .errors import Conflict, InvalidRequest, StorageError
 from .models import (
+    AGENT_TASK_QUEUED,
+    AGENT_TASK_RUNNING,
     DEPLOYMENT_READY,
     ENDPOINT_READY,
     ENGINE_MODE_USER,
+    ENGINE_RUNTIME_ATTACHED,
     ENGINE_VERIFIED,
+    LOCATION_MISSING,
+    LOCATION_PRESENT,
     ROUTER_EVIDENCE_KINDS,
+    RUNTIME_BUILD_MISSING,
+    RUNTIME_BUILD_PRESENT,
     AclGrant,
+    AgentTask,
     AuditEntry,
     Deployment,
     Endpoint,
     EndpointRouting,
     Engine,
     Model,
+    ModelLocation,
+    RuntimeBuild,
     isoformat,
     parse_timestamp,
     utc_now,
 )
 
 #: 当前 schema 版本。**每次改动表结构都要 +1 并追加一条迁移**。
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 #: 有序迁移：(版本, SQL)。只追加，永不修改已发布的条目。
 MIGRATIONS: tuple[tuple[int, str], ...] = (
@@ -254,7 +264,129 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         ALTER TABLE endpoints ADD COLUMN router_ack_evidence TEXT;
         """,
     ),
+    (
+        4,
+        # v4：资源自动接入（§3）。新增的四张表各自回答一个独立问题：
+        #
+        # * ``model_locations`` —— 同一个模型文件可以在多处（多盘、移动、复制）；
+        # * ``runtime_builds`` —— build 是文件，engines 是进程，二者不能混为一谈；
+        # * ``agent_tasks`` —— 守护进程不能以用户身份执行任何东西，只能排队等代理来领；
+        # * ``lab_settings`` —— 跨用户的实验室策略（目前只有 default_visibility）。
+        #
+        # ``engines.state`` 是**运行时**状态轴，与既有的 ``status``（登记/验证）
+        # 正交。迁移前的行由 Python 侧的 ``_backfill_v4_engine_state`` 回填为
+        # ``attached``：它们当初就是人工逐一确认过的运行中服务。留 NULL 等于
+        # 让上层在 seen/healthy/attached/offline 之外再判断一种没有含义的「未知」。
+        #
+        # ``engines.source`` / ``engines.last_seen_at`` / ``models.fingerprint`` /
+        # ``models.source`` / ``models.weight_path`` 在 v1 就已存在，v4 不重复添加
+        # （SQLite 没有 ADD COLUMN IF NOT EXISTS）。
+        #
+        # 全部字符串默认值都留在代码侧：一是不让 DDL 依赖 ``_split_statements``
+        # 对引号的禁令，二是旧行显式读作 NULL 比一个「看起来有值」的默认更诚实。
+        """
+        ALTER TABLE models ADD COLUMN kind TEXT;
+        ALTER TABLE models ADD COLUMN task TEXT;
+        ALTER TABLE models ADD COLUMN facts_json TEXT;
+        ALTER TABLE models ADD COLUMN size_bytes INTEGER;
+
+        ALTER TABLE engines ADD COLUMN state TEXT;
+        ALTER TABLE engines ADD COLUMN pid INTEGER;
+        ALTER TABLE engines ADD COLUMN unit TEXT;
+        ALTER TABLE engines ADD COLUMN model_id TEXT;
+        ALTER TABLE engines ADD COLUMN runtime_build_id TEXT;
+        ALTER TABLE engines ADD COLUMN launch_json TEXT;
+
+        CREATE TABLE IF NOT EXISTS model_locations (
+            model_id     TEXT NOT NULL REFERENCES models(id),
+            path         TEXT NOT NULL,
+            uid          INTEGER NOT NULL,
+            device       INTEGER,
+            inode        INTEGER,
+            mtime        REAL,
+            tier         TEXT,
+            state        TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            PRIMARY KEY (model_id, path)
+        );
+
+        -- 状态过滤是发现循环每轮都要做的查询。
+        CREATE INDEX IF NOT EXISTS model_locations_state
+            ON model_locations (state);
+        -- 按 uid 限定「只能看自己的位置」时走这条。
+        CREATE INDEX IF NOT EXISTS model_locations_uid
+            ON model_locations (uid);
+
+        CREATE TABLE IF NOT EXISTS runtime_builds (
+            id              TEXT PRIMARY KEY,
+            owner_principal TEXT NOT NULL,
+            owner_uid       INTEGER NOT NULL,
+            framework       TEXT NOT NULL,
+            binary_path     TEXT NOT NULL,
+            version         TEXT,
+            git_commit      TEXT,
+            fingerprint     TEXT NOT NULL,
+            flags_json      TEXT,
+            formats_json    TEXT,
+            state           TEXT NOT NULL,
+            last_seen_at    TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS runtime_builds_owner
+            ON runtime_builds (owner_principal);
+        -- 代理上报的是指纹而不是守护进程分配的 id，所以按指纹查找必须快。
+        CREATE INDEX IF NOT EXISTS runtime_builds_fingerprint
+            ON runtime_builds (fingerprint);
+
+        CREATE TABLE IF NOT EXISTS agent_tasks (
+            id           TEXT PRIMARY KEY,
+            uid          INTEGER NOT NULL,
+            kind         TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            requested_by TEXT NOT NULL,
+            created_at   TEXT NOT NULL,
+            state        TEXT NOT NULL,
+            result_json  TEXT,
+            updated_at   TEXT
+        );
+
+        -- 领取任务是「按 uid 找最老的 queued」，这条索引同时覆盖过滤与排序。
+        CREATE INDEX IF NOT EXISTS agent_tasks_uid_state
+            ON agent_tasks (uid, state, created_at);
+
+        CREATE TABLE IF NOT EXISTS lab_settings (
+            key        TEXT PRIMARY KEY,
+            value      TEXT NOT NULL,
+            updated_by TEXT,
+            updated_at TEXT
+        );
+        """,
+    ),
 )
+
+#: 迁移里**不能**用字面量表达的部分（回填值等）。
+#:
+#: 为什么不直接把 ``UPDATE engines SET state = 'attached'`` 写进迁移 4 的 SQL：
+#: ``_split_statements`` 刻意拒绝任何带引号的语句（它靠朴素分号切分，字符串
+#: 字面量里的分号会让切分错位）。与其为一条回填放宽这个安全边界，不如让它在
+#: Python 里走参数化 SQL —— 它仍然跑在**同一个事务**里，所以迁移的原子性不变。
+def _backfill_v4_engine_state(connection: sqlite3.Connection) -> None:
+    """把迁移前就已登记的服务标成 ``attached``。
+
+    它们是在旧世界里由人逐一确认过的运行中服务；若留 NULL，上层就不得不在
+    seen / healthy / attached / offline 之外多判断一种「未知」，而那个状态没有
+    任何业务含义。只改 NULL，不覆盖任何已经写好的值。
+    """
+    connection.execute(
+        "UPDATE engines SET state = ? WHERE state IS NULL",
+        (ENGINE_RUNTIME_ATTACHED,),
+    )
+
+
+#: 键是迁移版本，值是接收连接的函数。见上方关于「为什么回填不在 SQL 字面量里」的说明。
+_MIGRATION_BACKFILLS: dict[int, Callable[[sqlite3.Connection], None]] = {
+    4: _backfill_v4_engine_state,
+}
 
 
 @dataclass(frozen=True)
@@ -286,6 +418,28 @@ def _loads_or_empty(raw: object) -> dict:
     except (TypeError, ValueError):
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _column(row: sqlite3.Row, name: str, default: object = None) -> object:
+    """读一个**可能不存在**的列。
+
+    ``SELECT *`` 拿到的列集合取决于库的版本。旧库（或测试里把 schema 钉在
+    历史版本时）没有 v4 的列，``row[name]`` 会抛 ``IndexError`` 而不是返回 None。
+    行映射是唯一的读取口，所以「这一列在旧库上不存在」必须在这里被吸收成
+    默认值，而不是让一条历史数据的读取炸掉整个列表查询。
+    """
+    try:
+        return row[name]
+    except (IndexError, KeyError):
+        return default
+
+
+def _optional_int(raw: object) -> int | None:
+    return None if raw is None else int(raw)
+
+
+def _optional_float(raw: object) -> float | None:
+    return None if raw is None else float(raw)
 
 
 def _split_statements(script: str) -> tuple[str, ...]:
@@ -465,6 +619,10 @@ class Store:
                         continue
                     for statement in _split_statements(script):
                         connection.execute(statement)
+                    # 数据回填与 DDL 在同一个事务里：要么一起生效，要么一起回滚。
+                    backfill = _MIGRATION_BACKFILLS.get(version)
+                    if backfill is not None:
+                        backfill(connection)
                     connection.execute(
                         "INSERT OR REPLACE INTO schema_migrations (version, applied_at) "
                         "VALUES (?, ?)",
@@ -508,9 +666,17 @@ class Store:
             tags=tuple(_loads(row["tags_json"])),
             # v2 之前写下的行这些列是 NULL：缺省成「用户登记 + 未证明 + 未验证」，
             # 也就是**最保守**的那一组取值。
-            mode=(row["mode"] or ENGINE_MODE_USER),
-            ownership=_loads_or_empty(row["ownership_json"]),
-            verification=_loads_or_empty(row["verification_json"]),
+            mode=(_column(row, "mode") or ENGINE_MODE_USER),
+            ownership=_loads_or_empty(_column(row, "ownership_json")),
+            verification=_loads_or_empty(_column(row, "verification_json")),
+            # v4 的运行时列。state 的 NULL 只在「升级后新登记、尚未被观察」的行上
+            # 出现，这里如实保留 None，而不是替它猜一个 seen/attached。
+            state=_column(row, "state"),
+            pid=_optional_int(_column(row, "pid")),
+            unit=_column(row, "unit"),
+            model_id=_column(row, "model_id"),
+            runtime_build_id=_column(row, "runtime_build_id"),
+            launch=_loads_or_empty(_column(row, "launch_json")),
         )
 
     @staticmethod
@@ -532,6 +698,56 @@ class Store:
             last_seen_at=parse_timestamp(row["last_seen_at"]),
             description=row["description"],
             tags=tuple(_loads(row["tags_json"])),
+            kind=_column(row, "kind"),
+            task=_column(row, "task"),
+            facts=_loads_or_empty(_column(row, "facts_json")),
+            size_bytes=_optional_int(_column(row, "size_bytes")),
+        )
+
+    @staticmethod
+    def _location(row: sqlite3.Row) -> ModelLocation:
+        return ModelLocation(
+            model_id=row["model_id"],
+            path=row["path"],
+            uid=int(row["uid"]),
+            device=_optional_int(row["device"]),
+            inode=_optional_int(row["inode"]),
+            mtime=_optional_float(row["mtime"]),
+            tier=row["tier"],
+            state=row["state"],
+            last_seen_at=parse_timestamp(row["last_seen_at"]),
+        )
+
+    @staticmethod
+    def _build(row: sqlite3.Row) -> RuntimeBuild:
+        return RuntimeBuild(
+            id=row["id"],
+            owner_principal=row["owner_principal"],
+            owner_uid=int(row["owner_uid"]),
+            framework=row["framework"],
+            binary_path=row["binary_path"],
+            version=row["version"],
+            git_commit=row["git_commit"],
+            fingerprint=row["fingerprint"],
+            flags=_loads_or_empty(row["flags_json"]),
+            formats=tuple(_loads(row["formats_json"]) or ()),
+            state=row["state"],
+            last_seen_at=parse_timestamp(row["last_seen_at"]),
+        )
+
+    @staticmethod
+    def _task(row: sqlite3.Row) -> AgentTask:
+        raw_result = row["result_json"]
+        return AgentTask(
+            id=row["id"],
+            uid=int(row["uid"]),
+            kind=row["kind"],
+            payload=_loads_or_empty(row["payload_json"]),
+            requested_by=row["requested_by"],
+            created_at=parse_timestamp(row["created_at"]),
+            state=row["state"],
+            result=None if raw_result is None else _loads(raw_result),
+            updated_at=parse_timestamp(row["updated_at"]),
         )
 
     @staticmethod
@@ -589,8 +805,9 @@ class Store:
                         id, owner_principal, owner_uid, name, target_json, protocol, status,
                         health_json, source, description, tags_json, created_at, updated_at,
                         last_seen_at, verified_at, idempotency_key, fingerprint,
-                        mode, ownership_json, verification_json
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        mode, ownership_json, verification_json,
+                        state, pid, unit, model_id, runtime_build_id, launch_json
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
                         engine.id,
@@ -613,6 +830,12 @@ class Store:
                         engine.mode,
                         _dumps(engine.ownership or {}),
                         _dumps(engine.verification or {}),
+                        engine.state,
+                        engine.pid,
+                        engine.unit,
+                        engine.model_id,
+                        engine.runtime_build_id,
+                        _dumps(engine.launch or {}),
                     ),
                 )
             except sqlite3.IntegrityError as exc:
@@ -693,6 +916,327 @@ class Store:
                 f"UPDATE engines SET {', '.join(assignments)} WHERE id = ?", tuple(params)
             )
 
+    def update_engine_runtime(
+        self,
+        engine_id: str,
+        *,
+        state: str | None = None,
+        pid: int | None = None,
+        unit: str | None = None,
+        model_id: str | None = None,
+        runtime_build_id: str | None = None,
+        launch: dict | None = None,
+        last_seen_at: object = None,
+    ) -> None:
+        """只更新**传入**的运行时列，外加 ``updated_at``。
+
+        为什么用 ``None`` 表示「这一列不动」而不是「写回 NULL」：发现循环每轮
+        只知道很少几件事（这轮只探到了 pid，不代表模型换了）。若把没传的字段
+        当作「清空」，一次只带 pid 的更新就会把上一轮补好的 ``state``、
+        ``model_id`` 一起抹成 NULL —— 那是最容易被忽略、又最难复现的数据丢失。
+        因此清空语义必须由调用方显式提供一个新值（例如 state=offline）。
+        """
+        assignments: list[str] = []
+        params: list[object] = []
+        if state is not None:
+            assignments.append("state = ?")
+            params.append(state)
+        if pid is not None:
+            assignments.append("pid = ?")
+            params.append(int(pid))
+        if unit is not None:
+            assignments.append("unit = ?")
+            params.append(unit)
+        if model_id is not None:
+            assignments.append("model_id = ?")
+            params.append(model_id)
+        if runtime_build_id is not None:
+            assignments.append("runtime_build_id = ?")
+            params.append(runtime_build_id)
+        if launch is not None:
+            assignments.append("launch_json = ?")
+            params.append(_dumps(launch))
+        if last_seen_at is not None:
+            assignments.append("last_seen_at = ?")
+            params.append(isoformat(last_seen_at))
+        assignments.append("updated_at = ?")
+        params.append(isoformat(utc_now()))
+        params.append(engine_id)
+        with self.transaction() as connection:
+            connection.execute(
+                f"UPDATE engines SET {', '.join(assignments)} WHERE id = ?", tuple(params)
+            )
+
+    def engines_in_state(self, state: str) -> list[Engine]:
+        rows = self.connection.execute(
+            "SELECT * FROM engines WHERE state = ? ORDER BY rowid", (state,)
+        ).fetchall()
+        return [self._engine(row) for row in rows]
+
+    def engines_by_source(self, source: str) -> list[Engine]:
+        rows = self.connection.execute(
+            "SELECT * FROM engines WHERE source = ? ORDER BY rowid", (source,)
+        ).fetchall()
+        return [self._engine(row) for row in rows]
+
+    # -- 实验室设置（lab_settings）-----------------------------------------
+
+    def get_setting(self, key: str) -> str | None:
+        row = self.connection.execute(
+            "SELECT value FROM lab_settings WHERE key = ?", (key,)
+        ).fetchone()
+        return row["value"] if row else None
+
+    def set_setting(self, key: str, value: str, *, updated_by: str) -> None:
+        """upsert。``updated_at`` 由 store 写：设置是全局共享的，调用方不该决定
+        「这次改动算什么时候发生的」—— 否则两条并发写入会带着各自的时钟互相覆盖。"""
+        updated_at = isoformat(utc_now())
+        with self.transaction() as connection:
+            connection.execute(
+                "INSERT INTO lab_settings (key, value, updated_by, updated_at) "
+                "VALUES (?,?,?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, "
+                "updated_by = excluded.updated_by, updated_at = excluded.updated_at",
+                (key, value, updated_by, updated_at),
+            )
+
+    def all_settings(self) -> dict[str, str]:
+        rows = self.connection.execute(
+            "SELECT key, value FROM lab_settings ORDER BY key"
+        ).fetchall()
+        return {row["key"]: row["value"] for row in rows}
+
+    # -- 模型位置（model_locations）----------------------------------------
+
+    def upsert_location(self, location: ModelLocation) -> None:
+        """按 ``(model_id, path)`` upsert。
+
+        inode / mtime / tier 都是**观测值**，每次上报都可能变（同盘重写会换
+        inode），所以它们必须跟着最新一次观测走；而 ``model_id`` 是身份，
+        不在更新集合里 —— 换 id 就是另一行，不是改这一行。
+        """
+        if location.last_seen_at is None:
+            # 列是 NOT NULL。若放它进 SQL，会得到一个被 IntegrityError 包装成
+            # Conflict（「和现有行冲突」）的错误 —— 那是在撒谎：同一个路径再写
+            # 一次本来就不冲突。缺少观测时间属于参数错误，必须当场说清楚。
+            raise InvalidRequest("a model location requires last_seen_at")
+        with self.transaction() as connection:
+            try:
+                connection.execute(
+                    "INSERT INTO model_locations "
+                    "(model_id, path, uid, device, inode, mtime, tier, state, last_seen_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(model_id, path) DO UPDATE SET "
+                    "uid = excluded.uid, device = excluded.device, inode = excluded.inode, "
+                    "mtime = excluded.mtime, tier = excluded.tier, state = excluded.state, "
+                    "last_seen_at = excluded.last_seen_at",
+                    (
+                        location.model_id,
+                        location.path,
+                        int(location.uid),
+                        location.device,
+                        location.inode,
+                        location.mtime,
+                        location.tier,
+                        location.state,
+                        isoformat(location.last_seen_at),
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                # 最常见的原因是 model_id 指向一个不存在的模型：位置不能凭空存在。
+                raise Conflict(f"location conflicts with an existing row: {exc}") from exc
+
+    def locations_for(self, model_id: str) -> list[ModelLocation]:
+        rows = self.connection.execute(
+            "SELECT * FROM model_locations WHERE model_id = ? ORDER BY path", (model_id,)
+        ).fetchall()
+        return [self._location(row) for row in rows]
+
+    def mark_locations_missing(self, model_id: str, seen_paths: Iterable[str]) -> int:
+        """把这一轮**没有出现**的位置标成 missing，返回被改的行数。
+
+        ``seen_paths`` 为空意味着「整个模型本轮都没看到」。这里刻意不删除行：
+        位置消失又回来（外接盘掉了再插上）是很常见的事，删了就只能从头再发现，
+        而且「曾经在哪」这段历史也就没了。
+        """
+        seen = tuple(dict.fromkeys(seen_paths))
+        with self.transaction() as connection:
+            if not seen:
+                cursor = connection.execute(
+                    "UPDATE model_locations SET state = ? "
+                    "WHERE model_id = ? AND state != ?",
+                    (LOCATION_MISSING, model_id, LOCATION_MISSING),
+                )
+            else:
+                placeholders = ",".join("?" for _ in seen)
+                cursor = connection.execute(
+                    f"UPDATE model_locations SET state = ? "
+                    f"WHERE model_id = ? AND path NOT IN ({placeholders}) AND state != ?",
+                    (LOCATION_MISSING, model_id, *seen, LOCATION_MISSING),
+                )
+            return int(cursor.rowcount)
+
+    def present_locations(self) -> list[ModelLocation]:
+        rows = self.connection.execute(
+            "SELECT * FROM model_locations WHERE state = ? ORDER BY model_id, path",
+            (LOCATION_PRESENT,),
+        ).fetchall()
+        return [self._location(row) for row in rows]
+
+    # -- 引擎 build（runtime_builds）---------------------------------------
+
+    def upsert_build(self, build: RuntimeBuild) -> None:
+        """按 ``id`` upsert。空 ``formats`` 写成 ``[]`` 而不是 NULL：
+        「这个 build 什么格式都不支持」是一个观测结论，不是「不知道」。"""
+        with self.transaction() as connection:
+            connection.execute(
+                "INSERT INTO runtime_builds "
+                "(id, owner_principal, owner_uid, framework, binary_path, version, "
+                "git_commit, fingerprint, flags_json, formats_json, state, last_seen_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET "
+                "owner_principal = excluded.owner_principal, owner_uid = excluded.owner_uid, "
+                "framework = excluded.framework, binary_path = excluded.binary_path, "
+                "version = excluded.version, git_commit = excluded.git_commit, "
+                "fingerprint = excluded.fingerprint, flags_json = excluded.flags_json, "
+                "formats_json = excluded.formats_json, state = excluded.state, "
+                "last_seen_at = excluded.last_seen_at",
+                (
+                    build.id,
+                    build.owner_principal,
+                    int(build.owner_uid),
+                    build.framework,
+                    build.binary_path,
+                    build.version,
+                    build.git_commit,
+                    build.fingerprint,
+                    _dumps(build.flags or {}),
+                    _dumps(list(build.formats)),
+                    build.state,
+                    isoformat(build.last_seen_at),
+                ),
+            )
+
+    def builds_for_owner(self, principal: str) -> list[RuntimeBuild]:
+        rows = self.connection.execute(
+            "SELECT * FROM runtime_builds WHERE owner_principal = ? ORDER BY id",
+            (principal,),
+        ).fetchall()
+        return [self._build(row) for row in rows]
+
+    def build_by_fingerprint(self, fingerprint: str) -> RuntimeBuild | None:
+        # 指纹理论上唯一，但表上没有 UNIQUE 约束（同一二进制换了登记路径时
+        # 会出现两行同指纹）。取最近见过的一行，让行为可预期而不是随机。
+        row = self.connection.execute(
+            "SELECT * FROM runtime_builds WHERE fingerprint = ? "
+            "ORDER BY last_seen_at DESC, id LIMIT 1",
+            (fingerprint,),
+        ).fetchone()
+        return self._build(row) if row else None
+
+    def mark_build_missing(self, ids: Iterable[str]) -> int:
+        """把这一轮没上报的 build 标成 missing；空集合是**无操作**。
+
+        空集合绝不能被翻译成「全部标 missing」：一次失败的上报（扫描器崩溃、
+        权限错误）会因此把整个用户的 build 列表抹掉。这个判断必须在这里做，
+        因为调用方很容易传一个空列表而不觉得有歧义。
+        """
+        candidates = tuple(dict.fromkeys(ids))
+        if not candidates:
+            return 0
+        placeholders = ",".join("?" for _ in candidates)
+        with self.transaction() as connection:
+            cursor = connection.execute(
+                f"UPDATE runtime_builds SET state = ? "
+                f"WHERE id IN ({placeholders}) AND state != ?",
+                (RUNTIME_BUILD_MISSING, *candidates, RUNTIME_BUILD_MISSING),
+            )
+            return int(cursor.rowcount)
+
+    # -- 代理任务（agent_tasks）--------------------------------------------
+
+    def enqueue_task(self, task: AgentTask) -> None:
+        with self.transaction() as connection:
+            connection.execute(
+                "INSERT INTO agent_tasks "
+                "(id, uid, kind, payload_json, requested_by, created_at, state, "
+                "result_json, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                (
+                    task.id,
+                    int(task.uid),
+                    task.kind,
+                    _dumps(task.payload or {}),
+                    task.requested_by,
+                    isoformat(task.created_at),
+                    task.state,
+                    None if task.result is None else _dumps(task.result),
+                    isoformat(task.updated_at),
+                ),
+            )
+
+    def claim_task(self, uid: int, *, now: object) -> AgentTask | None:
+        """原子地领取该 uid 最老的一条 ``queued`` 任务；没有就返回 ``None``。
+
+        并发保证的两层：
+
+        1. 整个「选一条 + 改状态」在同一个 ``BEGIN IMMEDIATE`` 事务里。SQLite
+           的写事务之间互斥，第二个领取者要么等第一个提交、要么超时；
+        2. 即便有人绕过事务（或将来改成先读后写），UPDATE 仍然带
+           ``state = queued`` 条件并检查 ``rowcount`` —— 状态已经不是 queued
+           时改不动任何行，于是不会被重复领取。
+
+        为什么必须先 SELECT 再 UPDATE 而不是一条 UPDATE：需要返回的是**被领到
+        的那一条**（含 payload）。随机挑一条会让同一个人排队的两份 start 顺序错乱。
+        """
+        at = isoformat(now)
+        with self.transaction() as connection:
+            row = connection.execute(
+                "SELECT id FROM agent_tasks WHERE uid = ? AND state = ? "
+                "ORDER BY created_at, rowid LIMIT 1",
+                (int(uid), AGENT_TASK_QUEUED),
+            ).fetchone()
+            if row is None:
+                return None
+            cursor = connection.execute(
+                "UPDATE agent_tasks SET state = ?, updated_at = ? "
+                "WHERE id = ? AND state = ?",
+                (AGENT_TASK_RUNNING, at, row["id"], AGENT_TASK_QUEUED),
+            )
+            if cursor.rowcount != 1:  # pragma: no cover - 同一事务内理论不可达
+                return None
+            claimed = connection.execute(
+                "SELECT * FROM agent_tasks WHERE id = ?", (row["id"],)
+            ).fetchone()
+            return self._task(claimed)
+
+    def finish_task(
+        self, task_id: str, *, state: str, result: dict | None, now: object
+    ) -> bool:
+        """收尾一条任务，返回是否真的改到了行。
+
+        允许从任何状态改写：代理可能先报 failed 再补一条 done（重试成功），
+        而「最后一次上报」才是事实。不存在一个需要保护的中间状态。
+        """
+        with self.transaction() as connection:
+            cursor = connection.execute(
+                "UPDATE agent_tasks SET state = ?, result_json = ?, updated_at = ? "
+                "WHERE id = ?",
+                (
+                    state,
+                    None if result is None else _dumps(result),
+                    isoformat(now),
+                    task_id,
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def tasks_for(self, uid: int) -> list[AgentTask]:
+        rows = self.connection.execute(
+            "SELECT * FROM agent_tasks WHERE uid = ? ORDER BY created_at, rowid",
+            (int(uid),),
+        ).fetchall()
+        return [self._task(row) for row in rows]
+
     # -- Model -----------------------------------------------------------
 
     def insert_model(self, model: Model, *, idempotency_key: str | None, fingerprint: str) -> None:
@@ -703,8 +1247,9 @@ class Store:
                     INSERT INTO models (
                         id, owner_principal, owner_uid, name, weight_path, weight_sha256, format,
                         parameter_count, status, health_json, source, description, tags_json,
-                        created_at, updated_at, last_seen_at, idempotency_key, fingerprint
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        created_at, updated_at, last_seen_at, idempotency_key, fingerprint,
+                        kind, task, facts_json, size_bytes
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
                         model.id,
@@ -725,6 +1270,10 @@ class Store:
                         isoformat(model.last_seen_at),
                         idempotency_key,
                         fingerprint,
+                        model.kind,
+                        model.task,
+                        _dumps(model.facts or {}),
+                        model.size_bytes,
                     ),
                 )
             except sqlite3.IntegrityError as exc:

@@ -60,6 +60,51 @@ SOURCE_ADMIN_IMPORTED = "admin_imported"
 SOURCE_FIXTURE = "synthetic_fixture"
 #: 由运维策略登记进来的**既有**服务（例如那台已经在 8080 上跑着的 Strata）。
 SOURCE_OPERATOR_EXISTING = "operator_existing_service"
+#: 守护进程每 30 s 观测到的回环服务（§4.1）。它没有经历任何人的登记动作，
+#: 所以「是谁把它放进来的」必须一眼可辨：这是 auto，不是 client_registered。
+SOURCE_AUTO = "auto"
+
+#: Engine 的**运行时**状态（``engines.state``，v4 新增）。
+#:
+#: 它与上面的 ``ENGINE_STATES`` 是**两条正交的轴**：``status`` 回答「登记过没有、
+#: 验证过没有」，``state`` 回答「这个监听端口此刻处于发现状态机的哪一步」。
+#: 刻意不复用 ``status``：把「手工登记且已验证」和「自动发现但还没探测成功」
+#: 塞进同一个字符串，上层就只能靠猜。迁移回填老行为 ``attached``，是因为
+#: 它们当初就是经人工确认过的运行中服务 —— 留 NULL 会让上层多出一种「未知」
+#: 状态去判断，而那个状态没有任何业务含义。
+ENGINE_RUNTIME_SEEN = "seen"
+ENGINE_RUNTIME_HEALTHY = "healthy"
+ENGINE_RUNTIME_ATTACHED = "attached"
+ENGINE_RUNTIME_OFFLINE = "offline"
+ENGINE_RUNTIME_STATES = (
+    ENGINE_RUNTIME_SEEN,
+    ENGINE_RUNTIME_HEALTHY,
+    ENGINE_RUNTIME_ATTACHED,
+    ENGINE_RUNTIME_OFFLINE,
+)
+
+#: 模型文件位置的状态。位置是**多对多**的：同一个模型可以在 SSD 与 HDD 上各有一份。
+LOCATION_PRESENT = "present"
+LOCATION_MISSING = "missing"
+LOCATION_STATES = (LOCATION_PRESENT, LOCATION_MISSING)
+
+#: 引擎 build 的存在状态。build 文件不在 ≠ build 从未登记过。
+RUNTIME_BUILD_PRESENT = "present"
+RUNTIME_BUILD_MISSING = "missing"
+RUNTIME_BUILD_STATES = (RUNTIME_BUILD_PRESENT, RUNTIME_BUILD_MISSING)
+
+#: 派给用户代理的任务状态。``queued`` 是**唯一**可被领取的状态，且领取是一次
+#: 原子状态迁移 —— 见 ``Store.claim_task``。
+AGENT_TASK_QUEUED = "queued"
+AGENT_TASK_RUNNING = "running"
+AGENT_TASK_DONE = "done"
+AGENT_TASK_FAILED = "failed"
+AGENT_TASK_STATES = (AGENT_TASK_QUEUED, AGENT_TASK_RUNNING, AGENT_TASK_DONE, AGENT_TASK_FAILED)
+
+#: 实验室级设置。只放**跨用户**的策略，不放任何用户私有数据。
+SETTING_DEFAULT_VISIBILITY = "default_visibility"
+DEFAULT_VISIBILITY_PRIVATE = "private"
+DEFAULT_VISIBILITY_ALL = "all"
 
 #: Engine 的登记模式。
 #:
@@ -218,6 +263,18 @@ class Engine:
     ownership: dict = field(default_factory=dict)
     #: 两根验证轴：``{"transport": ..., "protocol": ..., "verified": ...}``。
     verification: dict = field(default_factory=dict)
+    #: 运行时状态（``seen`` / ``healthy`` / ``attached`` / ``offline``）。
+    #: ``None`` 只应出现在「刚登记、还没被观察过」的行上，由发现循环补写。
+    state: str | None = None
+    pid: int | None = None
+    #: 代理拉起时用的 systemd 单元名；手工登记的服务没有。
+    unit: str | None = None
+    #: 该服务此刻加载的模型与 build。二者都是**引用**，不是拷贝。
+    model_id: str | None = None
+    runtime_build_id: str | None = None
+    #: 启动参数快照（守护进程生成、代理执行的那一份）。留档是为了让「这个服务
+    #: 当时是用什么参数起来的」在重启后仍可回答，而不是只剩当前值。
+    launch: dict = field(default_factory=dict)
 
     def verification_block(self) -> dict:
         """两根轴 + 一个**兼容用的**总状态 token。
@@ -289,6 +346,14 @@ class Model:
     last_seen_at: datetime | None = None
     description: str | None = None
     tags: tuple[str, ...] = ()
+    #: 文件形态：``gguf`` / ``hf`` / ``diffusers``。``None`` = 尚未识别。
+    kind: str | None = None
+    #: 用途推断：chat / vision / decision / embedding / rerank / image / video / unknown。
+    task: str | None = None
+    #: 从文件头读出的元数据（上下文上限、层数、KV 头数……）。只是**观测结果**，
+    #: 不参与授权判断，所以可以安全地随模型视图一起返回。
+    facts: dict = field(default_factory=dict)
+    size_bytes: int | None = None
 
     def to_dict(self, *, reveal_weight_path: bool) -> dict:
         from .weights import redact_weight_path, reveal_weight_path as reveal
@@ -560,6 +625,115 @@ class AuditEntry:
             "object_type": self.object_type,
             "object_id": self.object_id,
             "detail": dict(self.detail),
+        }
+
+
+@dataclass(frozen=True)
+class ModelLocation:
+    """模型文件在某台机器上的**一个**落点（model_locations）。
+
+    单独成表而不是给 ``models.weight_path`` 加字段，是因为位置本来就是多值的：
+    同盘移动、跨盘移动、复制成两份，都是同一个模型的多个 location。主键用
+    ``(model_id, path)`` —— 路径是位置的天然身份，而 inode 会随复制/重写变化。
+    """
+
+    model_id: str
+    path: str
+    uid: int
+    device: int | None = None
+    inode: int | None = None
+    mtime: float | None = None
+    #: ``ssd`` / ``hdd``，按挂载点判定；只用于提示冷启动快慢，不参与授权。
+    tier: str | None = None
+    state: str = LOCATION_PRESENT
+    last_seen_at: datetime | None = None
+
+    def to_dict(self) -> dict:
+        return {
+            "model_id": self.model_id,
+            "path": self.path,
+            "uid": self.uid,
+            "device": self.device,
+            "inode": self.inode,
+            "mtime": self.mtime,
+            "tier": self.tier,
+            "state": self.state,
+            "last_seen_at": isoformat(self.last_seen_at),
+        }
+
+
+@dataclass(frozen=True)
+class RuntimeBuild:
+    """一个可执行的引擎 build（runtime_builds）。
+
+    与 ``engines`` 的区别是刻意的：build 是**文件**，engines 是**进程**。同一个
+    build 可以起多个服务；一个服务也可能在重启前换了 build。``fingerprint``
+    标识二进制身份（inode + mtime + 版本），``flags`` / ``formats`` 是
+    ``--help`` 解析的结果，供推荐参数时求交。
+    """
+
+    id: str
+    owner_principal: str
+    owner_uid: int
+    framework: str
+    binary_path: str
+    version: str | None = None
+    git_commit: str | None = None
+    fingerprint: str = ""
+    #: 该 build 实际支持的参数：``{"--ctx-size": {"type": "int", "default": 4096}}``。
+    flags: dict = field(default_factory=dict)
+    #: 能加载的模型格式：``("gguf",)`` / ``("hf",)`` / ``("ollama",)``。
+    formats: tuple[str, ...] = ()
+    state: str = RUNTIME_BUILD_PRESENT
+    last_seen_at: datetime | None = None
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "owner": self.owner_principal,
+            "owner_uid": self.owner_uid,
+            "framework": self.framework,
+            "binary_path": self.binary_path,
+            "version": self.version,
+            "git_commit": self.git_commit,
+            "fingerprint": self.fingerprint,
+            "flags": dict(self.flags),
+            "formats": list(self.formats),
+            "state": self.state,
+            "last_seen_at": isoformat(self.last_seen_at),
+        }
+
+
+@dataclass(frozen=True)
+class AgentTask:
+    """派给某个用户代理去做的一件事（agent_tasks）。
+
+    任务表是**按 uid 分桶**的，因为代理只以本人身份运行：守护进程永远不会
+    替一个 uid 领另一个 uid 的任务。``queued`` → ``running`` 的迁移必须原子，
+    否则两个轮询会把同一条 ``start`` 执行两次（见 ``Store.claim_task``）。
+    """
+
+    id: str
+    uid: int
+    kind: str
+    payload: dict = field(default_factory=dict)
+    requested_by: str = ""
+    created_at: datetime | None = None
+    state: str = AGENT_TASK_QUEUED
+    result: dict | None = None
+    updated_at: datetime | None = None
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "uid": self.uid,
+            "kind": self.kind,
+            "payload": dict(self.payload),
+            "requested_by": self.requested_by,
+            "created_at": isoformat(self.created_at),
+            "state": self.state,
+            "result": dict(self.result) if self.result is not None else None,
+            "updated_at": isoformat(self.updated_at),
         }
 
 
