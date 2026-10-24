@@ -16,15 +16,21 @@ from __future__ import annotations
 
 from datetime import datetime
 from hashlib import sha256
+import json
 
+from .errors import Conflict
+from .health import unknown
 from .ingest import route_name_for
 from .lab_settings import needs_route
 from .models import (
     ENGINE_MODE_USER,
     ENGINE_RUNTIME_ATTACHED,
     ENGINE_RUNTIME_OFFLINE,
+    MAX_NAME_LENGTH,
+    MODEL_REGISTERED,
     SOURCE_AUTO,
     Engine,
+    Model,
     isoformat,
 )
 from .store import Store
@@ -83,6 +89,109 @@ def _unique_name(store: Store, principal: str, wanted: str, *, port: int) -> str
     return candidate
 
 
+def _new_model_id() -> str:
+    """模型 id 与手工登记同形（``mdl_<16 hex>``）。
+
+    延迟导入是因为 ``registry`` 是本服务最重的一个模块，而本模块要被发现循环
+    反复调用；两边没有循环依赖（``registry`` 不导入本模块），只是没必要每次
+    启动都为了一个格式字符串多拉一遍。
+    """
+
+    from .registry import new_id
+
+    return new_id("mdl")
+
+
+def _auto_model_name(serving_id: str) -> str:
+    """把 ``/v1/models`` 报的 id 变成合法的 Registry 名称。
+
+    服务端报的通常是 ``Qwen/Qwen3-4B``，而 Registry 的名称**不能**含路径分隔符
+    （名称会进 URL 与路由配置）。斜杠换成连字符，控制字符直接丢掉，其余原样
+    保留——自动起的名字也要认得出来是哪个模型。
+    """
+
+    cleaned = "".join(
+        "-" if ch in "/\\" else ch
+        for ch in serving_id
+        if ord(ch) >= 0x20 and ord(ch) != 0x7F
+    )
+    return cleaned.strip().strip("-._")[:MAX_NAME_LENGTH]
+
+
+AUTO_MODEL_HEALTH = (
+    "model id observed in the engine's /v1/models response; "
+    "the weights file is not located by discovery"
+)
+
+
+def adopt_models(
+    store: Store,
+    *,
+    principal: str,
+    uid: int,
+    serving_ids: tuple[str, ...],
+    now: datetime,
+) -> dict[str, str]:
+    """把引擎自报的模型名落成 ``models`` 行，返回 ``{服务端 id: 账本行 id}``。
+
+    观测到的只有**名字**：引擎说它在服务 ``Qwen3-4B``，这足以说明「这个模型
+    在这台机器上跑着」，但不足以说明权重文件在哪、是什么格式。所以这些行的
+    ``weight_path`` / ``format`` 留空而不是猜——猜错的路径比空着更坏，它会让
+    别人以为这个引用被核对过。
+
+    同一个 owner 下同名模型只建一行：两个端口都在服务 ``Qwen3-4B`` 是常态，
+    账本里因此出现两条一模一样的模型反而是噪音。已存在的手工登记行同样被复用，
+    不会被自动发现改写——自动发现只**补空**，不**覆盖**。
+    """
+
+    adopted: dict[str, str] = {}
+    for serving_id in serving_ids:
+        if not isinstance(serving_id, str):
+            continue
+        name = _auto_model_name(serving_id)
+        if not name:
+            continue
+        existing = store.model_by_owner_name(principal, name)
+        if existing is not None:
+            adopted[serving_id] = existing.id
+            continue
+        model = Model(
+            id=_new_model_id(),
+            owner_principal=principal,
+            owner_uid=int(uid),
+            name=name,
+            weight_path=None,
+            weight_path_sha256=None,
+            format=None,
+            parameter_count=None,
+            status=MODEL_REGISTERED,
+            health=unknown(AUTO_MODEL_HEALTH),
+            source=SOURCE_AUTO,
+            created_at=now,
+            updated_at=now,
+            last_seen_at=now,
+        )
+        fingerprint = sha256(
+            json.dumps(
+                {"kind": "model", "name": name, "source": SOURCE_AUTO},
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()[:32]
+        try:
+            store.insert_model(model, idempotency_key=None, fingerprint=fingerprint)
+        except Conflict:
+            # 并发接入（两个引擎同一轮报告同一个模型）会撞唯一索引。撞了就说明
+            # 别人刚建好这一行，重新读回来即是我们要的结果，不是错误。
+            raced = store.model_by_owner_name(principal, name)
+            if raced is None:
+                raise
+            adopted[serving_id] = raced.id
+            continue
+        adopted[serving_id] = model.id
+    return adopted
+
+
 def attach_observed(
     store: Store,
     *,
@@ -107,6 +216,11 @@ def attach_observed(
         # 快照：默认可见性在接入时是什么，这个服务就按什么处理。
         "visibility": visibility,
     }
+    # 引擎自报的模型名同时落成 models 行：自动发现的是「引擎 + 模型」两样，
+    # 只记在 launch_json 里等于只有引擎被发现，模型仍然要人工登记一遍。
+    launch["model_rows"] = adopt_models(
+        store, principal=principal, uid=uid, serving_ids=model_ids, now=now
+    )
 
     existing = store.engine_by_id(engine_id)
     if existing is not None:

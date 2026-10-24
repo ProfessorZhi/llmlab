@@ -1073,6 +1073,16 @@ health 类路径（`/healthz` 等）**不足以**判定 `verified`：一个 200 
 的服务不占名字。定下来就不再变——守护进程重启、服务名字冲突都只影响之后接入的
 服务，与默认可见性同一条纪律。
 
+**自动接入同时登记模型。** 引擎在 `/v1/models` 里报出的每个模型名都会落成一行
+`models`（`source=auto`，owner 就是这个端口所属的 principal），引擎的
+`observed_models` 列出 `{serving_id, model_id}` 的对应关系。同一条纪律：只**补空**，
+不覆盖——已存在的手工登记行会被复用，它的 `weight_path` 不会被观测值抹掉；同名
+但不同 owner 的模型各自成行；同一 owner 下两个端口服务同名模型共用一行。
+
+这些行的 `weight_path` / `format` 是 `null`，不是猜出来的值：发现循环拿到的是
+**名字**，不是权重文件的位置。`Qwen/Qwen3-4B` 这类带斜杠的 id 会把 `/` 换成 `-`
+（Registry 名称不允许路径分隔符）。模型行不随引擎下线删除，理由与引擎行相同。
+
 自动接入的服务**目前不会**被发布到 Gateway 快照：`build_routing_snapshot` 要求
 engine 有 `secret_ref`，且路由挂在 Endpoint 上，而观测到的服务既没有上游密钥配置、
 也还没有 Model / Deployment / Endpoint 链。快照的 `excluded` 会如实列出原因。

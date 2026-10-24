@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 import re
 import tempfile
@@ -20,7 +21,10 @@ from backend.registry.lab_settings import ALL, PRIVATE, set_default_visibility
 from backend.registry.models import (
     ENGINE_RUNTIME_ATTACHED,
     ENGINE_RUNTIME_OFFLINE,
+    MODEL_REGISTERED,
     SOURCE_AUTO,
+    SOURCE_CLIENT_REGISTERED,
+    Model,
 )
 from backend.registry.observed_services import (
     auto_engine_id,
@@ -331,6 +335,116 @@ class BudgetTests(RunnerTestCase):
         self.assertEqual(round_result.of_kind("drop"), [])
         self.assertTrue(all(s.probe_failures == 0 for s in self.runner.tracked.values()))
         self.assertEqual(observed_engines(self.store), [])
+
+
+class AutoModelTests(RunnerTestCase):
+    """自动发现的是「引擎 + 模型」两样：模型也要进账本，不能只留在 launch_json 里。"""
+
+    def models_of(self, principal: str = "alice"):
+        return [m for m in self.store.list_models() if m.owner_principal == principal]
+
+    def test_an_attached_engine_registers_the_models_it_reports(self):
+        self.serve(models=("qwen3-4b", "qwen3-4b-embed"))
+
+        self.runner.tick()
+
+        rows = self.models_of()
+        self.assertEqual(sorted(row.name for row in rows), ["qwen3-4b", "qwen3-4b-embed"])
+        for row in rows:
+            self.assertEqual(row.source, SOURCE_AUTO)
+            self.assertEqual(row.owner_uid, ALICE_UID)
+            # 观测到名字 ≠ 观测到权重：路径必须留空，猜出来的路径比空着更坏。
+            self.assertIsNone(row.weight_path)
+            self.assertIsNone(row.format)
+
+    def test_the_engine_payload_links_its_models_back_to_the_ledger_rows(self):
+        self.serve(models=("qwen3-4b",))
+
+        self.runner.tick()
+
+        engine = self.engine()
+        model = self.models_of()[0]
+        self.assertEqual(engine.launch["model_rows"], {"qwen3-4b": model.id})
+
+    def test_a_restart_does_not_duplicate_the_model_rows(self):
+        self.serve()
+        self.runner.tick()
+        first = [row.id for row in self.models_of()]
+
+        self.runner.tick()
+        self.runner.tracked.clear()  # 守护进程重启：tracked 空了，会再 ATTACH 一次
+        self.runner.tick()
+
+        self.assertEqual([row.id for row in self.models_of()], first)
+
+    def test_two_ports_serving_the_same_model_share_one_row(self):
+        self.serve(port=8013, models=("qwen3-4b",))
+        self.serve(port=8014, models=("qwen3-4b",))
+
+        self.runner.tick()
+
+        self.assertEqual(len(self.models_of()), 1)
+        self.assertEqual(
+            len({row.id for row in self.models_of()}), 1, "同一 owner 下的同名模型只该有一行"
+        )
+
+    def test_an_owner_prefixed_serving_id_becomes_a_legal_name(self):
+        """``Qwen/Qwen3-4B`` 含斜杠，而 Registry 名称不允许路径分隔符。"""
+
+        self.serve(models=("Qwen/Qwen3-4B",))
+
+        self.runner.tick()
+
+        names = [row.name for row in self.models_of()]
+        self.assertEqual(names, ["Qwen-Qwen3-4B"])
+        self.assertNotIn("/", names[0])
+
+    def test_an_existing_manual_model_is_reused_and_never_rewritten(self):
+        """自动发现只补空、不覆盖：手工登记的权重路径不能被观测值抹掉。"""
+
+        now = datetime.now(timezone.utc)
+        self.store.insert_model(
+            Model(
+                id="mdl_manual0000000000",
+                owner_principal="alice",
+                owner_uid=ALICE_UID,
+                name="qwen3-4b",
+                weight_path="/srv/models/qwen3-4b",
+                weight_path_sha256=None,
+                format="hf",
+                parameter_count=None,
+                status=MODEL_REGISTERED,
+                health={},
+                source=SOURCE_CLIENT_REGISTERED,
+                created_at=now,
+                updated_at=now,
+            ),
+            idempotency_key=None,
+            fingerprint="manual0000000000000000000000000",
+        )
+        self.serve(models=("qwen3-4b",))
+
+        self.runner.tick()
+
+        rows = self.models_of()
+        self.assertEqual(len(rows), 1, "不得为同名模型再建一行")
+        self.assertEqual(rows[0].id, "mdl_manual0000000000")
+        self.assertEqual(rows[0].weight_path, "/srv/models/qwen3-4b")
+        self.assertEqual(
+            self.engine().launch["model_rows"], {"qwen3-4b": "mdl_manual0000000000"}
+        )
+
+    def test_going_offline_does_not_delete_the_model_rows(self):
+        self.serve()
+        self.runner.tick()
+        before = [row.id for row in self.models_of()]
+
+        self.table.stop(8013)
+        for _ in range(2):
+            self.runner.tick()
+
+        self.assertEqual(self.engine().state, ENGINE_RUNTIME_OFFLINE)
+        self.assertEqual([row.id for row in self.models_of()], before)
 
 
 if __name__ == "__main__":

@@ -685,6 +685,15 @@ class RegistryService:
     def _engine_payload(self, engine: Engine, policy: AccessPolicy) -> dict:
         """Engine 的**唯一**视图。单个查与列表都用它 —— 免得同一个对象两种形状。"""
         data = dto.render_engine(engine, reveal_target=policy.can_see_engine_raw_target(engine))
+        # 自动接入的引擎会带着它自报的模型：不列出来，管理员看到的就是一个
+        # 「不知道在跑什么」的端口，还得自己去 /v1/models 查一遍。
+        launch = engine.launch if isinstance(engine.launch, dict) else {}
+        observed = launch.get("model_rows")
+        if isinstance(observed, dict) and observed:
+            data["observed_models"] = [
+                {"serving_id": str(serving), "model_id": str(row_id)}
+                for serving, row_id in observed.items()
+            ]
         block = data["verification"]
         # 服务级事实（不属于这一行，属于这个部署）。
         block["prober_attached"] = self.prober is not None
