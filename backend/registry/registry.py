@@ -36,6 +36,7 @@ from .errors import (
     OwnershipUnverified,
     ProtocolUnverified,
     RevisionConflict,
+    ServiceOffline,
     UpstreamUnavailable,
 )
 from .gateway import REASON_GATEWAY_NOT_ATTACHED
@@ -60,6 +61,7 @@ from .identity import (
     TrustedTokenIntrospector,
     is_account_principal,
 )
+from .ingest import OFFLINE_AFTER_MISSES
 from .models import (
     DEPLOYMENT_READY,
     DEPLOYMENT_REGISTERED,
@@ -71,6 +73,7 @@ from .models import (
     ENGINE_MODE_USER,
     ENGINE_MODES,
     ENGINE_REGISTERED,
+    ENGINE_RUNTIME_OFFLINE,
     ENGINE_UNAVAILABLE,
     ENGINE_VERIFIED,
     MODEL_REGISTERED,
@@ -520,6 +523,26 @@ class RegistryService:
                 f"endpoint {endpoint.id!r} is not in the currently publishable routing "
                 "snapshot; the Gateway was never told about this route"
             )
+
+    def _runtime_gate(self, policy: AccessPolicy, endpoint: Endpoint, *, action: str) -> None:
+        """后端被观测到**已经不在运行**时拒绝（§4.1：``offline`` ⇒ 503）。
+
+        与两根验证轴不同，这一条**永远**生效：不是可选的部署策略。一个明确看到了
+        「端口连续两轮不在」的部署，再去转发只会换回一个连接错误，而用户从
+        ``upstream_unavailable`` 里读不出「是我的进程没起来」。
+
+        没有观测源（``state is None``）时这里什么都不做：不知道不等于不在。
+        """
+
+        deployment = policy.require_deployment_read(endpoint.deployment_id)
+        engine = policy.require_engine_read(deployment.engine_id)
+        if engine.state != ENGINE_RUNTIME_OFFLINE:
+            return
+        raise ServiceOffline(
+            f"service_offline: engine {engine.id!r} has not been seen by the discovery "
+            f"loop for {OFFLINE_AFTER_MISSES} consecutive rounds; the route is retained, "
+            f"but {action} cannot reach a process that is not running"
+        )
 
     def _gate_endpoint_backend(self, policy: AccessPolicy, endpoint: Endpoint, *, action: str) -> None:
         """共享/调用一个 Endpoint 之前，对它的**后端引擎**过两根轴。
@@ -2102,6 +2125,9 @@ class RegistryService:
         # 得到 `ownership_unverified` / `protocol_unverified`，而不是被路由状态
         # 抢先报成一个看起来无关的错误。
         self._gate_endpoint_backend(policy, endpoint, action="invoke")
+        # 「验证过」也不等于「此刻在跑」：发现循环看到它连续两轮不在，就不要把
+        # 一次注定失败的调用送到 Gateway。路由保留，错误码说清楚是服务不在。
+        self._runtime_gate(policy, endpoint, action="invoke")
         # 可用 != 已路由：只有 Gateway 回读确认过的路由才可转发。
         # 这一步必须**先于**计量与任何 Gateway 调用 —— 被拒的调用不该被记成
         # 一次「已授权的调用」，更不该碰上游。

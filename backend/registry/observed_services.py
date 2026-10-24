@@ -17,6 +17,8 @@ from __future__ import annotations
 from datetime import datetime
 from hashlib import sha256
 
+from .ingest import route_name_for
+from .lab_settings import needs_route
 from .models import (
     ENGINE_MODE_USER,
     ENGINE_RUNTIME_ATTACHED,
@@ -114,6 +116,11 @@ def attach_observed(
         # 要防的「同时应用到已有服务」。原快照有值就沿用。
         previous = existing.launch if isinstance(existing.launch, dict) else {}
         launch["visibility"] = previous.get("visibility", launch["visibility"])
+        # 路由名同理：它是对外契约的一部分，重启不能改名。
+        if isinstance(previous.get("route"), dict):
+            launch["route"] = previous["route"]
+        else:
+            launch["route"] = _route_plan(store, engine_id, model_ids, framework, principal, port, launch["visibility"])
         store.update_engine_runtime(
             engine_id,
             state=ENGINE_RUNTIME_ATTACHED,
@@ -125,6 +132,7 @@ def attach_observed(
         return refreshed
 
     wanted = _wanted_name(model_ids, framework, port)
+    launch["route"] = _route_plan(store, engine_id, model_ids, framework, principal, port, launch["visibility"])
     name = _unique_name(store, principal, wanted, port=port)
     target = _target(port)
     fingerprint = sha256(f"{engine_id}|{target['url']}|{name}".encode()).hexdigest()
@@ -178,6 +186,41 @@ def mark_observed_offline(store: Store, *, uid: int, port: int, now: datetime) -
 
 def observed_engines(store: Store) -> list[Engine]:
     return store.engines_by_source(SOURCE_AUTO)
+
+
+def _route_plan(
+    store: Store,
+    engine_id: str,
+    model_ids: tuple[str, ...],
+    framework: str | None,
+    principal: str,
+    port: int,
+    visibility: str,
+) -> dict:
+    """§4.2 的路由名：模型 id 规范化，撞了就追加 ``@<用户名>``。
+
+    名字在**接入时**定下来并留在 ``launch_json`` 里，理由和可见性快照一样：
+    路由名是对外契约的一部分，同一个服务不能今天叫 ``qwen3-4b``、明天因为
+    别人先接入了就叫 ``qwen3-4b@alice``。
+
+    ``private`` 的服务不占这个名字——它不需要网关路由，占着反而会让后接入的
+    共享服务无谓地改名。
+    """
+
+    if not needs_route(visibility):
+        return {"name": None, "shared": False}
+
+    wanted = _wanted_name(model_ids, framework, port)
+    taken: set[str] = set()
+    for engine in observed_engines(store):
+        if engine.id == engine_id:
+            continue
+        launch = engine.launch if isinstance(engine.launch, dict) else {}
+        route = launch.get("route")
+        name = route.get("name") if isinstance(route, dict) else None
+        if isinstance(name, str) and name:
+            taken.add(name)
+    return {"name": route_name_for(wanted, principal, taken), "shared": True}
 
 
 def _wanted_name(model_ids: tuple[str, ...], framework: str | None, port: int) -> str:

@@ -124,6 +124,17 @@ class UpstreamUnavailable(RegistryError):
     contract_code = "registry.upstream_unavailable"
 
 
+class ServiceOffline(UpstreamUnavailable):
+    """服务被观测到**已经不在运行**，而不是「上游碰巧抖了一下」。
+
+    两者都是 503，但理由不同：``upstream_unavailable`` 说的是「转发失败/没接线」，
+    ``service_offline`` 说的是「发现循环连续两轮没看到这个端口」。用户看到前者会
+    去查网关，看到后者会去查自己的进程——分开是为了让他们查对地方。
+    """
+
+    contract_code = "registry.service_offline"
+
+
 class StorageError(RegistryError):
     """持久化层失败（迁移不匹配、约束冲突、数据库不可用）。
 
