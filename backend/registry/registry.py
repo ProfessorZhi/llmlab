@@ -956,15 +956,16 @@ class RegistryService:
                     model.owner_principal == requester.principal
                 )
         engines, engine_problem = self.discovery.engines(registered_targets=registered_targets)
-        models, missing_roots = self.discovery.models(registered_paths=registered_paths)
+        models, model_problems = self.discovery.models(registered_paths=registered_paths)
         problems = [engine_problem] if engine_problem else []
-        problems += [f"model_root_unavailable:{root}" for root in missing_roots]
+        problems += model_problems
         return self._envelope(
             {
                 "configured": True,
                 "engines": [item.to_dict() for item in engines],
                 "models": [item.to_dict() for item in models],
-                "model_roots": list(self.discovery.model_roots),
+                "model_roots": list(self.discovery.effective_model_roots()),
+                "model_roots_automatic": self.discovery.model_roots is None,
                 "allowed_ports": sorted(self.discovery.allowed_ports),
                 "problems": problems,
             },

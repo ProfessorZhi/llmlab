@@ -197,7 +197,9 @@ function discoveryPanel(ctx, kind) {
     const items = st.data?.[kind] ?? [];
     if (!items.length) return quietEmpty('ready', kind === 'engines'
       ? { title: '没有发现正在监听的推理服务', body: `允许的端口：${(st.data?.allowed_ports ?? []).join('、') || '—'}。启动服务后再扫描一次。` }
-      : { title: '没有发现模型', body: (st.data?.model_roots ?? []).length ? `已查找：${st.data.model_roots.join('、')}` : '管理员尚未配置可查找的模型目录。' });
+      : { title: '没有发现模型', body: (st.data?.model_roots ?? []).length
+        ? `已查找${st.data?.model_roots_automatic ? '（自动查找的默认位置）' : ''}：${st.data.model_roots.join('、')}`
+        : '管理员关闭了模型目录查找（--no-model-scan）。' });
     const head = kind === 'engines' ? ['端口', '运行用户', '推理框架', '模型', ''] : ['路径', '格式', '架构', '大小', ''];
     return h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
       h('thead', {}, h('tr', {}, head.map((t) => h('th', { scope: 'col' }, t)))),

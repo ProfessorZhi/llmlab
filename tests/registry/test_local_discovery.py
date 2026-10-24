@@ -12,8 +12,15 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from backend.registry.local_discovery import LocalDiscovery, parse_model_ids, suggest_name
+from backend.registry import local_discovery as ld_mod
+from backend.registry.local_discovery import (
+    DEFAULT_MODEL_ROOTS,
+    LocalDiscovery,
+    parse_model_ids,
+    suggest_name,
+)
 from backend.registry.ownership import ProcNetListenerTable
 
 # 8000 (0x1F40) uid 1001 on 127.0.0.1; 8001 (0x1F41) uid 1002 on 0.0.0.0;
@@ -196,6 +203,62 @@ class ModelDiscoveryTests(unittest.TestCase):
         found, missing = self.discovery(self.root / "nope").models(registered_paths={})
         self.assertEqual(found, [])
         self.assertEqual(len(missing), 1)
+        self.assertTrue(missing[0].startswith("model_root_unavailable:"))
+
+
+class AutomaticRootTests(unittest.TestCase):
+    """「自动发现」不能要求管理员先配一个目录——那就不叫自动了。"""
+
+    def bare(self, **kwargs):
+        return LocalDiscovery(
+            allowed_ports=ALLOWED,
+            table=ProcNetListenerTable.from_texts(tcp=""),
+            fetch=fake_fetch({}),
+            **kwargs,
+        )
+
+    def test_no_explicit_root_means_the_default_locations(self):
+        discovery = self.bare()
+
+        self.assertIsNone(discovery.model_roots)
+        self.assertEqual(
+            discovery.effective_model_roots(),
+            tuple(str(Path(root).expanduser()) for root in DEFAULT_MODEL_ROOTS),
+        )
+
+    def test_an_explicit_empty_tuple_means_do_not_scan(self):
+        found, problems = self.bare(model_roots=()).models(registered_paths={})
+
+        self.assertEqual(found, [])
+        self.assertEqual(problems, [])
+
+    def test_a_noisy_directory_is_not_walked_into(self):
+        """``node_modules`` 能一口吃掉条目预算，把真正的模型挡在后面。"""
+
+        root = Path(tempfile.mkdtemp(prefix="llm-lab-noise-"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        buried = root / "node_modules" / "pkg" / "model"
+        buried.mkdir(parents=True)
+        (buried / "config.json").write_text("{}")
+        (buried / "w.safetensors").write_bytes(b"x")
+
+        found, _ = self.bare(model_roots=(str(root),)).models(registered_paths={})
+
+        self.assertEqual(found, [])
+
+    def test_hitting_the_entry_budget_is_reported_not_silent(self):
+        """扫不完却不说话，页面就只剩「没有发现模型」，没人知道该查哪儿。"""
+
+        root = Path(tempfile.mkdtemp(prefix="llm-lab-trunc-"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        for index in range(10):
+            (root / f"f{index}.txt").write_text("x")
+
+        with mock.patch.object(ld_mod, "MAX_WALK_ENTRIES", 3):
+            found, problems = self.bare(model_roots=(str(root),)).models(registered_paths={})
+
+        self.assertEqual(found, [])
+        self.assertEqual(problems, [f"model_walk_truncated:{root}"])
 
 
 class HelperTests(unittest.TestCase):

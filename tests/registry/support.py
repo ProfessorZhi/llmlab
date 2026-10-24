@@ -190,6 +190,7 @@ class Harness:
         prober: object | None = _UNSET,
         protocol_prober: object | None = _UNSET,
         ownership_prover: object | None = _UNSET,
+        discovery: object | None = _UNSET,
         gateway: object | None = None,
         router: object | None = None,
         config: RegistryConfig | None = None,
@@ -224,6 +225,8 @@ class Harness:
         self.ownership_prover = (
             default_ownership_prover() if ownership_prover is _UNSET else ownership_prover
         )
+        # 同上：``None`` = 本部署没有装配发现器（``configured: false``），是个有意义的状态。
+        self.discovery = None if discovery is _UNSET else discovery
         self.gateway = MockGatewayAdapter() if gateway is None else gateway
         #: ``None`` 让服务用缺省的 ``DetachedRouterAdapter``（不写任何 Gateway）。
         self.router = router
@@ -237,6 +240,7 @@ class Harness:
             gateway=self.gateway,
             protocol_prober=self.protocol_prober,
             ownership_prover=self.ownership_prover,
+            discovery=self.discovery,
             router=router,
         )
         self.app = create_app(self.service)

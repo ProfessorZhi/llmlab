@@ -973,7 +973,7 @@ helper（预检能过的目标，登记的目标校验也能过）。请求：
 只读候选清单（`backend/registry/local_discovery.py`），CLI `llmlab discover` 与网页「推理服务 / 模型库 → 本机发现」共用。需要 `registry:read`。
 
 * **推理服务**：`/proc/net/tcp(6)` 中在回环或通配地址上 LISTEN、且端口在 `allowed_ports` 内的 socket；每个端口只读 GET `/v1/models`（模型 id）与框架指纹（`/version` 带 `version` ⇒ vllm，`/get_server_info` 带 `tp_size`+`model_path` ⇒ sglang）。监听 uid 反查用户名作为 `run_as_user`。
-* **模型**：只在部署配置的 `model_roots` 里找；深度 ≤ 4、条目 ≤ 20000、候选 ≤ 200；不跟随软链出根；识别 `config.json`+权重文件的 HF 目录与 `.gguf` 文件；只读 `config.json`（≤ 256 KiB），权重只看名字与大小。
+* **模型**：配置了 `--model-root` 就在这些根目录里找；**没有配置时**自动查 `/data`、`/srv`、`$HOME` 这三个约定位置（`DEFAULT_MODEL_ROOTS`），`--no-model-scan` 可关闭。这是「自动」而不是「全盘」：全盘要跨 TB 级、跨用户目录、可能落在网络存储上。深度 ≤ 4、条目 ≤ 200000、候选 ≤ 200；不跟随软链出根；`node_modules` / `site-packages` / `venv` 之类的噪声目录不进去（它们能一口吃掉条目预算，把真正的模型挡在后面）；识别 `config.json`+权重文件的 HF 目录与 `.gguf` 文件，切分的 `…-00001-of-00002` 归成一个模型，`mmproj-*.gguf` 不算模型；只读 `config.json`（≤ 256 KiB），权重只看名字与大小。扫描被上限截断时 `problems` 里会出现 `model_walk_truncated:<root>`——**不静默截断**。
 * 每个候选带 `registered` / `registered_by_me`；**没有写入路径**。登记仍走 `POST /engines` / `POST /models`（`llmlab discover --register PORT` / `--register-model PATH` 只是把候选填进这两个调用）。
 * 本部署未装配发现器时返回 `configured: false`（不是空清单，也不是错误）。
 

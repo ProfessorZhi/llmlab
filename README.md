@@ -60,7 +60,7 @@ LLMLAB_DEV_API=http://127.0.0.1:8790 npm run serve
 # http://127.0.0.1:8123/console/ — 以 admin 登录后在「用户与权限」创建平台账户；
 # 成员用自己的账户登录后，在「推理服务 → 登记推理服务」登记本机 127.0.0.1 上的推理引擎，
 # 系统会记录它由哪个 Linux 用户运行（--observe-local-engines 只读本机端口表与 /v1/models）。
-# 加 --model-root DIR（可重复）后，「模型库 → 本机发现」会在这些目录里找 HF 模型目录与 GGUF 文件。
+# 「模型库 → 本机发现」默认自动查 /data、/srv、$HOME（不是全盘）；--model-root DIR（可重复）改成只查指定目录，--no-model-scan 关闭。
 ```
 
 模型调用走控制台自带的网关（同源 `/v1`，OpenAI 兼容）：在「网关 → 模型路由」把自己的推理服务发布成模型名，在「网关 → API 密钥」建自己的 `sk-lab-…` 密钥。引擎自身的密钥用 `--engine-secret-ref ENGINE=FILE:VAR` 只留在服务端。日志以密钥为单位，正文默认不记录。详见 [docs/gateway.md](docs/gateway.md)。

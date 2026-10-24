@@ -44,7 +44,7 @@ from ..registry.api import RegistryApplication
 from ..runtime.params import ParamStore
 from ..registry.identity import Principal, PrincipalDirectory, TrustedTokenIntrospector
 from ..registry.health import LoopbackHttpProber, LoopbackProtocolProber, StaticProber
-from ..registry.local_discovery import LocalDiscovery
+from ..registry.local_discovery import DEFAULT_MODEL_ROOTS, LocalDiscovery
 from ..registry.ownership import EMPTY_POLICY, ProcNetOwnershipProver, load_operator_policy
 from ..registry.registry import RegistryConfig, RegistryService
 from ..registry.store import Store
@@ -141,7 +141,8 @@ def build_application(
     trusted_authorities: tuple[str, ...] = (),
     observe_local_engines: bool = False,
     live_host_summary: bool = False,
-    model_roots: tuple[str, ...] = (),
+    #: None = 用自动默认位置；() = 不扫（缺省：库的默认值不该去读真实主机）。
+    model_roots: tuple[str, ...] | None = (),
     engine_secret_refs: tuple[str, ...] = (),
     operator_policy: object | None = None,
     host_users: tuple[tuple[str, int], ...] = HOST_USERS,
@@ -204,7 +205,9 @@ def build_application(
             "ownership_prover": ProcNetOwnershipProver(),
             # 发现与登记共用同一份端口允许列表：发现不到登记不了的东西。
             "discovery": LocalDiscovery(
-                allowed_ports=config.allowed_ports, model_roots=tuple(model_roots)
+                allowed_ports=config.allowed_ports,
+                # None = 没点名就按 DEFAULT_MODEL_ROOTS 自动找；() = 明确不找。
+                model_roots=None if model_roots is None else tuple(model_roots),
             ),
         }
     service = RegistryService(
@@ -659,8 +662,16 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="DIR",
         help=(
             "a directory the model discovery may look in (repeatable; only with "
-            "--observe-local-engines). Only config.json and file names/sizes are read"
+            "--observe-local-engines). Only config.json and file names/sizes are read. "
+            "Given at least once, these replace the automatic defaults ("
+            + ", ".join(DEFAULT_MODEL_ROOTS)
+            + ")"
         ),
+    )
+    parser.add_argument(
+        "--no-model-scan",
+        action="store_true",
+        help="关闭模型目录的自动查找（推理服务的发现不受影响）",
     )
     parser.add_argument(
         "--engine-secret-ref",
@@ -765,7 +776,7 @@ def main(argv: list[str] | None = None) -> int:
         trusted_authorities=tuple(args.trusted_authority),
         observe_local_engines=args.observe_local_engines,
         live_host_summary=args.live_host_summary,
-        model_roots=tuple(args.model_root),
+        model_roots=None if args.no_model_scan else (tuple(args.model_root) or None),
         engine_secret_refs=tuple(args.engine_secret_ref),
         operator_policy=operator_policy,
         host_users=host_users,

@@ -10,10 +10,12 @@
   Registry 允许列表内的 socket（全员可读，不读任何 ``/proc/<pid>``）。对每个端口
   只做两次短超时的只读 GET：``/v1/models``（拿模型 id）与一个框架指纹路径。
   监听 uid 反查用户名，作为「运行用户」展示。
-* **模型目录**：只在管理员配置的根目录（``--model-root``）里找，深度与条目数都有
-  上限，不跟随软链出根。识别 Hugging Face 目录（``config.json`` + 权重文件）与
-  GGUF 文件；只读 ``config.json``（大小有上限），权重文件**只看名字与大小**，
-  从不打开。
+* **模型目录**：在管理员配置的根目录（``--model-root``）里找；没有配置时用
+  :data:`DEFAULT_MODEL_ROOTS` 这几个约定位置（``/data``、``/srv``、``$HOME``），
+  不是全盘扫描。深度与条目数都有上限，不跟随软链出根，噪声目录
+  （``node_modules`` 之类）不进去。识别 Hugging Face 目录（``config.json`` + 权重
+  文件）与 GGUF 文件（切分的分片归成一个模型）；只读 ``config.json``（大小有上限），
+  权重文件**只看名字与大小**，从不打开。
 
 不会做的事：扫描全盘、探测非回环地址、探测允许列表外的端口、读取别人的进程、
 自动登记或自动共享。
@@ -43,9 +45,39 @@ MAX_MODEL_IDS = 20
 MAX_CONFIG_BYTES = 256 * 1024
 MAX_MODEL_CANDIDATES = 200
 MAX_WALK_DEPTH = 4
-MAX_WALK_ENTRIES = 20000
+#: 条目预算。实测（本机、已剪掉 node_modules 等噪声目录）：整个 ``$HOME``
+#: 深度 4 是 17 万条目、0.26 秒。两万太小——它会在一个无关的项目目录里用完，
+#: 于是一个真实存在的模型「没有被发现」。
+MAX_WALK_ENTRIES = 200_000
 
 WEIGHT_SUFFIXES = (".safetensors", ".bin", ".pt", ".pth")
+
+#: 没有显式配置 ``--model-root`` 时自动查找的位置。
+#:
+#: 「自动」不等于「全盘」：全盘要跨 1.9 TiB、跨用户目录、可能落在网络存储上，
+#: 一次请求要跑几分钟，还会把与模型无关的东西全读一遍。这里只覆盖模型通常被放在
+#: 哪儿的约定位置，管理员可以用 ``--model-root`` 换成别处。
+DEFAULT_MODEL_ROOTS = ("/data", "/srv", "~")
+
+#: 这些目录名下面不可能有模型，却能让有界遍历的条目预算瞬间用光
+#: （一个 ``node_modules`` 就能吃掉两万个条目，``$HOME`` 于是「什么都没找到」）。
+#: 跳过它们不是排除用户文件，是把预算花在可能的地方。
+NOISY_DIR_NAMES = frozenset(
+    {
+        "node_modules",
+        "site-packages",
+        "dist-packages",
+        "__pycache__",
+        ".git",
+        ".svn",
+        ".hg",
+        ".npm",
+        ".cache",
+        ".mozilla",
+        ".venv",
+        "venv",
+    }
+)
 
 #: 切分 GGUF 的命名约定：``<name>-00001-of-00002.gguf``。
 _SHARD = re.compile(r"^(?P<stem>.+)-(?P<index>\d{5})-of-(?P<total>\d{5})$", re.IGNORECASE)
@@ -184,7 +216,8 @@ class LocalDiscovery:
     """可注入的本机发现器。生产缺省读真表、连真回环；测试注入 fixture。"""
 
     allowed_ports: Iterable[int]
-    model_roots: tuple[str, ...] = ()
+    #: ``None`` = 用 :data:`DEFAULT_MODEL_ROOTS` 自动查找；空元组 = 明确不找。
+    model_roots: tuple[str, ...] | None = None
     table: ProcNetListenerTable = field(default_factory=ProcNetListenerTable)
     fetch: Fetch = field(default_factory=loopback_fetch)
     uid_namer: Callable[[int], str | None] = linux_user_for_uid
@@ -238,23 +271,37 @@ class LocalDiscovery:
 
     # --- 模型目录 ------------------------------------------------------------
 
+    def effective_model_roots(self) -> tuple[str, ...]:
+        """实际要查的根目录；页面上的「已查找：…」就是它。"""
+
+        if self.model_roots is not None:
+            return self.model_roots
+        return tuple(str(Path(root).expanduser()) for root in DEFAULT_MODEL_ROOTS)
+
     def models(self, *, registered_paths: dict[str, bool]) -> tuple[list[ModelCandidate], list[str]]:
-        """``registered_paths``：``权重路径 -> 是否本人登记``，由 Registry 给。"""
+        """``registered_paths``：``权重路径 -> 是否本人登记``，由 Registry 给。
+
+        第二个返回值是**问题清单**（完整的 ``problem`` 串），不是根目录清单：
+        「这个目录不存在」和「这个目录有，但条目预算在找到之前就用完了」是两件
+        不同的事，都出现在页面上，但排查方向不一样。
+        """
         found: list[ModelCandidate] = []
-        unavailable: list[str] = []
-        for root in self.model_roots:
+        problems: list[str] = []
+        for root in self.effective_model_roots():
             base = Path(root)
             try:
                 resolved_root = base.resolve(strict=True)
             except (OSError, RuntimeError):
-                unavailable.append(root)
+                problems.append(f"model_root_unavailable:{root}")
                 continue
             if not resolved_root.is_dir():
-                unavailable.append(root)
+                problems.append(f"model_root_unavailable:{root}")
                 continue
-            for candidate in _walk_models(resolved_root):
+            flags: dict[str, bool] = {}
+            for candidate in _walk_models(resolved_root, flags=flags):
                 if len(found) >= MAX_MODEL_CANDIDATES:
-                    return found, unavailable
+                    problems.append(f"model_candidates_capped:{MAX_MODEL_CANDIDATES}")
+                    return found, problems
                 # 分片模型有一组路径；只要其中任意一片被登记过，就算这个模型已登记。
                 paths = candidate.get("paths") or [candidate["path"]]
                 found.append(
@@ -274,15 +321,21 @@ class LocalDiscovery:
                         or "model",
                     )
                 )
-        return found, unavailable
+            if flags.get("truncated"):
+                problems.append(f"model_walk_truncated:{root}")
+        return found, problems
 
 
 def _serves_loopback(ip: str) -> bool:
     return ip in ("127.0.0.1", "0.0.0.0", "::", "::1", "::ffff:127.0.0.1") or ip.startswith("127.")
 
 
-def _walk_models(root: Path) -> Iterable[dict]:
-    """有界遍历：不跟随软链，不出根，深度与条目数有上限。"""
+def _walk_models(root: Path, flags: dict[str, bool] | None = None) -> Iterable[dict]:
+    """有界遍历：不跟随软链，不出根，深度与条目数有上限。
+
+    ``flags["truncated"]`` 在条目预算用完时置位：**静默**截断是最坏的一种失败——
+    页面上只会显示「没有发现模型」，而管理员无从知道是磁盘上没有、还是没扫到。
+    """
     seen = 0
     stack: list[tuple[Path, int]] = [(root, 0)]
     while stack:
@@ -296,6 +349,8 @@ def _walk_models(root: Path) -> Iterable[dict]:
         for entry in entries:
             seen += 1
             if seen > MAX_WALK_ENTRIES:
+                if flags is not None:
+                    flags["truncated"] = True
                 return
             if entry.name.startswith("."):
                 continue
@@ -303,6 +358,8 @@ def _walk_models(root: Path) -> Iterable[dict]:
                 if entry.is_symlink():
                     continue
                 if entry.is_dir(follow_symlinks=False):
+                    if entry.name in NOISY_DIR_NAMES:
+                        continue
                     subdirs.append(Path(entry.path))
                 elif entry.is_file(follow_symlinks=False):
                     files[entry.name] = entry.stat(follow_symlinks=False).st_size
