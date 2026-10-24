@@ -31,6 +31,7 @@ from backend.registry.ownership import ListeningSocket
 from backend.registry.store import Store
 
 ALICE_UID = 1001
+BOB_UID = 1002
 
 
 class FakeTable:
@@ -71,7 +72,7 @@ class RunnerTestCase(unittest.TestCase):
         self.addCleanup(self.store.close)
 
         self.directory = PrincipalDirectory(
-            [Principal("alice", "alice", ALICE_UID), Principal("bob", "bob", 1002)]
+            [Principal("alice", "alice", ALICE_UID), Principal("bob", "bob", BOB_UID)]
         )
         self.table = FakeTable()
         self.fetch = FakeFetch()
@@ -219,6 +220,54 @@ class LifecycleTests(RunnerTestCase):
         self.assertTrue(round_result.of_kind("attach"))
         self.assertEqual(self.engine().launch["visibility"], PRIVATE)
         self.assertEqual(len(observed_engines(self.store)), 1)
+
+
+class RouteNameTests(RunnerTestCase):
+    """§4.2：路由名 = 模型 id 规范化，冲突时追加 ``@<用户名>``。"""
+
+    def test_a_private_service_does_not_take_a_route_name(self):
+        self.serve()
+        self.runner.tick()
+
+        route = self.engine().launch["route"]
+        self.assertIsNone(route["name"], "private 的服务不需要网关路由")
+        self.assertFalse(route["shared"])
+
+    def test_a_shared_service_gets_the_normalized_model_id(self):
+        set_default_visibility(self.store, ALL, updated_by="admin")
+        self.serve()
+
+        self.runner.tick()
+
+        route = self.engine().launch["route"]
+        self.assertEqual(route["name"], "qwen3-4b")
+        self.assertTrue(route["shared"])
+
+    def test_two_users_serving_the_same_model_get_distinct_route_names(self):
+        set_default_visibility(self.store, ALL, updated_by="admin")
+        self.serve(port=8013, uid=ALICE_UID)
+        self.serve(port=8014, uid=BOB_UID)
+
+        self.runner.tick()
+
+        self.assertEqual(self.engine(8013).launch["route"]["name"], "qwen3-4b")
+        self.assertEqual(self.engine(8014, BOB_UID).launch["route"]["name"], "qwen3-4b@bob")
+
+    def test_a_restart_does_not_rename_an_existing_route(self):
+        set_default_visibility(self.store, ALL, updated_by="admin")
+        self.serve(port=8013)
+        self.runner.tick()
+        first = self.engine().launch["route"]["name"]
+        # 换一个占用了同一个名字的服务，再重启守护进程
+        self.serve(port=8014, uid=BOB_UID)
+
+        restarted = IngestRunner(
+            store=self.store, directory=self.directory, table=self.table, fetch=self.fetch
+        )
+        restarted.tick()
+
+        self.assertEqual(first, "qwen3-4b")
+        self.assertEqual(self.engine(8013).launch["route"]["name"], "qwen3-4b")
 
 
 class CooldownTests(RunnerTestCase):

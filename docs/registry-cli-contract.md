@@ -312,6 +312,7 @@ Endpoint**。它**不** `stat`、**不**打开、**不**哈希内容、**不** `
 | `registry.unsupported_media_type` | 415 |
 | `registry.error` / `registry.internal_error` / `registry.storage_error` | 500 |
 | `registry.upstream_unavailable` | 503 |
+| `registry.service_offline` | 503 |
 
 ### 7.4 为什么传输层也用 `registry.*` 命名空间
 
@@ -1058,8 +1059,23 @@ health 类路径（`/healthz` 等）**不足以**判定 `verified`：一个 200 
   `seen`，未启用自动接入或还没扫到时为 `null`。
 
 `state=offline` **不删除**登记：服务停了两轮之后行还在，只是调用返回
-`service_offline`（503）；服务回来时复用同一行、同一路由。这是「停掉」与
+`registry.service_offline`（503）；服务回来时复用同一行、同一路由。这是「停掉」与
 「丢弃」的区别——丢弃只发生在从未识别成功的端口上。
+
+`service_offline` 与 `upstream_unavailable` 都是 503，但读的人要做的事不同：
+前者是「你的进程没在跑，去看你自己的服务」，后者是「转发失败或本部署没接网关」。
+这一条判断**永远**生效（不是可选的部署策略），并且在任何 Gateway 调用之前完成 ——
+一个注定失败的转发不该被记成一次已授权的调用。`state` 为 `null`（没有观测源）时
+不做这一判断：不知道不等于不在。
+
+**自动接入的路由名**（§4.2）在接入那一刻定下来，存在 `launch_json` 里：模型 id
+规范化（`[A-Za-z0-9._:/-]`），与已占用的名字冲突时追加 `@<用户名>`。`private`
+的服务不占名字。定下来就不再变——守护进程重启、服务名字冲突都只影响之后接入的
+服务，与默认可见性同一条纪律。
+
+自动接入的服务**目前不会**被发布到 Gateway 快照：`build_routing_snapshot` 要求
+engine 有 `secret_ref`，且路由挂在 Endpoint 上，而观测到的服务既没有上游密钥配置、
+也还没有 Model / Deployment / Endpoint 链。快照的 `excluded` 会如实列出原因。
 
 真正的 start/stop/restart、CUDA 加载与 GPU 准入属于一个**独立的受限 owner-agent**，
 不在这条路径上（也超出了本仓库的部署边界：`docs/access-boundaries.md` §6

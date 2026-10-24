@@ -62,6 +62,8 @@ CONTRACT_STATUS: dict[str, int] = {
     "registry.unsupported_media_type": 415,
     "registry.internal_error": 500,
     "registry.upstream_unavailable": 503,
+    # 服务被观测到已经不在了。与上游失败同为 503，但理由不同（见 errors.ServiceOffline）。
+    "registry.service_offline": 503,
     "registry.storage_error": 500,
 }
 
