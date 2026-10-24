@@ -45,6 +45,7 @@ from ..runtime.params import ParamStore
 from ..registry.identity import Principal, PrincipalDirectory, TrustedTokenIntrospector
 from ..registry.health import LoopbackHttpProber, LoopbackProtocolProber, StaticProber
 from ..registry.local_discovery import DEFAULT_MODEL_ROOTS, LocalDiscovery
+from ..registry.urls import DEFAULT_ALLOWED_PORTS
 from ..registry.ownership import EMPTY_POLICY, ProcNetOwnershipProver, load_operator_policy
 from ..registry.registry import RegistryConfig, RegistryService
 from ..registry.store import Store
@@ -143,6 +144,8 @@ def build_application(
     live_host_summary: bool = False,
     #: None = 用自动默认位置；() = 不扫（缺省：库的默认值不该去读真实主机）。
     model_roots: tuple[str, ...] | None = (),
+    #: 追加到缺省允许列表的端口。推理服务只能被发现/登记在这些端口上。
+    allowed_ports: tuple[int, ...] = (),
     engine_secret_refs: tuple[str, ...] = (),
     operator_policy: object | None = None,
     host_users: tuple[tuple[str, int], ...] = HOST_USERS,
@@ -195,6 +198,8 @@ def build_application(
     config = RegistryConfig(
         mode=registry_mode,
         operator_policy=operator_policy or EMPTY_POLICY,
+        # 追加而不是替换：缺省那几个端口是约定好的推理端口，别因为多加了几个就丢掉。
+        allowed_ports=DEFAULT_ALLOWED_PORTS | frozenset(int(port) for port in allowed_ports),
     )
     local = {}
     if observe_local_engines:
@@ -669,6 +674,18 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--allowed-port",
+        action="append",
+        type=int,
+        default=[],
+        metavar="PORT",
+        help=(
+            "extra port the registry may discover and register engines on (repeatable). "
+            "Added to the built-in set (8000, 8001, 8081, 9000, 9001); ports outside the "
+            "allowlist can be neither discovered nor registered"
+        ),
+    )
+    parser.add_argument(
         "--no-model-scan",
         action="store_true",
         help="关闭模型目录的自动查找（推理服务的发现不受影响）",
@@ -777,6 +794,7 @@ def main(argv: list[str] | None = None) -> int:
         observe_local_engines=args.observe_local_engines,
         live_host_summary=args.live_host_summary,
         model_roots=None if args.no_model_scan else (tuple(args.model_root) or None),
+        allowed_ports=tuple(args.allowed_port),
         engine_secret_refs=tuple(args.engine_secret_ref),
         operator_policy=operator_policy,
         host_users=host_users,
