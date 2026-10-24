@@ -146,6 +146,52 @@ class ModelDiscoveryTests(unittest.TestCase):
         self.assertTrue(hf.registered_by_me)
         self.assertFalse(next(c for c in found if c.format == "gguf").registered)
 
+    def test_split_gguf_shards_are_one_model(self):
+        """``…-00001-of-00002`` 与 ``…-00002-of-00002`` 是一个模型的两片。
+
+        按片报会让人「登记」半个权重文件，界面还会显示成两个模型。
+        """
+
+        shard_dir = self.root / "split"
+        shard_dir.mkdir()
+        first = shard_dir / "big-q4-00001-of-00002.gguf"
+        second = shard_dir / "big-q4-00002-of-00002.gguf"
+        first.write_bytes(b"a" * 30)
+        second.write_bytes(b"b" * 70)
+
+        found, _ = self.discovery(self.root).models(registered_paths={})
+
+        split = [c for c in found if c.path.endswith(".gguf") and "big-q4" in c.path]
+        self.assertEqual([c.path for c in split], [str(first)])
+        self.assertEqual(split[0].size_bytes, 100, "大小应当是各片之和")
+        self.assertEqual(split[0].suggested_name, "big-q4")
+
+    def test_a_multimodal_projector_is_not_a_model(self):
+        shard_dir = self.root / "vision"
+        shard_dir.mkdir()
+        (shard_dir / "vision-q4-00001-of-00001.gguf").write_bytes(b"v" * 10)
+        (shard_dir / "mmproj-vision-f16.gguf").write_bytes(b"p" * 10)
+
+        found, _ = self.discovery(self.root).models(registered_paths={})
+
+        names = [c.suggested_name for c in found]
+        self.assertIn("vision-q4", names)
+        self.assertFalse(any("mmproj" in name for name in names), names)
+
+    def test_registering_one_shard_marks_the_whole_model(self):
+        shard_dir = self.root / "split2"
+        shard_dir.mkdir()
+        (shard_dir / "m-00001-of-00002.gguf").write_bytes(b"a")
+        (shard_dir / "m-00002-of-00002.gguf").write_bytes(b"b")
+
+        found, _ = self.discovery(self.root).models(
+            registered_paths={str(shard_dir / "m-00002-of-00002.gguf"): True}
+        )
+
+        model = next(c for c in found if c.suggested_name == "m")
+        self.assertTrue(model.registered)
+        self.assertTrue(model.registered_by_me)
+
     def test_a_missing_root_is_reported(self):
         found, missing = self.discovery(self.root / "nope").models(registered_paths={})
         self.assertEqual(found, [])

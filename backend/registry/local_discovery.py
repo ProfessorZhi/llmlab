@@ -46,6 +46,11 @@ MAX_WALK_DEPTH = 4
 MAX_WALK_ENTRIES = 20000
 
 WEIGHT_SUFFIXES = (".safetensors", ".bin", ".pt", ".pth")
+
+#: 切分 GGUF 的命名约定：``<name>-00001-of-00002.gguf``。
+_SHARD = re.compile(r"^(?P<stem>.+)-(?P<index>\d{5})-of-(?P<total>\d{5})$", re.IGNORECASE)
+#: 多模态投影文件的前缀：与模型一起用，但本身不是一个可加载的模型。
+MMPROJ_PREFIX = "mmproj"
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$")
 
 #: 框架指纹：(路径, 必须出现的字段, 框架名)。只读、小响应；拿不准就是 ``None``。
@@ -250,6 +255,8 @@ class LocalDiscovery:
             for candidate in _walk_models(resolved_root):
                 if len(found) >= MAX_MODEL_CANDIDATES:
                     return found, unavailable
+                # 分片模型有一组路径；只要其中任意一片被登记过，就算这个模型已登记。
+                paths = candidate.get("paths") or [candidate["path"]]
                 found.append(
                     ModelCandidate(
                         path=candidate["path"],
@@ -258,9 +265,13 @@ class LocalDiscovery:
                         size_bytes=candidate["size"],
                         architecture=candidate.get("architecture"),
                         model_type=candidate.get("model_type"),
-                        registered=candidate["path"] in registered_paths,
-                        registered_by_me=bool(registered_paths.get(candidate["path"])),
-                        suggested_name=suggest_name(Path(candidate["path"]).stem if candidate["format"] == "gguf" else candidate["path"]) or "model",
+                        registered=any(p in registered_paths for p in paths),
+                        registered_by_me=any(registered_paths.get(p) for p in paths),
+                        suggested_name=suggest_name(
+                            candidate.get("label")
+                            or (Path(candidate["path"]).stem if candidate["format"] == "gguf" else candidate["path"])
+                        )
+                        or "model",
                     )
                 )
         return found, unavailable
@@ -308,9 +319,38 @@ def _walk_models(root: Path) -> Iterable[dict]:
                 **info,
             }
             continue  # 一个模型目录里的子目录不再当作独立模型
+        singles: list[tuple[str, int]] = []
+        shards: dict[str, list[tuple[int, str, int]]] = {}
         for name, size in files.items():
-            if name.endswith(".gguf"):
-                yield {"path": str(directory / name), "format": "gguf", "size": size}
+            if not name.endswith(".gguf"):
+                continue
+            label = name[: -len(".gguf")]
+            match = _SHARD.match(label)
+            if match is not None:
+                shards.setdefault(match.group("stem"), []).append(
+                    (int(match.group("index")), name, size)
+                )
+            elif label.lower().startswith(MMPROJ_PREFIX):
+                # ``mmproj-*.gguf`` 是多模态投影，不能单独加载，也不会被单独登记成模型。
+                continue
+            else:
+                singles.append((label, name, size))
+
+        for label, name, size in singles:
+            yield {"path": str(directory / name), "format": "gguf", "size": size, "label": label}
+
+        for stem, parts in shards.items():
+            # 一个切分的模型是一个模型：``…-00001-of-00002`` 与 ``…-00002-of-00002``
+            # 若各自作为候选出现，用户会「登记」半个权重文件，而界面还会显示成两个模型。
+            parts.sort()
+            yield {
+                "path": str(directory / parts[0][1]),
+                "paths": [str(directory / name) for _index, name, _size in parts],
+                "format": "gguf",
+                # 只是已存在的片之和；缺片时这里会偏小 —— 发现不声称「这个模型完整」。
+                "size": sum(size for _index, _name, size in parts),
+                "label": stem,
+            }
         if depth < MAX_WALK_DEPTH:
             stack.extend((path, depth + 1) for path in reversed(subdirs))
 
