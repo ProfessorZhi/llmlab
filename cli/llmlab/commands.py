@@ -715,6 +715,18 @@ def cmd_discover(client: ApiClient, args: argparse.Namespace, as_json: bool) -> 
         ]
         print("models:")
         _table(rows, ["PATH", "FORMAT", "ARCH", "SIZE", "STATE"])
+        installed = payload.get("installed_engines") or []
+        rows = [
+            [
+                item["name"],
+                _fmt(item.get("version")),
+                item.get("found_as", "—"),
+                item["path"],
+            ]
+            for item in installed
+        ]
+        print("installed engines (on disk, running or not):")
+        _table(rows, ["ENGINE", "VERSION", "FOUND AS", "PATH"])
         for problem in payload.get("problems") or []:
             print(f"note: {problem}")
         print("register one with: llmlab discover --register PORT [--name NAME]  |  --register-model PATH")

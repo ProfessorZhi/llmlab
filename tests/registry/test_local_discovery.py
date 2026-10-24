@@ -261,6 +261,85 @@ class AutomaticRootTests(unittest.TestCase):
         self.assertEqual(problems, [f"model_walk_truncated:{root}"])
 
 
+class InstalledEngineTests(unittest.TestCase):
+    """磁盘上装着的引擎：跑没跑都要能看见。"""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="llm-lab-engines-"))
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+
+    def venv(self, *, relative="qwen-test/venv", executable=None, distributions=()):
+        env = self.root / relative
+        (env / "bin").mkdir(parents=True)
+        (env / "pyvenv.cfg").write_text("home = /usr/bin\n")
+        if executable:
+            exe = env / "bin" / executable
+            exe.write_text("#!/bin/sh\nexit 0\n")
+            exe.chmod(0o755)
+        for dist in distributions:
+            (env / "lib" / "python3.12" / "site-packages" / dist).mkdir(parents=True)
+        return env
+
+    def discovery(self):
+        return LocalDiscovery(
+            allowed_ports=ALLOWED,
+            model_roots=(str(self.root),),
+            table=ProcNetListenerTable.from_texts(tcp=""),
+            fetch=fake_fetch({}),
+        )
+
+    def test_an_engine_inside_a_virtualenv_is_found(self):
+        env = self.venv(executable="vllm")
+
+        found, _problems = self.discovery().installed_engines()
+
+        vllm = [item for item in found if item.engine == "vllm"]
+        self.assertEqual([item.found_as for item in vllm], ["executable"])
+        self.assertEqual(vllm[0].path, str(env / "bin" / "vllm"))
+        self.assertEqual(vllm[0].env, str(env))
+
+    def test_a_version_is_read_from_pip_metadata_never_by_running_anything(self):
+        """``vllm --version`` 得先执行一个别人放进去的程序；发现不做这件事。"""
+
+        env = self.venv(executable="vllm", distributions=("vllm-0.6.3.dist-info",))
+
+        found, _ = self.discovery().installed_engines()
+
+        by_kind = {item.found_as: item for item in found if item.engine == "vllm"}
+        self.assertEqual(by_kind["executable"].version, None)
+        self.assertEqual(by_kind["python_package"].version, "0.6.3")
+        self.assertEqual(by_kind["python_package"].env, str(env))
+
+    def test_a_directory_without_pyvenv_cfg_is_not_a_virtualenv(self):
+        fake = self.root / "looks-like-venv" / "bin"
+        fake.mkdir(parents=True)
+        exe = fake / "vllm"
+        exe.write_text("#!/bin/sh\n")
+        exe.chmod(0o755)
+
+        found, _ = self.discovery().installed_engines()
+
+        self.assertEqual([item for item in found if item.engine == "vllm"], [])
+
+    def test_a_source_tree_named_after_an_engine_is_reported_as_such(self):
+        tree = self.root / "vllm"
+        tree.mkdir()
+        (tree / "CMakeLists.txt").write_text("project(vllm)\n")
+
+        found, _ = self.discovery().installed_engines()
+
+        vllm = [item for item in found if item.engine == "vllm"]
+        self.assertEqual([item.found_as for item in vllm], ["source_tree"])
+        self.assertEqual(vllm[0].path, str(tree))
+
+    def test_an_empty_directory_named_after_an_engine_is_not_an_engine(self):
+        (self.root / "sglang").mkdir()
+
+        found, _ = self.discovery().installed_engines()
+
+        self.assertEqual([item for item in found if item.engine == "sglang"], [])
+
+
 class HelperTests(unittest.TestCase):
     def test_parse_model_ids(self):
         self.assertEqual(parse_model_ids(b'{"data":[{"id":"a"},{"id":7}]}'), ["a"])

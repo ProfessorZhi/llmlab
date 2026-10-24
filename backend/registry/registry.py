@@ -938,7 +938,13 @@ class RegistryService:
         policy.require_read_scope()
         if self.discovery is None:
             return self._envelope(
-                {"configured": False, "engines": [], "models": [], "problems": ["discovery_not_configured"]},
+                {
+                    "configured": False,
+                    "engines": [],
+                    "installed_engines": [],
+                    "models": [],
+                    "problems": ["discovery_not_configured"],
+                },
                 requester,
                 notes=["本部署没有开启本机发现；仍可手动登记。"],
             )
@@ -957,12 +963,17 @@ class RegistryService:
                 )
         engines, engine_problem = self.discovery.engines(registered_targets=registered_targets)
         models, model_problems = self.discovery.models(registered_paths=registered_paths)
+        # 「装着的引擎」与「正在跑的引擎」分开列：一个没启动的 vLLM 仍然说明这台机器
+        # 能跑什么，而它没有端口、没有 target_url，也就没有可登记的地址。
+        installed, installed_problems = self.discovery.installed_engines()
         problems = [engine_problem] if engine_problem else []
         problems += model_problems
+        problems += installed_problems
         return self._envelope(
             {
                 "configured": True,
                 "engines": [item.to_dict() for item in engines],
+                "installed_engines": [item.to_dict() for item in installed],
                 "models": [item.to_dict() for item in models],
                 "model_roots": list(self.discovery.effective_model_roots()),
                 "model_roots_automatic": self.discovery.model_roots is None,

@@ -58,6 +58,7 @@ class DiscoveryEnvelopeTests(unittest.TestCase):
         self.assertFalse(data["configured"])
         self.assertEqual(data["models"], [])
         self.assertEqual(data["engines"], [])
+        self.assertEqual(data["installed_engines"], [])
         self.assertIn("discovery_not_configured", data["problems"])
 
     def test_explicit_roots_are_reported_as_configured_not_automatic(self):
@@ -68,6 +69,7 @@ class DiscoveryEnvelopeTests(unittest.TestCase):
         self.assertEqual(data["model_roots"], [str(self.root)])
         self.assertEqual([item["format"] for item in data["models"]], ["hf"])
         self.assertEqual(data["models"][0]["architecture"], "LlamaForCausalLM")
+        self.assertIn("installed_engines", data)
 
     def test_automatic_roots_are_announced_so_the_page_can_name_them(self):
         """页面要能写出「已查找（自动）：/data、/srv、…」，否则用户仍然不知道看的是哪儿。"""

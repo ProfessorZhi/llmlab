@@ -141,27 +141,36 @@ export async function services(ctx) {
     pageHead('推理服务', '实验室内已登记的推理引擎。服务归登记它的平台账户所有，「运行用户」是登记时检测到的监听进程所属 Linux 用户。',
       h('a', { class: 'btn primary', href: '#/services/register' }, '手动登记')),
     body,
-    discoveryPanel(ctx, 'engines'));
+    discoveryPanel(ctx, 'engines'),
+    discoveryPanel(ctx, 'installed'));
 }
 
 /* ---------- 本机发现：推理服务与模型共用 ---------- */
 const fmtBytes = (n) => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : `${Math.max(1, Math.round(n / 1024 ** 2))} MB`);
+
+const ENGINE_FOUND_AS = { executable: '可执行文件', python_package: 'Python 包', source_tree: '源码/构建树' };
 
 const scannedKinds = new Set();
 
 function discoveryPanel(ctx, kind) {
   const holder = h('div', {});
   const st = { data: null, state: null, busy: false, msg: null, done: new Set() };
-  const title = kind === 'engines' ? '本机发现 · 推理服务' : '本机发现 · 模型目录';
+  const title = kind === 'engines' ? '本机发现 · 推理服务'
+    : kind === 'models' ? '本机发现 · 模型目录' : '本机发现 · 已安装的引擎';
   const intro = kind === 'engines'
     ? '列出本机回环地址上正在监听、端口在允许列表内的服务，并读取它的模型清单与运行用户。只读；点「登记」才会加入资源池。'
-    : '在管理员授权的模型目录里查找 Hugging Face 模型目录与 GGUF 文件。只读取 config.json 与文件名、大小，不打开权重。';
+    : kind === 'models'
+      ? '在管理员授权的模型目录里查找 Hugging Face 模型目录与 GGUF 文件。只读取 config.json 与文件名、大小，不打开权重。'
+      : '磁盘上装着哪些推理引擎，跑没跑都列。不启动、不执行找到的程序；版本只从 pip 的元数据目录读，可执行文件的版本不探测。';
 
   async function scan() {
     scannedKinds.add(kind);
     st.busy = true; st.msg = null; draw();
     if (ctx.demo) {
-      st.data = { configured: true, problems: [], engines: [
+      st.data = { configured: true, problems: [], installed_engines: [
+        { engine: 'vllm', name: 'vLLM', found_as: 'python_package', version: '0.6.3', path: '/opt/vllm/.venv/lib/python3.12/site-packages/vllm-0.6.3.dist-info', env: '/opt/vllm/.venv' },
+        { engine: 'llama.cpp', name: 'llama.cpp', found_as: 'executable', version: null, path: '/usr/local/bin/llama-server', env: null },
+      ], engines: [
         { port: 8001, target_url: 'http://127.0.0.1:8001', run_as_user: 'li', framework: 'vllm', models: ['Qwen2.5-14B-Instruct'], openai_compatible: true, registered: false, registered_by_me: false, suggested_name: 'Qwen2.5-14B-Instruct' },
         { port: 8000, target_url: 'http://127.0.0.1:8000', run_as_user: 'zhang', framework: 'strata', models: ['Qwen2.5-32B-Instruct'], openai_compatible: true, registered: true, registered_by_me: true, suggested_name: 'Qwen2.5-32B-Instruct' },
       ], models: [
@@ -194,28 +203,39 @@ function discoveryPanel(ctx, kind) {
   }
 
   function rows() {
-    const items = st.data?.[kind] ?? [];
+    const items = (kind === 'installed' ? st.data?.installed_engines : st.data?.[kind]) ?? [];
     if (!items.length) return quietEmpty('ready', kind === 'engines'
       ? { title: '没有发现正在监听的推理服务', body: `允许的端口：${(st.data?.allowed_ports ?? []).join('、') || '—'}。启动服务后再扫描一次。` }
-      : { title: '没有发现模型', body: (st.data?.model_roots ?? []).length
-        ? `已查找${st.data?.model_roots_automatic ? '（自动查找的默认位置）' : ''}：${st.data.model_roots.join('、')}`
-        : '管理员关闭了模型目录查找（--no-model-scan）。' });
-    const head = kind === 'engines' ? ['端口', '运行用户', '推理框架', '模型', ''] : ['路径', '格式', '架构', '大小', ''];
+      : kind === 'models'
+        ? { title: '没有发现模型', body: (st.data?.model_roots ?? []).length
+          ? `已查找${st.data?.model_roots_automatic ? '（自动查找的默认位置）' : ''}：${st.data.model_roots.join('、')}`
+          : '管理员关闭了模型目录查找（--no-model-scan）。' }
+        : { title: '没有发现已安装的推理引擎', body: '查找范围：PATH、/usr/local/bin、/opt/*/bin、模型目录下的虚拟环境，以及 /opt 与 /usr/local 下以引擎命名的源码树。服务账户读不到的目录会被跳过。' });
+    const head = kind === 'engines' ? ['端口', '运行用户', '推理框架', '模型', '']
+      : kind === 'models' ? ['路径', '格式', '架构', '大小', '']
+        : ['引擎', '版本', '识别方式', '路径', ''];
     return h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
       h('thead', {}, h('tr', {}, head.map((t) => h('th', { scope: 'col' }, t)))),
       h('tbody', {}, items.map((item) => {
         const key = item.port ?? item.path;
         const registered = item.registered || st.done.has(key);
-        const action = registered
-          ? h('span', { class: 'muted' }, item.registered_by_me || st.done.has(key) ? '已登记（我）' : '已被登记')
-          : (kind === 'engines' && !item.openai_compatible)
-            ? h('span', { class: 'muted' }, '不是 OpenAI 兼容接口')
-            : h('button', { type: 'button', class: 'btn', onclick: () => register(item) }, '登记');
+        const action = kind === 'installed'
+          // 装着的引擎没有地址可登记：能登记的是**服务**（有 target_url 的那个）。
+          ? h('span', { class: 'muted' }, '磁盘上')
+          : registered
+            ? h('span', { class: 'muted' }, item.registered_by_me || st.done.has(key) ? '已登记（我）' : '已被登记')
+            : (kind === 'engines' && !item.openai_compatible)
+              ? h('span', { class: 'muted' }, '不是 OpenAI 兼容接口')
+              : h('button', { type: 'button', class: 'btn', onclick: () => register(item) }, '登记');
         const cells = kind === 'engines'
           ? [h('td', { class: 'tnum' }, String(item.port)), h('td', { class: 'tnum' }, item.run_as_user ?? (item.run_as_uid != null ? `uid ${item.run_as_uid}` : '—')),
             h('td', {}, engineLabel(item.framework)), h('td', {}, (item.models ?? []).join('、') || '—')]
-          : [h('td', { class: 'mono', style: { 'font-size': '12px', 'word-break': 'break-all' } }, item.path), h('td', {}, item.format === 'hf' ? 'Hugging Face' : 'GGUF'),
-            h('td', {}, item.architecture ?? '—'), h('td', { class: 'tnum' }, fmtBytes(item.size_bytes ?? 0))];
+          : kind === 'models'
+            ? [h('td', { class: 'mono', style: { 'font-size': '12px', 'word-break': 'break-all' } }, item.path), h('td', {}, item.format === 'hf' ? 'Hugging Face' : 'GGUF'),
+              h('td', {}, item.architecture ?? '—'), h('td', { class: 'tnum' }, fmtBytes(item.size_bytes ?? 0))]
+            : [h('td', {}, item.name), h('td', { class: 'tnum' }, item.version ?? '—'),
+              h('td', {}, ENGINE_FOUND_AS[item.found_as] ?? item.found_as),
+              h('td', { class: 'mono', style: { 'font-size': '12px', 'word-break': 'break-all' } }, item.path)];
         return h('tr', {}, ...cells, h('td', { style: { 'text-align': 'right' } }, action));
       }))));
   }

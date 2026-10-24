@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import http.client
+import glob
 import json
 import os
 import re
@@ -51,6 +52,32 @@ MAX_WALK_DEPTH = 4
 MAX_WALK_ENTRIES = 200_000
 
 WEIGHT_SUFFIXES = (".safetensors", ".bin", ".pt", ".pth")
+
+#: 认识的推理引擎：``(id, 显示名, 可执行文件名, python 分发包名)``。
+#: 只列**能自己起服务**的那几个；``transformers`` 这类库不算引擎。
+KNOWN_ENGINES: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...]], ...] = (
+    ("vllm", "vLLM", ("vllm",), ("vllm",)),
+    ("sglang", "SGLang", ("sglang",), ("sglang",)),
+    ("llama.cpp", "llama.cpp", ("llama-server", "llama-cli"), ("llama_cpp_python", "llama-cpp-python")),
+    ("ollama", "Ollama", ("ollama",), ("ollama",)),
+    ("tensorrt-llm", "TensorRT-LLM", ("trtllm-serve",), ("tensorrt_llm",)),
+    ("tgi", "Text Generation Inference", ("text-generation-launcher",), ("text_generation",)),
+    ("mlx", "MLX", ("mlx_lm.server",), ("mlx_lm", "mlx-lm")),
+    ("strata", "Strata", ("strata", "strata-server"), ("strata",)),
+)
+
+#: 认出「这是一份引擎的源码/构建树」的文件。只用来判断目录，不解析内容。
+TREE_MARKERS = ("CMakeLists.txt", "pyproject.toml", "setup.py", "Makefile", "go.mod")
+
+#: 除了 ``PATH``，还要看一眼的地方（真实部署很少把引擎放进服务账户的 PATH）。
+EXTRA_BIN_GLOBS = (
+    "/usr/local/bin",
+    "/opt/*/bin",
+    "/opt/*/venv/bin",
+    "~/.local/bin",
+    "~/miniconda3/bin",
+    "~/anaconda3/bin",
+)
 
 #: 没有显式配置 ``--model-root`` 时自动查找的位置。
 #:
@@ -172,6 +199,33 @@ class EngineCandidate:
             "registered": self.registered,
             "registered_by_me": self.registered_by_me,
             "suggested_name": self.suggested_name,
+        }
+
+
+@dataclass(frozen=True)
+class InstalledEngineCandidate:
+    """磁盘上**装着的**推理引擎——与「正在监听的进程」是两件事。
+
+    一个引擎装好了但今天没启动，它仍然说明「这台机器能跑什么」。反过来，一个服务
+    在监听也不说明装了哪个引擎（可能是别人起的、也可能是容器）。
+    """
+
+    engine: str
+    name: str
+    found_as: str
+    version: str | None
+    path: str
+    env: str | None
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "installed_engine",
+            "engine": self.engine,
+            "name": self.name,
+            "found_as": self.found_as,
+            "version": self.version,
+            "path": self.path,
+            "env": self.env,
         }
 
 
@@ -325,6 +379,180 @@ class LocalDiscovery:
                 problems.append(f"model_walk_truncated:{root}")
         return found, problems
 
+    # --- 磁盘上的引擎 --------------------------------------------------------
+
+    def installed_engines(self) -> tuple[list[InstalledEngineCandidate], list[str]]:
+        """装了哪些推理引擎——**不启动任何东西**，也不执行找到的程序。
+
+        版本号只从两处读：``*.dist-info`` 目录名（pip 自己写的），和运行中的
+        解释器（``importlib.metadata``）。至于可执行文件的版本，那得跑一次
+        ``--version``——发现循环不执行它找到的东西，这条边界比一个版本号值钱。
+        """
+
+        found: list[InstalledEngineCandidate] = []
+        seen: set[tuple[str, str]] = set()
+
+        def add(engine: str, name: str, found_as: str, version: str | None, path: str, env: str | None) -> None:
+            key = (engine, path)
+            if key in seen:
+                return
+            seen.add(key)
+            found.append(
+                InstalledEngineCandidate(
+                    engine=engine,
+                    name=name,
+                    found_as=found_as,
+                    version=version,
+                    path=path,
+                    env=env,
+                )
+            )
+
+        # 1) 可执行文件：PATH 与几个约定 bin 目录。
+        for directory in self._executable_dirs():
+            try:
+                entries = sorted(os.listdir(directory))
+            except OSError:
+                continue
+            present = set(entries)
+            for engine, name, executables, _packages in KNOWN_ENGINES:
+                for executable in executables:
+                    if executable not in present:
+                        continue
+                    path = directory / executable
+                    if not path.is_file() or not os.access(path, os.X_OK):
+                        continue
+                    add(engine, name, "executable", None, str(path), None)
+
+        # 2) 模型根目录下的虚拟环境：bin/ 里的可执行文件 + site-packages 里的分发包。
+        problems: list[str] = []
+        for root in self.effective_model_roots():
+            base = Path(root)
+            try:
+                resolved_root = base.resolve(strict=True)
+            except (OSError, RuntimeError):
+                continue  # 根目录不存在这件事已经由 models() 报过，不重复报
+            flags: dict[str, bool] = {}
+            for env_dir in _walk_envs(resolved_root, flags=flags):
+                self._inspect_env(env_dir, add)
+            if flags.get("truncated"):
+                problems.append(f"env_walk_truncated:{root}")
+
+        # 3) 源码/构建树：``/opt/strata`` 这种「装在这儿但没进 PATH」的引擎。
+        for tree in self._engine_trees():
+            for engine, name, _executables, _packages in KNOWN_ENGINES:
+                if tree.name.lower() != engine:
+                    continue
+                add(engine, name, "source_tree", None, str(tree), None)
+
+        # 4) 本服务自己的解释器里装了什么。
+        try:
+            import importlib.metadata as metadata
+
+            for engine, name, _executables, packages in KNOWN_ENGINES:
+                for package in packages:
+                    try:
+                        version = metadata.version(package)
+                    except metadata.PackageNotFoundError:
+                        continue
+                    add(engine, name, "python_package", version, f"python:{package}", "service")
+                    break
+        except Exception:  # 元数据坏了不该让整页发现失败
+            pass
+
+        found.sort(key=lambda item: (item.engine, item.path))
+        return found, problems
+
+    def _engine_trees(self) -> list[Path]:
+        """按目录名找引擎的源码/构建树：``/opt/strata``、``/opt/vllm`` 这类。
+
+        只认「目录名就是引擎名、而且里面确实有构建入口」的目录。名字对但空着的
+        目录不算——一个叫 ``vllm`` 的空文件夹不是引擎。
+        """
+
+        bases = [Path("/opt"), Path("/usr/local")]
+        bases.extend(Path(root).expanduser() for root in self.effective_model_roots())
+        trees: list[Path] = []
+        seen: set[str] = set()
+        known = {engine for engine, *_ in KNOWN_ENGINES}
+        for base in bases:
+            try:
+                children = sorted(os.scandir(base), key=lambda e: e.name)
+            except OSError:
+                continue
+            for entry in children:
+                try:
+                    if entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
+                        continue
+                except OSError:
+                    continue
+                if entry.name.lower() not in known:
+                    continue
+                if str(entry.path) in seen:
+                    continue
+                try:
+                    names = set(os.listdir(entry.path))
+                except OSError:
+                    continue
+                if not names.intersection(TREE_MARKERS):
+                    continue
+                seen.add(str(entry.path))
+                trees.append(Path(entry.path))
+        return trees
+
+    def _executable_dirs(self) -> list[Path]:
+        candidates = [Path(raw) for raw in os.environ.get("PATH", "").split(os.pathsep) if raw]
+        for pattern in EXTRA_BIN_GLOBS:
+            candidates.extend(Path(match) for match in glob.glob(os.path.expanduser(pattern)))
+        dirs: list[Path] = []
+        seen: set[str] = set()
+        for path in candidates:
+            text = str(path)
+            if text not in seen:
+                seen.add(text)
+                dirs.append(path)
+        return dirs
+
+    def _inspect_env(self, env_dir: Path, add) -> None:
+        """看一个虚拟环境：``bin/`` 里的引擎可执行文件，``site-packages`` 里的分发包。
+
+        不执行这个环境里的 python，也不 ``import`` 任何东西——读目录名就够了。
+        """
+
+        for bin_name in ("bin", "Scripts"):
+            bin_dir = env_dir / bin_name
+            if not bin_dir.is_dir():
+                continue
+            for engine, name, executables, _packages in KNOWN_ENGINES:
+                for executable in executables:
+                    candidate = bin_dir / executable
+                    if candidate.is_file():
+                        add(engine, name, "executable", None, str(candidate), str(env_dir))
+
+        for site_dir in sorted(env_dir.glob("lib/python*/site-packages")) + sorted(
+            env_dir.glob("lib64/python*/site-packages")
+        ):
+            try:
+                entries = sorted(os.listdir(site_dir))
+            except OSError:
+                continue
+            for entry in entries:
+                if not entry.endswith(".dist-info"):
+                    continue
+                stem = entry[: -len(".dist-info")]
+                package, _, version = stem.partition("-")
+                for engine, name, _executables, packages in KNOWN_ENGINES:
+                    if package not in packages:
+                        continue
+                    add(
+                        engine,
+                        name,
+                        "python_package",
+                        version or None,
+                        str(site_dir / entry),
+                        str(env_dir),
+                    )
+
 
 def _serves_loopback(ip: str) -> bool:
     return ip in ("127.0.0.1", "0.0.0.0", "::", "::1", "::ffff:127.0.0.1") or ip.startswith("127.")
@@ -409,6 +637,52 @@ def _walk_models(root: Path, flags: dict[str, bool] | None = None) -> Iterable[d
                 "label": stem,
             }
         if depth < MAX_WALK_DEPTH:
+            stack.extend((path, depth + 1) for path in reversed(subdirs))
+
+
+def _walk_envs(root: Path, flags: dict[str, bool] | None = None) -> Iterable[Path]:
+    """在根目录下找虚拟环境（有 ``pyvenv.cfg`` 的目录），找到就不再往下走。
+
+    与模型遍历同一套边界：不跟随软链、不出根、深度与条目数有上限、跳过噪声目录。
+    进到一个环境之后**不深入** ``site-packages`` —— 那里装着几千个与引擎无关的包，
+    只会把预算吃光；:meth:`LocalDiscovery._inspect_env` 只读它的目录名。
+    """
+
+    seen = 0
+    stack: list[tuple[Path, int]] = [(root, 0)]
+    while stack:
+        directory, depth = stack.pop()
+        try:
+            entries = sorted(os.scandir(directory), key=lambda e: e.name)
+        except OSError:
+            continue
+        files: set[str] = set()
+        subdirs: list[Path] = []
+        is_env = False
+        for entry in entries:
+            seen += 1
+            if seen > MAX_WALK_ENTRIES:
+                if flags is not None:
+                    flags["truncated"] = True
+                return
+            if entry.name.startswith(".") and entry.name != ".venv":
+                continue
+            try:
+                if entry.is_symlink():
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    # 虚拟环境本身就是要找的东西，别当成噪声跳过去。
+                    if entry.name in NOISY_DIR_NAMES and entry.name not in (".venv", "venv"):
+                        continue
+                    subdirs.append(Path(entry.path))
+                elif entry.is_file(follow_symlinks=False):
+                    files.add(entry.name)
+            except OSError:
+                continue
+        if "pyvenv.cfg" in files:
+            yield directory
+            is_env = True
+        if not is_env and depth < MAX_WALK_DEPTH:
             stack.extend((path, depth + 1) for path in reversed(subdirs))
 
 
