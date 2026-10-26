@@ -37,6 +37,9 @@ export const ENGINE_LABEL = Object.freeze({
   ollama: 'Ollama',
   tei: 'Text Embeddings Inference',
   'llama.cpp': 'llama.cpp',
+  'tensorrt-llm': 'TensorRT-LLM',
+  tgi: 'Text Generation Inference',
+  mlx: 'MLX',
   openai: 'OpenAI 兼容',
   'openai-compatible': 'OpenAI 兼容',
 });
@@ -65,12 +68,22 @@ const ENGINE_STATUS = Object.freeze({
   registered: { tone: 'off', text: '未验证' },
 });
 
+/** build id → 「框架 版本」，服务行据此显示它跑在哪个 build 上。 */
+function buildLabels(builds) {
+  const map = new Map();
+  for (const b of builds ?? []) {
+    if (b?.build_id) map.set(b.build_id, [engineLabel(b.framework), b.version].filter(Boolean).join(' '));
+  }
+  return map;
+}
+
 /** 推理服务列表：已登记的推理引擎在前，其上的模型部署在后（管理员看全部，成员看自己的与共享给自己的）。 */
 export function servicesFromOps(ops) {
   const reg = ops?.registry;
   if (!reg || reg.adapter_attached === false) return null;
   // Registry demo rows are fixtures, not deployed engines or routes.
   if (ops.synthetic === true) return [];
+  const builds = buildLabels(reg.builds);
   const list = (reg.engines ?? []).map((e) => ({
     id: e.engine_id,
     kind: 'engine',
@@ -80,6 +93,9 @@ export function servicesFromOps(ops) {
     runAs: e.run_as_user ?? (Number.isInteger(e.run_as_uid) ? `uid ${e.run_as_uid}` : null),
     port: e.port ?? null,
     self: e.owner_is_self === true,
+    // 这个服务跑在哪个 build 上。服务端**没有**这条证据时是 null，页面就不显示
+    // 那一列（见 ops.engine_record）——空着一列「未关联」比不显示更容易被误读。
+    build: e.runtime_build_id ? (builds.get(e.runtime_build_id) ?? e.runtime_build_id) : null,
     runtime: ENGINE_STATUS[e.status] ?? RUNTIME_LABEL.unknown,
     health: e.status === 'verified' ? HEALTH_LABEL.healthy : e.status === 'unavailable' ? HEALTH_LABEL.unreachable : HEALTH_LABEL.unknown,
     share: '—',
@@ -145,6 +161,29 @@ export function modelsFromOps(ops) {
     self: m.owner_is_self === true,
     weightPath: m.weight_path ?? null,
     createdAt: m.created_at ?? null,
+  }));
+}
+
+/** 引擎库：磁盘上装着的 build，由本机代理自动入账。可执行文件路径只有 owner 才拿得到。 */
+export function buildsFromOps(ops) {
+  const reg = ops?.registry;
+  if (!reg || reg.adapter_attached === false) return null;
+  // 合成的 ops 载荷里没有真的磁盘扫描结果：不要把它们画成「本机装了什么」。
+  if (ops.synthetic === true) return [];
+  return (reg.builds ?? []).map((b) => ({
+    id: b.build_id,
+    framework: b.framework ?? null,
+    version: b.version ?? null,
+    foundAs: b.found_as ?? null,
+    path: b.binary_path ?? null,
+    // 服务端**打码**过：非 owner 只拿到指纹。页面要照实说「仅所有者可见」，
+    // 而不是把它画成「这个 build 没有路径」。
+    redacted: b.binary_path_redacted === true || (b.binary_path == null && b.binary_path_sha256 != null),
+    env: b.env ?? null,
+    owner: b.owner_name ?? b.owner ?? null,
+    self: b.owner_is_self === true,
+    state: b.state ?? null,
+    lastSeenAt: b.last_seen_at ?? null,
   }));
 }
 

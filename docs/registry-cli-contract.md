@@ -1292,15 +1292,20 @@ socket 绑不上（目录不存在、权限不足）**不会**让服务起不来
 `path_uid_mismatch` / `path_other_user_home` 拒绝时，平台记一条审计
 `agent_report_ownership_violation`——干净的报告不记审计，否则日志会被正常上报淹掉。
 
-### 22.5 上报 ≠ 登记（模型是唯一的例外）
+### 22.5 上报 ≠ 登记（磁盘上本来就有的东西是例外）
 
 一份报告只写 `agent_reports` 表（主键 `(principal, agent_id)`，同一代理**覆盖**而不是
 追加）。`engines` / `model_locations` 表**一个字节都不动**。要登记一个服务，仍然走
 同一套所有权校验的 `POST /engines`；网页上的「可登记 / 端口不在允许列表」只是提示，
 不是一条捷径。
 
-**模型例外**（§22.5.1）：报告里的权重文件会以**上报者的平台账户**名义落成 `models`
-行。理由是两个说法不能同时成立——「本机发现了 4 个模型」与「我的模型库里 0 个」。
+**两处例外**，都只涉及「磁盘上本来就有的东西」，都落在**上报者的平台账户**名下：
+
+* **模型**（§22.5.1）：报告里的权重文件 → `models` 行。理由是两个说法不能同时成立
+  ——「本机发现了 4 个模型」与「我的模型库里 0 个」。
+* **引擎 build**（§22.5.2）：报告里装着的引擎 → `runtime_builds` 行。同一个道理：
+  「本机装了 llama.cpp」与「引擎库是空的」不该同时为真。
+
 服务那一半没有这个矛盾：一台机器上 8081（Caddy）、9000（评测服务）之类的监听端口
 每天都可能变，把「有人在听」直接变成「平台对外提供一个服务」是把风险推给平台，
 而不是把方便给用户。
@@ -1335,6 +1340,45 @@ socket 绑不上（目录不存在、权限不足）**不会**让服务起不来
 其它边界值：一个主体最多 8 个 `agent_id`（再多是 `registry.conflict`）；报告超过
 30 分钟标 `stale`（30 个上报周期，短暂重启不该立刻看起来像死了）；写路径顺手清理
 超过 30 天的行——报告是「现在在哪」的快照，不是历史。
+
+#### 22.5.2 自动入账的引擎 build（`backend/registry/reported_builds.py`）
+
+`runtime_builds` 这张表在 v5 就已经建好（id / owner / framework / binary_path /
+version / fingerprint / flags / formats / state / last_seen_at），但**一直到 v6 才
+有写入者**。现在写它的是这条上报路径，v6 补上两个观测列 `found_as` / `env`。
+
+| 问题 | 答案 | 依据 |
+| --- | --- | --- |
+| 所有者是谁 | 上报者的**平台账户**（`owner_uid=-1`），与模型同一条解析 | 引擎库和模型库都该是账户的视图 |
+| 身份是什么 | **(framework, binary_path)** 一对 | 一个 build 就是磁盘上的一个文件；路径换了版本还是同一个文件 |
+| 指纹怎么算 | `sha256("kind=runtime_build + framework + binary_path + version")` 前 32 位 | 代理给不出 inode / mtime（扫描器只读目录），路径与版本是唯一可用的身份 |
+| 观测值 | `version` / `found_as`（`executable` / `python_package` / `source_tree`）/ `env`（venv） | 都是扫描器当时看见的；`state` 写入时恒为 `present` |
+| 刷新规则 | 每轮刷新；但**补上非空值，不清空** —— 一轮读不到版本不抹掉上一轮的 | 可执行文件的版本号探测不到是常态（不执行找到的程序） |
+| 会标 `missing` 吗 | **不会**。`mark_build_missing()` 存在，但这条路径不用它 | build 归账户，而一个账户下的 linux 用户可能有不止一个 agent：甲机器没报不证明卸了 |
+| 过期怎么看 | 页面显示 `last_seen_at`（「最近见到」），不替它下结论 | 把判断留给读者，而不是伪造一个状态 |
+| 一条路径被两种框架认领 | 一条路径只入账一行，先报的那个胜出 | 报告自相矛盾时不在库里制造两行「同一路径」 |
+| 审计 | 只在**新建**行时写一条 `agent_builds_adopted` | 同 §22.5.1 |
+
+**可见性**：`AccessPolicy.visible_builds()` 与其余四类同一条规则（自己名下的 ∪ 被
+可见 Engine 引用到的；管理员读看全部）。第二半现在总为空——没有任何代码写
+`engines.runtime_build_id`：服务进程跑在哪个文件上，要读 `/proc/<pid>/exe`，而扫描器
+**刻意不读任何 `/proc/<pid>`**。规则先立着，等真有证据时不用再改一遍授权。
+
+**可执行文件路径**与权重路径同一个待遇：owner 与管理员只读看到原文，别人只看到
+`binary_path_sha256` 与 `binary_path_redacted: true`。非 owner 的 `env` 也不给。
+
+**没有手工登记入口**，也不该有：一个只有扫描才看得见的文件，人填不出来。
+
+出口只有 `GET /api/v2/ops` → `data.ops.registry.builds`（与模型一致，没有单独的
+列表路由）。`engine_record` 同时带上 `runtime_build_id`，控制台的「推理服务」页只在
+**有值**时才显示「运行 build」这一列——空着一列「未关联」会被读成「这个服务没有
+build」，那是另一个断言。
+
+`tests/registry/test_reported_builds.py`（14 条）钉落成规则，
+`tests/registry/test_agent_reports.py` 里另 6 条钉接线（账户归属、端口永不变成 build、
+没有账户时不入账、重复上报不重复建行、账户读得回自己的引擎库、别人看不见）；
+`tests/bff/test_ops_builds.py`（5 条）钉出口与打码；
+控制台侧是 `tests/web-features/engines-library.test.js`（13 条：8 条映射 + 5 条浏览器契约）。
 
 ### 22.6 `/discovery` 信封新增（见 §18.3.3）
 
@@ -1460,10 +1504,19 @@ sudo runuser -u <name> -- env -i HOME=<home> PYTHONPATH=<repo> \
 * `tests/registry/test_agent_channel.py`（18 条）：真的 AF_UNIX 监听器，握手、上限、
   错误透传、退出清理；其中两条**不替换** `peer_uid`，让内核真的回答一次
   `SO_PEERCRED`，证明这条通道在当前内核上可用。
-* `tests/registry/test_agent_reports.py`（46 条）：校验的每一条拒绝理由、服务端的
-  归属写入、覆盖而非追加、审计、可见性、v4→v5 迁移，以及 §22.5.1 的自动登记接线。
+* `tests/registry/test_agent_reports.py`（52 条）：校验的每一条拒绝理由、服务端的
+  归属写入、覆盖而非追加、审计、可见性、v4→v6 迁移，以及 §22.5.1 / §22.5.2 的
+  自动登记接线。
 * `tests/registry/test_reported_models.py`（11 条）：上报条目落成账户名下 `models`
   行的规则（命名、去重、不覆盖、别的主体的行不被借走、没有所有者就不写）。
+* `tests/registry/test_reported_builds.py`（14 条）：上报条目落成账户名下
+  `runtime_builds` 行的规则（身份是路径、版本随轮刷新、读不到版本不清空、
+  永不标 missing、一个文件只一行）。
+* `tests/bff/test_ops_builds.py`（5 条）：`registry.builds` 的出口——owner 拿到路径与
+  `env`，别人只拿指纹，被可见服务引用到的 build 也随之可见（打码后），看不见的不出现。
+* `tests/web-features/engines-library.test.js`（13 条）：引擎库的映射、「运行 build」
+  那一列的出现条件（没有证据就不加这一列），以及浏览器契约对 `registry.builds` 的
+  字段白名单与四条拒绝。
 * `tests/registry/test_agent_cli.py`（10 条）：真子进程跑 `python3 -m cli.llmlab agent`，
   环境里清掉全部 `LLMLAB_TOKEN*`，证明**没有令牌也能上报**。
 * `tests/web-features/agent-reports.test.js`（17 条）：控制台表格行的语义——

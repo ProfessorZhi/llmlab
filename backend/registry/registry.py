@@ -73,6 +73,7 @@ from .identity import (
     is_account_principal,
     principal_host_id,
 )
+from .reported_builds import BuildAdoption, adopt_reported_builds
 from .reported_models import Adoption, adopt_reported_models
 from .ingest import OFFLINE_AFTER_MISSES
 from .models import (
@@ -1062,10 +1063,16 @@ class RegistryService:
         * 只有 ``agent_reports`` 是这条通道的落点。``engines`` / ``model_locations``
           永远不写——「看见一个端口」不等于「我要登记它」。
 
-        **模型是唯一的例外**：报告里的权重文件会被自动登记成**本人平台账户**名下的
-        ``models`` 行（``source=auto``），否则「本机发现了 4 个模型」与「模型库里有
-        0 个模型」永远是两句话。代价与边界见 :mod:`reported_models`：这些行只是
-        路径引用（平台不打开文件），只填空不覆盖，linux 用户没有账户时不登记。
+        **两处例外，都是「磁盘上本来就有」的事实**，都记在**本人平台账户**名下：
+
+        * 报告里的权重文件 → ``models`` 行（``source=auto``），见
+          :mod:`reported_models`：只是路径引用（平台不打开文件），只填空不覆盖；
+        * 报告里装着的引擎 → ``runtime_builds`` 行，见 :mod:`reported_builds`：
+          以 ``(framework, 路径)`` 为身份，观测值随每轮刷新，不标 missing。
+
+        ``engines``（正在跑的服务）仍然一条都不写：端口有人监听，不代表这个人要
+        把那个服务登记进资源池。linux 用户没有对应账户时两条例外都不生效——没有
+        可归属的所有者，就不替谁做主。
         """
 
         if not isinstance(requester, RequesterContext):
@@ -1129,6 +1136,7 @@ class RegistryService:
                 detail={"violations": violations},
             )
         self._adopt_reported_models(requester, principal, report, received_at)
+        self._adopt_reported_builds(requester, principal, report, received_at)
         return report
 
     def _account_for_linux_user(self, linux_user: str) -> Principal | None:
@@ -1169,6 +1177,44 @@ class RegistryService:
             self._audit(
                 requester,
                 action="agent_models_adopted",
+                object_type="agent_report",
+                object_id=report.agent_id,
+                detail={
+                    "owner": owner.principal,
+                    "created": list(adoption.created),
+                    "seen": len(adoption.adopted),
+                },
+            )
+        return adoption
+
+    def _adopt_reported_builds(
+        self,
+        requester: RequesterContext,
+        principal: Principal,
+        report: AgentReport,
+        now: datetime,
+    ) -> BuildAdoption:
+        """把上报里「装着的引擎」落成**本人账户**的 ``runtime_builds`` 行。
+
+        与模型那条路同一条边界：失败不影响这次上报（快照已经写进去了），linux
+        用户没有账户就不入账。区别只在去重与刷新规则，见 :mod:`reported_builds`。
+        """
+
+        if not report.installed_engines:
+            return BuildAdoption()
+        owner = self._account_for_linux_user(principal.linux_user)
+        if owner is None:
+            return BuildAdoption()
+        try:
+            adoption = adopt_reported_builds(
+                self.store, owner=owner.principal, builds=report.installed_engines, now=now
+            )
+        except RegistryError:  # pragma: no cover - 存储故障
+            return BuildAdoption()
+        if adoption.created:
+            self._audit(
+                requester,
+                action="agent_builds_adopted",
                 object_type="agent_report",
                 object_id=report.agent_id,
                 detail={
@@ -1515,6 +1561,31 @@ class RegistryService:
         policy = self.policy(requester)
         model = policy.require_model_read(model_id)
         return self._model_view(model, policy, requester)
+
+    # -- 引擎 build（引擎库）-----------------------------------------------
+
+    def list_builds(self, requester: RequesterContext) -> dict:
+        """引擎库：本人名下的 build（管理员只读看全部）。
+
+        没有手工登记入口，也不该有：一行 build 是「磁盘上有个文件」这件事，人
+        填不出来，只有以本人身份跑的扫描器看得见（见 ``report_agent``）。因此
+        这里只有读——登记那条路是上报，不是表单。
+        """
+
+        policy = self.policy(requester)
+        items = [
+            dto.render_build(item, reveal_binary_path=policy.can_see_binary_path(item))
+            for item in policy.visible_builds()
+        ]
+        return self._envelope(
+            {"items": items, "count": len(items)},
+            requester,
+            notes=[
+                "build 是文件（可执行文件 / 分发包 / 源码树），服务是进程：同一个 build 可以起多个服务。",
+                "非 owner 看到的是可执行文件路径的哈希指纹 —— 共享的是推理能力，不是家目录结构。",
+                "last_seen_at 是最后一次被扫描到的时间；平台不据此自动删除行（一台账户下可能不止一个 agent）。",
+            ],
+        )
 
     # -- Deployment -------------------------------------------------------
 

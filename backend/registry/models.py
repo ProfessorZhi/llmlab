@@ -672,8 +672,13 @@ class RuntimeBuild:
 
     与 ``engines`` 的区别是刻意的：build 是**文件**，engines 是**进程**。同一个
     build 可以起多个服务；一个服务也可能在重启前换了 build。``fingerprint``
-    标识二进制身份（inode + mtime + 版本），``flags`` / ``formats`` 是
-    ``--help`` 解析的结果，供推荐参数时求交。
+    标识二进制身份，``flags`` / ``formats`` 是 ``--help`` 解析的结果，供推荐参数
+    时求交。
+
+    代理上报的 build 没有 inode / mtime 可给（扫描器只读目录，不读 ``/proc``），
+    所以那边的指纹按 ``framework + binary_path + version`` 算，见
+    :mod:`reported_builds`。同一份表同时容纳两种来源，只是为了不把「磁盘上有个
+    llama.cpp」这件事分两个地方说。
     """
 
     id: str
@@ -688,22 +693,39 @@ class RuntimeBuild:
     flags: dict = field(default_factory=dict)
     #: 能加载的模型格式：``("gguf",)`` / ``("hf",)`` / ``("ollama",)``。
     formats: tuple[str, ...] = ()
+    #: 代理是怎么认出它的：``executable`` / ``python_package`` / ``source_tree``。
+    #: 这三者对使用者的含义不同（能直接跑 / 要先进 venv / 还得编译），值得存下来。
+    found_as: str | None = None
+    #: ``python_package`` 所在的那个虚拟环境；其余识别方式没有这个字段。
+    env: str | None = None
     state: str = RUNTIME_BUILD_PRESENT
     last_seen_at: datetime | None = None
 
-    def to_dict(self) -> dict:
+    def to_dict(self, *, reveal_binary_path: bool) -> dict:
+        """``binary_path`` 与模型权重路径同一个待遇：只给 owner 原样看。
+
+        可执行文件路径同样是家目录结构（``/home/<user>/...``），而「实验室里有
+        几个 build」这件事本身不需要那份结构。非 owner 拿到的是指纹。
+        """
+        from .weights import path_fingerprint
+
         return {
             "id": self.id,
             "owner": self.owner_principal,
             "owner_uid": self.owner_uid,
             "framework": self.framework,
-            "binary_path": self.binary_path,
+            "binary_path": self.binary_path if reveal_binary_path else None,
+            "binary_path_sha256": path_fingerprint(self.binary_path),
+            "binary_path_redacted": not reveal_binary_path,
             "version": self.version,
             "git_commit": self.git_commit,
             "fingerprint": self.fingerprint,
             "flags": dict(self.flags),
             "formats": list(self.formats),
+            "found_as": self.found_as,
+            "env": self.env if reveal_binary_path else None,
             "state": self.state,
+            # 「最后一次见到它」是这台 build 的保鲜期，页面据此判断该不该信。
             "last_seen_at": isoformat(self.last_seen_at),
         }
 

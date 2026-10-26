@@ -593,3 +593,77 @@ chmod -R a+rX,go-w /opt/llmlab
 带权重路径与大小），审计里 `agent_models_adopted` 只记了 2 条（两个账户各一条，
 不是每轮一条）。以 `kai` 登录 `GET /api/v2/ops`：模型库 5 项，其中 4 项
 `owner_is_self=true` 且带着自己的权重路径。
+
+### 10.5.7 2026-10-26：「推理引擎」成为第三种资源（本次）
+
+**用户看到的问题**（原话）：「我们的 ui 模型 推理引擎不应该都是资源吗 模型 推理引擎
+服务 你觉得呢 目前只有模型 没有 推理引擎 一栏」。确实：控制台导航里只有「模型库」，
+而 `runtime_builds` 这张表从 v5 就建好了**却没有一个写入者**——设计里留了这个槽位，
+落地时只留了槽。
+
+**决定**（用户选「完整引擎库」）：三层资源各自成页，各说一件事：
+
+| 层 | 页 | 是 | 一句话 |
+| --- | --- | --- | --- |
+| 模型 | `#/models` | 文件（权重） | 「是什么」 |
+| 引擎 build | `#/engines`**（新）** | 文件（可执行文件 / Python 包 / 源码树） | 「这台机器能跑什么」 |
+| 推理服务 | `#/services` | **进程** | 「什么正在跑」 |
+
+四件改动：
+
+1. **build 自动入账**（`backend/registry/reported_builds.py` + `report_agent` 接线）。
+   与模型同一条所有者解析（上报者的平台账户），但去重与刷新规则不同：身份是
+   `(framework, binary_path)`——一个 build 就是一个文件，换了版本还是同一个文件；
+   观测值每轮刷新，但**补上非空值、不清空**（可执行文件的版本号探测不到是常态）；
+   **不标 missing**（一个账户可能不止一个 agent，甲机器没报不证明卸了）。详见
+   契约 §22.5.2。
+
+2. **表结构 v6**：`runtime_builds` 补 `found_as` / `env` 两列。扫描器本来就知道
+   「这是 PATH 里的可执行文件」还是「某个 venv 里的分发包」，v5 却没地方放；塞进
+   `flags` 会把「参数的形状」和「怎么被认出来的」混成一个 JSON。
+
+3. **出口与可见性**：`AccessPolicy.visible_builds()` 与其余四类同一条规则，ops 的
+   `registry.builds` 是唯一出口（与模型一致，不开单独的列表路由）。可执行文件路径
+   与权重路径同一个待遇：非 owner 只看到指纹 + `binary_path_redacted`，`env` 也不给。
+
+4. **控制台**：导航新增「推理引擎」（齿轮图标，模型库与推理服务之间）；
+   `#/engines` 是「引擎库」表格 + 「本机发现 · 已安装的引擎」面板（那个面板从
+   「推理服务」页搬过来——装着的引擎不属于服务页）。「推理服务」页多一列
+   「运行 build」**只在服务端真的给出关联时才显示**：空着一列「未关联」会被读成
+   「这个服务没有 build」，那是另一个断言。
+
+**刻意不做**：不给引擎库开手工登记入口（一个只有扫描才看得见的文件，人填不出来）；
+不去读 `/proc/<pid>/exe` 给服务关联 build（扫描器的边界是「不读任何 `/proc/<pid>`」，
+为了一个展示字段破这条边界不值得）；不做 build 的 `--help` 解析（`flags` / `formats`
+仍是空的槽位）。
+
+**诚实的代价**：`engines.runtime_build_id` 现在恒为 `None`，所以「每个服务跑在哪个
+build 上」这个问题**暂时答不了**，页面不显示这一列，也不显示「未关联」。要答它，
+需要扫描器以本人 uid 读自己进程的 `/proc/<pid>/exe`（只读、只对自己、不经 root），
+那是下一件事，不是这一个。
+
+**验证**：`tests/registry/test_reported_builds.py`（新，14）、
+`tests/registry/test_agent_reports.py` 新增 6 条（共 52）、
+`tests/bff/test_ops_builds.py`（新，5）、
+`tests/web-features/engines-library.test.js`（新，13：8 条映射 + 5 条浏览器契约）；
+`tests/bff/test_golden_payload.py` 的夹具按 `make_golden.py` 重新生成（新增
+`registry.builds` 与 `engines[].runtime_build_id` 两个字段），浏览器契约
+（`web/js/features/contract.js`）补上 `registry.builds` 的字段白名单，外加四条拒绝：
+白名单外的字段、非 owner 携带 `binary_path`、非 owner 携带 `env`、`owner_is_self`
+与会话主体不一致。全量：Python 4591 条 `OK (skipped=6)`，JS 646 条 1 跳过。
+
+**真机结果（2026-10-26 18:05 +08:00）**：BFF 用户单元重启后 schema 迁到 v6
+（`schema_migrations` 最大版本 6），下一次 `llmlabd-inventory` 轮次（17:59）把
+两条 `installed_engines` 自动入账，**两条上报 → 两行 build，不多不少**：
+
+| build | 账户（uid） | 框架 | 版本 | 识别方式 | 路径 |
+| --- | --- | --- | --- | --- | --- |
+| `bld_d9244201845d75c7` | fjd（1000） | strata | — | `source_tree` | `/opt/strata` |
+| `bld_e0235d76395d7d44` | kaidong（1004） | llama.cpp | 0.3.36 | `python_package` | venv 里的 `llama_cpp_python-0.3.36.dist-info` |
+
+18:04 的那一轮**没有新建行**：id 不变、`last_seen_at` 从 17:59 刷到 18:04、
+`agent_builds_adopted` 审计仍是 2 条（只在新建时记一次）、`agent_reports` 仍是 6 行。
+这正是「刷新而不是清空/重建」在真机上的样子。`GET /api/v2/ops` 未带会话仍是
+`401 no_authenticated_session`（路由活着，载荷要登录才拿）；这一轮**没有**用管理员
+会话把 `registry.builds` 读一遍——管理员口令只在哈希文件里，要读得先轮换，那是另一件
+要单独批准的事。载荷形状由夹具与契约测试负责。

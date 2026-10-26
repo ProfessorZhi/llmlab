@@ -40,6 +40,7 @@ from .models import (
     Endpoint,
     Engine,
     Model,
+    RuntimeBuild,
 )
 from .store import Store
 
@@ -52,6 +53,7 @@ class VisibilitySets:
     deployments: frozenset[str]
     engines: frozenset[str]
     models: frozenset[str]
+    builds: frozenset[str]
     global_read: bool
 
 
@@ -78,7 +80,7 @@ class AccessPolicy:
         return SCOPE_ADMIN_READ in self.requester.scopes
 
     def visibility(self) -> VisibilitySets:
-        """算出本次请求可见的四类 id。
+        """算出本次请求可见的五类 id。
 
         规则是对每一类都**同样**的一条：
 
@@ -153,11 +155,33 @@ class AccessPolicy:
             }
         )
 
+        # 4. Build：自己名下的 ∪ 被可见 Engine 引用到的。
+        #
+        # 这一步现在只会命中前一半：没有任何代码写 ``engines.runtime_build_id``
+        # （服务进程跑在哪个文件上，要读 ``/proc/<pid>/exe``，而扫描器刻意不读）。
+        # 规则先立在这里，是为了「服务标上了它的 build」那天不用再改一遍授权。
+        all_builds = self.store.list_builds()
+        referenced_builds = {
+            item.runtime_build_id
+            for item in all_engines
+            if item.id in engine_ids and item.runtime_build_id
+        }
+        build_ids = (
+            {item.id for item in all_builds}
+            if everything
+            else {
+                item.id
+                for item in all_builds
+                if item.owner_principal == me or item.id in referenced_builds
+            }
+        )
+
         self._sets = VisibilitySets(
             endpoints=endpoint_ids,
             deployments=frozenset(deployment_ids),
             engines=frozenset(engine_ids),
             models=frozenset(model_ids),
+            builds=frozenset(build_ids),
             global_read=everything,
         )
         return self._sets
@@ -168,6 +192,10 @@ class AccessPolicy:
 
     def can_see_weight_path(self, model: Model) -> bool:
         return self.is_owner_of_everything or model.owner_principal == self.requester.principal
+
+    def can_see_binary_path(self, build: RuntimeBuild) -> bool:
+        """build 的可执行文件路径与权重路径同一条规则。"""
+        return self.is_owner_of_everything or build.owner_principal == self.requester.principal
 
     # -- 读 -----------------------------------------------------------------
 
@@ -204,6 +232,11 @@ class AccessPolicy:
         self.require_read_scope()
         ids = self.visibility().deployments
         return [item for item in self.store.list_deployments() if item.id in ids]
+
+    def visible_builds(self) -> list[RuntimeBuild]:
+        self.require_read_scope()
+        ids = self.visibility().builds
+        return [item for item in self.store.list_builds() if item.id in ids]
 
     def require_engine_read(self, engine_id: str) -> Engine:
         self.require_read_scope()

@@ -434,7 +434,8 @@ function checkAllDeployment(row, index, errors) {
  *  never an authorisation input — and may be null when nothing was observed. */
 const ENGINE_FIELDS = Object.freeze([
   'engine_id', 'name', 'protocol', 'framework', 'port', 'owner', 'owner_name', 'owner_is_self',
-  'status', 'ownership_state', 'ownership_verified', 'run_as_user', 'run_as_uid', 'last_seen_at',
+  'status', 'ownership_state', 'ownership_verified', 'run_as_user', 'run_as_uid',
+  'runtime_build_id', 'last_seen_at',
 ]);
 const ENGINE_STATUSES = Object.freeze(['registered', 'verified', 'unavailable']);
 
@@ -484,6 +485,50 @@ function checkModel(row, index, subject, errors) {
   }
 }
 
+/** A runtime build — the engine library. A build is a **file** (an executable,
+ *  a Python distribution or a source tree); a service is a process. The path
+ *  and the venv name the owner's directory structure, so a non-owner row may
+ *  carry neither: it gets `binary_path: null` plus a fingerprint instead, and
+ *  `binary_path_redacted` must say so rather than letting "no path" read as
+ *  "this build has no file". */
+const BUILD_FIELDS = Object.freeze([
+  'build_id', 'framework', 'version', 'found_as', 'binary_path', 'binary_path_sha256',
+  'binary_path_redacted', 'env', 'formats', 'owner', 'owner_name', 'owner_is_self',
+  'state', 'last_seen_at',
+]);
+const BUILD_FOUND_AS = Object.freeze(['executable', 'python_package', 'source_tree']);
+const BUILD_STATES = Object.freeze(['present', 'missing']);
+
+function checkBuild(row, index, subject, errors) {
+  const where = `registry.builds[${index}]`;
+  if (!isPlainObject(row)) {
+    errors.push(`${where} must be an object`);
+    return;
+  }
+  checkForbidden(row, BUILD_FIELDS, where, errors);
+  for (const field of ['build_id', 'framework', 'owner']) {
+    if (!isNonEmptyString(row[field])) errors.push(`${where}.${field} must be a non-empty string`);
+  }
+  const mine = subject !== null && row.owner === subject;
+  if (subject !== null && (row.owner_is_self === true) !== mine) {
+    errors.push(`${where}.owner_is_self disagrees with the session subject`);
+  }
+  if (!mine) {
+    if (row.binary_path !== undefined && row.binary_path !== null) {
+      errors.push(`${where} carries another principal's binary path`);
+    }
+    if (row.env !== undefined && row.env !== null) {
+      errors.push(`${where} names another principal's virtual environment`);
+    }
+  }
+  if (row.found_as !== undefined && row.found_as !== null && !BUILD_FOUND_AS.includes(row.found_as)) {
+    errors.push(`${where}.found_as is not supported: ${String(row.found_as)}`);
+  }
+  if (row.state !== undefined && row.state !== null && !BUILD_STATES.includes(row.state)) {
+    errors.push(`${where}.state is not supported: ${String(row.state)}`);
+  }
+}
+
 function checkRegistry(registry, subject, scopes, errors) {
   if (!isPlainObject(registry)) {
     errors.push('registry must be an object');
@@ -519,6 +564,10 @@ function checkRegistry(registry, subject, scopes, errors) {
   if (registry.engines !== undefined && registry.engines !== null) {
     if (!Array.isArray(registry.engines)) errors.push('registry.engines must be a list');
     else registry.engines.forEach((row, index) => checkEngine(row, index, subject, errors));
+  }
+  if (registry.builds !== undefined && registry.builds !== null) {
+    if (!Array.isArray(registry.builds)) errors.push('registry.builds must be a list');
+    else registry.builds.forEach((row, index) => checkBuild(row, index, subject, errors));
   }
   if (registry.adapter_attached !== undefined && typeof registry.adapter_attached !== 'boolean') {
     errors.push('registry.adapter_attached must be a boolean when present');

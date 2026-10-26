@@ -206,6 +206,10 @@ class SchemaV4Test(_StoreCase):
                 "fingerprint",
                 "flags_json",
                 "formats_json",
+                # v6：代理是怎么认出这个 build 的（可执行文件 / Python 包 / 源码树）
+                # 与它所在的虚拟环境。旧行是 NULL，读作「不知道」。
+                "found_as",
+                "env",
                 "state",
                 "last_seen_at",
             },

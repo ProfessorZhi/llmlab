@@ -17,6 +17,7 @@ const NAV = [
     { route: '#/overview', label: '概览', icon: 'overview', color: '#007AFF', page: pages.overview },
     { route: '#/usage', label: '资源监控', icon: 'usage', color: '#30B0C7', page: pages.usage },
     { route: '#/models', label: '模型库', icon: 'models', color: '#34C759', page: pages.models },
+    { route: '#/engines', label: '推理引擎', icon: 'engines', color: '#FF9500', page: pages.engines },
     { route: '#/services', label: '推理服务', icon: 'services', color: '#5856D6', page: pages.services },
     { route: '#/evaluation', label: '模型评测', icon: 'evaluation', color: '#FF2D55', page: pages.evaluation },
     { route: '#/plugins', label: '插件', icon: 'extensions', color: '#636366', page: pages.extensions },

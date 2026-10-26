@@ -392,6 +392,7 @@
           }
         }
       ],
+      "builds": [],
       "engines": [
         {
           "engine_id": "eng_id001",
@@ -407,6 +408,7 @@
           "protocol": "openai_compatible",
           "run_as_uid": null,
           "run_as_user": null,
+          "runtime_build_id": null,
           "status": "verified"
         }
       ],
@@ -773,6 +775,7 @@
     "registry": {
       "adapter_attached": true,
       "all": [],
+      "builds": [],
       "engines": [
         {
           "engine_id": "eng_id001",
@@ -788,6 +791,7 @@
           "protocol": "openai_compatible",
           "run_as_uid": null,
           "run_as_user": null,
+          "runtime_build_id": null,
           "status": "verified"
         }
       ],
@@ -1124,6 +1128,7 @@
     "registry": {
       "adapter_attached": true,
       "all": [],
+      "builds": [],
       "engines": [
         {
           "engine_id": "eng_id001",
@@ -1139,6 +1144,7 @@
           "protocol": "openai_compatible",
           "run_as_uid": null,
           "run_as_user": null,
+          "runtime_build_id": null,
           "status": "verified"
         }
       ],

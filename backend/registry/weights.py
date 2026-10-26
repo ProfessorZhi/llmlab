@@ -85,6 +85,16 @@ def weight_path_fingerprint(path: str) -> str:
     return hashlib.sha256(path.encode("utf-8")).hexdigest()[:16]
 
 
+def path_fingerprint(path: str) -> str:
+    """任意**绝对路径引用**的稳定指纹。
+
+    引擎 build 的可执行文件路径享受与权重路径相同的待遇（存引用、只给 owner 看
+    原文、别人只看指纹），这条规则与「这是权重还是二进制」无关，所以指纹算法也
+    不该分家。名字里没有 ``weight`` 的那个才是通用入口。
+    """
+    return weight_path_fingerprint(path)
+
+
 def redact_weight_path(path: str | None) -> dict:
     """把权重路径降级成「非 owner 可见」的形态。
 

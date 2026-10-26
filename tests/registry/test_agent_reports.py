@@ -113,6 +113,20 @@ class _AccountDirectory(PrincipalDirectory):
 
 ALICE_ACCOUNT = "account:0123456789abcdef0123456789abcdef"
 MODEL_PATH = "/home/alice/m.gguf"
+LLAMA_PATH = "/usr/local/bin/llama-server"
+
+
+def _installed_entry(**overrides) -> dict:
+    entry = {
+        "engine": "llama.cpp",
+        "name": "llama.cpp",
+        "found_as": "executable",
+        "version": "b4120",
+        "path": LLAMA_PATH,
+        "env": None,
+    }
+    entry.update(overrides)
+    return entry
 
 
 def _model_entry(**overrides) -> dict:
@@ -420,7 +434,7 @@ class ReportServiceTests(unittest.TestCase):
         self.validator = _validator(
             listeners=[(8000, ALICE_UID)],
             allowed=(8000,),
-            owners={"/home/alice/m.gguf": ALICE_UID},
+            owners={"/home/alice/m.gguf": ALICE_UID, LLAMA_PATH: ALICE_UID},
         )
         self.service = self.service_for(self.principals)
         self.now = NOW
@@ -515,6 +529,81 @@ class ReportServiceTests(unittest.TestCase):
         # 只有**新建**那一轮留痕：每 5 分钟一轮的上报不该把审计表刷成日志。
         self.assertEqual(len(adopted), 1)
         self.assertEqual(adopted[0].detail["owner"], ALICE_ACCOUNT)
+
+    def test_a_reported_installed_engine_lands_in_the_reporters_engine_library(self) -> None:
+        """「本机装了 llama.cpp」与「引擎库里有 llama.cpp」必须是同一件事。"""
+
+        service = self.service_with_account()
+        service.report_agent(
+            self.requester(), _payload(installed_engines=[_installed_entry()])
+        )
+
+        (row,) = self.store.list_builds()
+        self.assertEqual(row.owner_principal, ALICE_ACCOUNT)
+        self.assertEqual(row.owner_uid, -1)
+        self.assertEqual(row.framework, "llama.cpp")
+        self.assertEqual(row.binary_path, LLAMA_PATH)
+        self.assertEqual(row.found_as, "executable")
+
+    def test_a_listening_port_never_becomes_a_build(self) -> None:
+        """端口是进程，build 是文件：一条上报的不是同一个东西。"""
+
+        self.service_with_account().report_agent(
+            self.requester(), _payload(engines=[{"port": 8000}])
+        )
+
+        self.assertEqual(self.store.list_builds(), [])
+
+    def test_a_linux_user_without_an_account_has_no_engine_library(self) -> None:
+        self.service.report_agent(
+            self.requester(), _payload(installed_engines=[_installed_entry()])
+        )
+
+        self.assertEqual(self.store.list_builds(), [])
+
+    def test_re_reporting_the_same_build_does_not_duplicate_it_or_the_audit(self) -> None:
+        service = self.service_with_account()
+        for _ in range(2):
+            service.report_agent(
+                self.requester(), _payload(installed_engines=[_installed_entry()])
+            )
+
+        self.assertEqual(len(self.store.list_builds()), 1)
+        adopted = [
+            entry
+            for entry in self.store.list_audit(limit=20)
+            if entry.action == "agent_builds_adopted"
+        ]
+        self.assertEqual(len(adopted), 1)
+        self.assertEqual(adopted[0].detail["owner"], ALICE_ACCOUNT)
+
+    def test_the_account_can_read_back_the_builds_its_own_agent_adopted(self) -> None:
+        service = self.service_with_account()
+        service.report_agent(
+            self.requester(), _payload(installed_engines=[_installed_entry()])
+        )
+
+        view = service.list_builds(self.account_requester())
+
+        self.assertEqual(view["data"]["count"], 1)
+        self.assertEqual(view["data"]["items"][0]["binary_path"], LLAMA_PATH)
+        self.assertEqual(view["data"]["items"][0]["found_as"], "executable")
+
+    def test_another_member_never_sees_that_library(self) -> None:
+        service = self.service_with_account()
+        service.report_agent(
+            self.requester(), _payload(installed_engines=[_installed_entry()])
+        )
+
+        other = RequesterContext(
+            principal="account:ffffffffffffffffffffffffffffffff",
+            uid=None,
+            linux_user="bob",
+            scopes=frozenset({"registry:read"}),
+            roles=frozenset(),
+        )
+
+        self.assertEqual(service.list_builds(other)["data"]["items"], [])
 
     def test_a_member_sees_the_report_of_the_linux_user_their_account_claims(self) -> None:
         """人以账户登录、代理以 linux 身份上报：看不见自己的上报才是错的。"""
@@ -655,7 +744,7 @@ class ReportServiceTests(unittest.TestCase):
 
         upgraded = Store(legacy)
         self.addCleanup(upgraded.close)
-        self.assertEqual(upgraded.applied_migrations(), (1, 2, 3, 4, 5))
+        self.assertEqual(upgraded.applied_migrations(), (1, 2, 3, 4, 5, 6))
         self.assertEqual(upgraded.list_agent_reports(), [])
 
     # -- 可见性 ------------------------------------------------------------

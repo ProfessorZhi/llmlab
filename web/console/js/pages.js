@@ -7,7 +7,8 @@ import {
   safeJumpUrl, send,
 } from './data.js';
 import {
-  overviewModel, servicesFromOps, modelsFromOps, hostFacts, engineLabel, modelColorMap, preflightChecks,
+  overviewModel, servicesFromOps, modelsFromOps, buildsFromOps, hostFacts, engineLabel, modelColorMap,
+  preflightChecks,
 } from './viewmodel.js';
 import {
   demoOverview, demoServices, demoEvaluation, DEMO_USERS,
@@ -28,7 +29,13 @@ const CALLS_EMPTY = { title: '暂无调用记录', body: '把推理服务发布�
 const SERVICES_EMPTY = { title: '还没有登记推理服务', body: '在自己的 Linux 用户下启动推理引擎，再用平台账户登记，这里会显示它的运行状态与显存占用。' };
 
 function servicesTable(list, { compact = false } = {}) {
-  const cols = compact ? ['推理服务', '推理框架', '所有者', '运行用户', '显存', '状态'] : ['推理服务', '推理框架', '所有者', '运行用户', '访问范围', '显存', '健康', '状态'];
+  // 「运行 build」只在服务端**真的知道**时才成一列。平台目前没有「进程 ↔ 可执行
+  // 文件」的证据（扫描器不读 /proc/<pid>），所以这一列通常根本不出现；硬留一列
+  // 「未关联」会被读成「这个服务没有 build」，那是另一个断言。
+  const showBuild = !compact && list.some((x) => x.build);
+  const cols = compact
+    ? ['推理服务', '推理框架', '所有者', '运行用户', '显存', '状态']
+    : ['推理服务', '推理框架', ...(showBuild ? ['运行 build'] : []), '所有者', '运行用户', '访问范围', '显存', '健康', '状态'];
   const vramCol = cols.indexOf('显存');
   return h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
     h('thead', {}, h('tr', {}, cols.map((t, i) => h('th', { scope: 'col', class: i === vramCol ? 'num' : null }, t)))),
@@ -37,6 +44,7 @@ function servicesTable(list, { compact = false } = {}) {
         x.sharedToMe ? h('div', { class: 'muted', style: { 'font-size': '12px' } }, '共享给我')
           : x.port ? h('div', { class: 'muted tnum', style: { 'font-size': '12px' } }, `端口 ${x.port}`) : null),
       h('td', {}, engineLabel(x.engine)),
+      showBuild ? h('td', { class: x.build ? null : 'muted' }, x.build ?? '—') : null,
       h('td', {}, x.owner ?? '—', x.self ? h('span', { class: 'muted' }, '（我）') : null),
       h('td', { class: x.runAs ? 'tnum' : 'muted' }, x.runAs ?? '—'),
       compact ? null : h('td', {}, x.share),
@@ -138,12 +146,50 @@ export async function services(ctx) {
     ? (list.length ? servicesTable(list) : h('div', { class: 'group' }, quietEmpty('ready', SERVICES_EMPTY)))
     : emptyState(state);
   return h('div', { class: 'page' },
-    pageHead('推理服务', '实验室内已登记的推理引擎。服务归登记它的平台账户所有，「运行用户」是登记时检测到的监听进程所属 Linux 用户。',
+    pageHead('推理服务', '实验室内已登记的推理引擎进程。服务归登记它的平台账户所有，「运行用户」是登记时检测到的监听进程所属 Linux 用户。服务跑在哪个可执行文件上，平台目前没有证据（扫描器不读进程），所以不猜。',
       h('a', { class: 'btn primary', href: '#/services/register' }, '手动登记')),
     body,
     discoveryPanel(ctx, 'engines'),
-    discoveryPanel(ctx, 'installed'),
     agentReportsPanel(ctx));
+}
+
+/* ============================== 推理引擎 ============================== */
+const BUILDS_EMPTY = {
+  title: '引擎库还是空的',
+  body: '装着的引擎由本机代理扫描后自动入账到本人账户名下：在自己的 Linux 账户下运行 `llmlab agent`。'
+    + '它只读目录、不执行找到的程序，所以可执行文件的版本号通常是空的。',
+};
+
+/** 引擎库里的一行：这是**文件**，不是进程。 */
+function buildsTable(list) {
+  const cols = ['引擎', '版本', '识别方式', '所有者', '文件 / 环境', '最近见到'];
+  return h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
+    h('thead', {}, h('tr', {}, cols.map((t) => h('th', { scope: 'col' }, t)))),
+    h('tbody', {}, list.map((b) => h('tr', {},
+      h('td', {}, h('div', { style: { 'font-weight': 500 } }, engineLabel(b.framework))),
+      h('td', { class: b.version ? 'tnum' : 'muted' }, b.version ?? '—'),
+      h('td', {}, ENGINE_FOUND_AS[b.foundAs] ?? b.foundAs ?? '—'),
+      h('td', {}, b.owner ?? '—', b.self ? h('span', { class: 'muted' }, '（我）') : null),
+      h('td', { class: b.path ? 'mono' : 'muted', style: { 'font-size': '12px', 'word-break': 'break-all' } },
+        b.path ?? (b.redacted ? '仅所有者可见' : '—'),
+        b.env ? h('div', { class: 'muted', style: { 'font-size': '12px' } }, `虚拟环境 ${b.env}`) : null),
+      h('td', { class: 'muted' }, relTime(b.lastSeenAt)))))));
+}
+
+export async function engines(ctx) {
+  let list; let state = 'ready';
+  if (ctx.demo) list = [
+    { id: 'b1', framework: 'llama.cpp', version: 'b4120', foundAs: 'executable', path: '/usr/local/bin/llama-server', env: null, redacted: false, owner: '我', self: true, lastSeenAt: new Date(Date.now() - 12 * 60000).toISOString() },
+    { id: 'b2', framework: 'vllm', version: '0.6.3', foundAs: 'python_package', path: '/opt/vllm/.venv/lib/python3.12/site-packages/vllm-0.6.3.dist-info', env: '/opt/vllm/.venv', redacted: false, owner: '陈静', self: false, lastSeenAt: null },
+  ];
+  else { const r = await loadOps(); state = r.state; list = r.state === 'ready' ? buildsFromOps(r.value) : null; }
+  return h('div', { class: 'page' },
+    pageHead('推理引擎', '磁盘上装着的引擎 build：一个可执行文件、一个 Python 包或一棵源码树。它说明这台机器**能**跑什么；「推理服务」是正在跑起来的那个进程。'
+      + '这些行由本机代理扫描后自动记在本人账户名下 —— 没有手工登记入口，因为一个只有扫描才看得见的文件，人填不出来。'),
+    list
+      ? (list.length ? buildsTable(list) : h('div', { class: 'group' }, quietEmpty('ready', BUILDS_EMPTY)))
+      : emptyState(state),
+    discoveryPanel(ctx, 'installed'));
 }
 
 /* ---------- 本机发现：推理服务与模型共用 ---------- */

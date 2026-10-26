@@ -34,6 +34,7 @@ from typing import Callable, Iterable, Protocol
 from ..registry import dto as registry_dto
 from ..registry import health as registry_health
 from ..registry import models as registry_models
+from ..registry import weights as registry_weights
 from . import scopes as bff_scopes
 from .sharing import endpoint_share_block, narrowest_share
 
@@ -329,7 +330,35 @@ def engine_record(engine, *, subject: str, principals) -> dict:
         "ownership_verified": bool(ownership.get("verified")),
         "run_as_user": ownership.get("linux_user"),
         "run_as_uid": ownership.get("uid"),
+        # 这个服务跑在哪个 build 上。目前恒为 None：扫描器刻意不读 /proc/<pid>，
+        # 平台没有「进程 ↔ 可执行文件」的证据。留字段而不是留一个假值。
+        "runtime_build_id": engine.runtime_build_id,
         "last_seen_at": registry_models.isoformat(engine.last_seen_at),
+    }
+
+
+def build_record(build, *, subject: str, principals) -> dict:
+    """一份引擎 build（引擎库）⇒ 前端的一行。
+
+    可执行文件路径与模型权重路径同一个待遇：只给 owner 原样看。非 owner 拿到
+    指纹，足够核对「我们说的是不是同一个文件」，不足以列出别人的家目录。
+    """
+    mine = build.owner_principal == subject
+    return {
+        "build_id": build.id,
+        "framework": build.framework,
+        "version": build.version,
+        "found_as": build.found_as,
+        "binary_path": build.binary_path if mine else None,
+        "binary_path_sha256": registry_weights.path_fingerprint(build.binary_path),
+        "binary_path_redacted": not mine,
+        "env": build.env if mine else None,
+        "formats": list(build.formats),
+        "owner": build.owner_principal,
+        "owner_name": principal_name(principals, build.owner_principal),
+        "owner_is_self": mine,
+        "state": build.state,
+        "last_seen_at": registry_models.isoformat(build.last_seen_at),
     }
 
 
@@ -529,6 +558,10 @@ def build_ops(
         model_record(item, subject=subject, principals=service.principals)
         for item in policy.visible_models()
     ]
+    builds = [
+        build_record(item, subject=subject, principals=service.principals)
+        for item in policy.visible_builds()
+    ]
 
     shared = []
     if visibility == VISIBILITY_SHARED_PORTAL:
@@ -640,6 +673,9 @@ def build_ops(
             "all": all_rows,
             "engines": engines,
             "models": models,
+            # 引擎库：磁盘上装着的 build。与 engines（正在跑的服务）是两类资源，
+            # 分两个键，不混在一个列表里。
+            "builds": builds,
         },
         "keys": keys,
         "playground": (

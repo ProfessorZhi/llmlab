@@ -56,7 +56,7 @@ from .models import (
 )
 
 #: 当前 schema 版本。**每次改动表结构都要 +1 并追加一条迁移**。
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 #: 有序迁移：(版本, SQL)。只追加，永不修改已发布的条目。
 MIGRATIONS: tuple[tuple[int, str], ...] = (
@@ -388,6 +388,17 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         -- 过期清理按 received_at 扫；它每次写入都会跑一次。
         CREATE INDEX IF NOT EXISTS agent_reports_received
             ON agent_reports (received_at);
+        """,
+    ),
+    (
+        6,
+        """
+        -- 引擎 build 的两个观测字段。代理的扫描器本来就知道它们（「在 PATH 里找到
+        -- 一个可执行文件」与「在某个 venv 里找到一个分发包」是两件事），而 v5 的
+        -- 表没有地方放：写进 ``flags`` 会把「参数的形状」和「怎么被认出来的」混成
+        -- 一个 JSON。旧行留 NULL，读作「不知道」——不是 ``executable``。
+        ALTER TABLE runtime_builds ADD COLUMN found_as TEXT;
+        ALTER TABLE runtime_builds ADD COLUMN env TEXT;
         """,
     ),
 )
@@ -759,6 +770,8 @@ class Store:
             fingerprint=row["fingerprint"],
             flags=_loads_or_empty(row["flags_json"]),
             formats=tuple(_loads(row["formats_json"]) or ()),
+            found_as=_column(row, "found_as"),
+            env=_column(row, "env"),
             state=row["state"],
             last_seen_at=parse_timestamp(row["last_seen_at"]),
         )
@@ -1239,14 +1252,16 @@ class Store:
             connection.execute(
                 "INSERT INTO runtime_builds "
                 "(id, owner_principal, owner_uid, framework, binary_path, version, "
-                "git_commit, fingerprint, flags_json, formats_json, state, last_seen_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
+                "git_commit, fingerprint, flags_json, formats_json, found_as, env, "
+                "state, last_seen_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(id) DO UPDATE SET "
                 "owner_principal = excluded.owner_principal, owner_uid = excluded.owner_uid, "
                 "framework = excluded.framework, binary_path = excluded.binary_path, "
                 "version = excluded.version, git_commit = excluded.git_commit, "
                 "fingerprint = excluded.fingerprint, flags_json = excluded.flags_json, "
-                "formats_json = excluded.formats_json, state = excluded.state, "
+                "formats_json = excluded.formats_json, found_as = excluded.found_as, "
+                "env = excluded.env, state = excluded.state, "
                 "last_seen_at = excluded.last_seen_at",
                 (
                     build.id,
@@ -1259,10 +1274,18 @@ class Store:
                     build.fingerprint,
                     _dumps(build.flags or {}),
                     _dumps(list(build.formats)),
+                    build.found_as,
+                    build.env,
                     build.state,
                     isoformat(build.last_seen_at),
                 ),
             )
+
+    def list_builds(self) -> list[RuntimeBuild]:
+        # 与 ``list_*`` 的其余方法一致按插入序：时间戳只有秒级精度，用第二列排序
+        # 只会让「刚入账的那一行」在列表里乱跳。
+        rows = self.connection.execute("SELECT * FROM runtime_builds ORDER BY rowid").fetchall()
+        return [self._build(row) for row in rows]
 
     def builds_for_owner(self, principal: str) -> list[RuntimeBuild]:
         rows = self.connection.execute(

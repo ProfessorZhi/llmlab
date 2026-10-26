@@ -20,7 +20,7 @@ from .health import (
     STATE_UNKNOWN,
     unknown,
 )
-from .models import Deployment, Endpoint, Engine, Model
+from .models import Deployment, Endpoint, Engine, Model, RuntimeBuild
 
 #: DTO 模式版本。字段增删必须同步 ``docs/registry-cli-contract.md``。
 SCHEMA_VERSION = "registry/1"
@@ -107,6 +107,10 @@ def render_engine(engine: Engine, *, reveal_target: bool) -> dict:
 
 def render_model(model: Model, *, reveal_weight_path: bool) -> dict:
     return model.to_dict(reveal_weight_path=reveal_weight_path)
+
+
+def render_build(build: RuntimeBuild, *, reveal_binary_path: bool) -> dict:
+    return build.to_dict(reveal_binary_path=reveal_binary_path)
 
 
 def render_deployment(deployment: Deployment) -> dict:
