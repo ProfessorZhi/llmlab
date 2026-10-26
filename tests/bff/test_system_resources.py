@@ -267,5 +267,54 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(out["gpu_processes"], [])
 
 
+class ReuseWindowTests(unittest.TestCase):
+    """两次采样之间的窗口。控制台可以每秒刷新，所以这里要说清「太快了会怎样」。
+
+    速率是「两次采样之差 ÷ 经过秒数」。窗口够长时，这条式子给出的是这几秒里的
+    平均；窗口只有几毫秒时，它给出的是计数器抖动被放大后的一个尖峰——那不是
+    一个更真的读数。所以窗口太短的这一拍要**等够**再采，而不是照算。
+    """
+
+    _summary = SummaryTests._summary
+
+    def _after_first_round(self, extra):
+        """跑完一轮，让 reader 手里有上一样本（``_prev_at`` = 第二个样本的 at）。"""
+        reader = _ScriptedReader([_sample(), _sample(), *extra])
+        self._summary(reader)
+        self.assertEqual(reader._prev_at, 1)
+        return reader
+
+    def test_a_rapid_second_call_waits_for_a_usable_window(self):
+        """两个标签页撞在一起（间隔 10 ms）时，这一拍等够 MIN 再采。"""
+        reader = self._after_first_round([_sample(cpu=(300, 250))])
+        with mock.patch.object(L.time, "monotonic", side_effect=[1.01, 1.52]), \
+                mock.patch.object(L.time, "sleep") as sleep:
+            self._summary(reader)
+
+        sleep.assert_called_once()
+        waited = sleep.call_args[0][0]
+        self.assertAlmostEqual(waited, L.MIN_SAMPLE_WINDOW_S - 0.01, places=2)
+
+    def test_a_normal_one_second_refresh_reuses_the_sample_without_waiting(self):
+        """每秒刷新的常态：窗口 1 秒已经够长，不该额外等。"""
+        reader = self._after_first_round([_sample(cpu=(300, 250))])
+        with mock.patch.object(L.time, "monotonic", side_effect=[2.0]), \
+                mock.patch.object(L.time, "sleep") as sleep:
+            out = self._summary(reader)
+
+        sleep.assert_not_called()
+        # 200 tick 里 150 忙 ⇒ 0.75，窗口用的是真实经过的那一秒
+        self.assertAlmostEqual(out["cpu"]["utilization_ratio"], 0.75, places=4)
+
+    def test_a_stale_previous_sample_is_not_reused(self):
+        """隔了很久再打开页面：不拿上一样本差分，现场采两次。"""
+        reader = self._after_first_round([_sample(), _sample(cpu=(300, 250))])
+        with mock.patch.object(L.time, "monotonic", side_effect=[1 + L.MAX_REUSE_AGE_S + 1]), \
+                mock.patch.object(L.time, "sleep") as sleep:
+            self._summary(reader)
+
+        sleep.assert_called_once_with(L.SAMPLE_WINDOW_S)
+
+
 if __name__ == "__main__":
     unittest.main()

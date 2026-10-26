@@ -15,6 +15,7 @@ import http.client
 import json
 import os
 import subprocess
+import threading
 import time
 import re
 from urllib.parse import urlsplit
@@ -335,6 +336,12 @@ SYSTEM_SCHEMA = "host-system/1"
 #: 首次调用时两次采样的间隔（秒）。够让 0.5 秒内的计数器噪音被平均掉，
 #: 又不至于让一次页面加载多等一秒以上。
 SAMPLE_WINDOW_S = 0.5
+
+#: 两次采样之间至少隔这么久，差分才有意义。控制台现在可以每秒刷新：一个标签页
+#: 每秒来一次时窗口本来是够的，但两个标签页（或一个页面的两处读数）撞在一起会把
+#: 窗口压到几毫秒——那时把计数器的抖动放大成「磁盘忽然 800 MB/s」并不能算作一个
+#: 更真的读数。所以窗口太短的这一拍先等到够长再采，而不是照算。
+MIN_SAMPLE_WINDOW_S = 0.5
 
 #: 上一次样本超过这个年龄就不再拿来差分：进程被内核换出又唤醒后，
 #: 一个 10 分钟前的样本会把这 10 分钟平均进去，得到一个「看起来很平稳」
@@ -791,6 +798,10 @@ class SystemResourceReader:
     def __init__(self) -> None:
         self._prev: dict | None = None
         self._prev_at: float | None = None
+        #: BFF 是多线程的：两个页面的读数会并发走到这里。上一样本「读—算—写」
+        #: 必须是同一件事，否则两个线程会各自拿同一份上一样本、各自写回自己那份，
+        #: 结果是其中一次的窗口被另一条请求改写。
+        self._lock = threading.Lock()
 
     # -- 采样 --------------------------------------------------------------
 
@@ -806,21 +817,27 @@ class SystemResourceReader:
 
     def _snapshot_pair(self) -> tuple[dict, dict, float]:
         """返回 ``(上一样本, 当前样本, 经过秒数)``。没有可用上一样本时现场采两次。"""
-        now = time.monotonic()
-        if self._prev is not None and self._prev_at is not None:
-            age = now - self._prev_at
-            if 0 < age <= MAX_REUSE_AGE_S:
-                previous = self._prev
-                current = self._sample()
-                self._prev, self._prev_at = current, current["at"]
-                # 必须返回**两份不同的样本**：拿同一份当 `before` 与 `after`
-                # 会让所有差值恒为 0，页面上表现为「磁盘和网卡一直没动静」。
-                return previous, current, age
-        first = self._sample()
-        time.sleep(SAMPLE_WINDOW_S)
-        second = self._sample()
-        self._prev, self._prev_at = second, second["at"]
-        return first, second, max(second["at"] - first["at"], 1e-6)
+        with self._lock:
+            now = time.monotonic()
+            if self._prev is not None and self._prev_at is not None:
+                age = now - self._prev_at
+                if 0 < age < MIN_SAMPLE_WINDOW_S:
+                    # 窗口太短：等够再采，而不是拿几毫秒的差值当速率。
+                    time.sleep(MIN_SAMPLE_WINDOW_S - age)
+                    now = time.monotonic()
+                    age = now - self._prev_at
+                if 0 < age <= MAX_REUSE_AGE_S:
+                    previous = self._prev
+                    current = self._sample()
+                    self._prev, self._prev_at = current, current["at"]
+                    # 必须返回**两份不同的样本**：拿同一份当 `before` 与 `after`
+                    # 会让所有差值恒为 0，页面上表现为「磁盘和网卡一直没动静」。
+                    return previous, current, age
+            first = self._sample()
+            time.sleep(SAMPLE_WINDOW_S)
+            second = self._sample()
+            self._prev, self._prev_at = second, second["at"]
+            return first, second, max(second["at"] - first["at"], 1e-6)
 
     # -- 对外 --------------------------------------------------------------
 

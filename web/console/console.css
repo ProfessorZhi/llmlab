@@ -173,6 +173,8 @@ button, input, select { font: inherit; color: inherit; letter-spacing: inherit; 
 .main { flex: 999 1 640px; min-width: 0; padding: 44px 52px 80px; }
 .page { max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; animation: rise .35s var(--ease) both; }
 .page.narrow { max-width: 740px; gap: 26px; }
+/* 资源监控：这块内容每秒重绘，容器自己承担 .page 的纵向节奏。 */
+.page-body { display: flex; flex-direction: column; gap: 28px; }
 @media (max-width: 720px) {
   .main { padding: 24px 16px 56px; }
   /* 窄屏：侧栏收成顶部的半透明工具条 + 横向滚动的胶囊导航（iOS 习惯）。 */

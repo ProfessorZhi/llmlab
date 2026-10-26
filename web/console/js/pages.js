@@ -1,6 +1,9 @@
 /*! web/console/js/pages.js — 控制台各页面。
  *  每个页面是 async (ctx) => Element。ctx.demo 为真时只使用 demo.js 的示例数据。 */
-import { h, put } from './dom.js';
+import { h, put, clear } from './dom.js';
+import {
+  createRefresher, REFRESH_CHOICES, refreshLabel, rememberRefreshMs, savedRefreshMs, usageStatus,
+} from './live-refresh.js';
 import { fmtInt, fmtGiB } from './charts.js';
 import {
   PATHS, loadOps, loadHost, loadUsers, loadIntegrations, loadDiscovery, loadTokens, loadSystem, loadData,
@@ -740,8 +743,12 @@ function myShare(sys, me, gpuTotalMiB) {
         h('div', {}, h('div', { class: 'gauge-label' }, '进程数'), h('div', { class: 'muted', style: { 'font-size': '12.5px' } }, `${(sys.gpu_processes ?? []).filter((g) => g.user === me).length} 个在用 GPU`)))));
 }
 
-/** 按用户的环形图：内存 / CPU / 显存，各自带「我」高亮；系统账户合并成一块。 */
-function userDonuts(sys, me, gpuTotalMiB) {
+/** 按用户的环形图：内存 / CPU / 显存，各自带「我」高亮；系统账户合并成一块。
+ *
+ *  ``focus`` / ``onFocus`` 让「点中的那一块」在每秒重绘之后还在原处：聚焦状态属于
+ *  页面，不属于这一次画出来的 DOM。
+ */
+function userDonuts(sys, me, gpuTotalMiB, focus = {}, onFocus = null) {
   const humans = (sys.per_user ?? []).filter((u) => u.account === 'human');
   const system = (sys.per_user ?? []).filter((u) => u.account !== 'human');
   const color = new Map(humans.map((u, i) => [u.user, USER_COLORS[i % USER_COLORS.length]]));
@@ -755,12 +762,21 @@ function userDonuts(sys, me, gpuTotalMiB) {
   return panel('', '按用户看资源', '点扇区或图例聚焦；「我」默认高亮。内存只统计进程常驻内存，缓存与内核占用计入「其他 / 空闲」。',
     h('div', { class: 'donut-grid' },
       h('div', {}, h('div', { class: 'section-title', style: { 'margin-bottom': '8px' } }, '内存'),
-        donutPanel(items('memory_mib'), { title: '进程内存', fmt: gib, rest: sys.memory ? { label: '其他 / 空闲', value: Math.max(0, sys.memory.total_mib - memUsed) } : null })),
+        donutPanel(items('memory_mib'), {
+          title: '进程内存', fmt: gib, focus: focus.mem, onFocus: onFocus && ((id) => onFocus('mem', id)),
+          rest: sys.memory ? { label: '其他 / 空闲', value: Math.max(0, sys.memory.total_mib - memUsed) } : null,
+        })),
       h('div', {}, h('div', { class: 'section-title', style: { 'margin-bottom': '8px' } }, 'CPU'),
         // cpu_ratio 以「核」计（1.0 = 跑满一个线程）；这里换成占整机的百分比。
-        donutPanel(items('cpu_ratio').map((i) => ({ ...i, value: ((i.value ?? 0) / (sys.cpu?.cores || 1)) * 100 })), { title: 'CPU（整机）', fmt: (v) => `${v.toFixed(v < 1 ? 2 : 1)}%`, rest: { label: '空闲', value: Math.max(0, 100 - (sys.per_user ?? []).reduce((t, u) => t + ((u.cpu_ratio ?? 0) / (sys.cpu?.cores || 1)) * 100, 0)) } })),
+        donutPanel(items('cpu_ratio').map((i) => ({ ...i, value: ((i.value ?? 0) / (sys.cpu?.cores || 1)) * 100 })), {
+          title: 'CPU（整机）', fmt: (v) => `${v.toFixed(v < 1 ? 2 : 1)}%`, focus: focus.cpu, onFocus: onFocus && ((id) => onFocus('cpu', id)),
+          rest: { label: '空闲', value: Math.max(0, 100 - (sys.per_user ?? []).reduce((t, u) => t + ((u.cpu_ratio ?? 0) / (sys.cpu?.cores || 1)) * 100, 0)) },
+        })),
       gpuTotalMiB ? h('div', {}, h('div', { class: 'section-title', style: { 'margin-bottom': '8px' } }, '显存'),
-        donutPanel(items('vram_mib').filter((i) => i.id !== '__system'), { title: 'GPU 显存', fmt: gib, rest: { label: '空闲', value: Math.max(0, gpuTotalMiB - vramUsed) } })) : null));
+        donutPanel(items('vram_mib').filter((i) => i.id !== '__system'), {
+          title: 'GPU 显存', fmt: gib, focus: focus.vram, onFocus: onFocus && ((id) => onFocus('vram', id)),
+          rest: { label: '空闲', value: Math.max(0, gpuTotalMiB - vramUsed) },
+        })) : null));
 }
 
 function hostSystem(sys, me) {
@@ -798,15 +814,10 @@ function hostSystem(sys, me) {
   ];
 }
 
-export async function usage(ctx) {
-  let model; let hostState = 'ready'; let opsState = 'ready'; let sys = null;
-  if (ctx.demo) { model = demoOverview(); sys = SNAP_SYSTEM; }
-  else {
-    const [ops, host, system] = await Promise.all([loadOps(), loadHost(), loadSystem()]);
-    hostState = host.state; opsState = ops.state;
-    model = overviewModel({ ops: ops.value, host: host.value });
-    sys = system.state === 'ready' && system.value.cpu ? system.value : null;
-  }
+/** 页面的那些块。数据全在 ``st`` 里，重绘只换内容，不换控件（频率、聚焦都不重来）。 */
+function usageBlocks(ctx, st) {
+  const model = st.model;
+  const sys = st.sys;
   const hf = model.host;
   const me = ctx.me?.linux_user ?? ctx.me?.username ?? null;
   const withVram = (model.services ?? []).filter((x) => x.vramMiB != null);
@@ -817,20 +828,92 @@ export async function usage(ctx) {
     { label: 'CPU', tint: '#34C759', glyph: 'cpu', value: sys ? `${(sys.cpu.utilization_ratio * 100).toFixed(1)}%` : '—', note: sys ? `${sys.cpu.cores} 线程 · 负载 ${sys.cpu.load1} / ${sys.cpu.load5} / ${sys.cpu.load15}` : '暂无主机读数' },
     { label: '内存', tint: '#30B0C7', glyph: 'services', value: mem ? fmtGiB(mem.used_mib) : '—', unit: mem ? `/ ${fmtGiB(mem.total_mib, 0)} GB` : null, note: mem ? `Swap ${fmtGiB(mem.swap_used_mib)} / ${fmtGiB(mem.swap_total_mib, 0)} GB${mem.swap_used_ratio > 0.9 ? ' · 已满' : ''}` : '暂无主机读数' },
   ];
-  return h('div', { class: 'page' },
-    pageHead('资源监控', 'GPU、主机与各推理服务的资源占用。读数只读获取，取不到的一律显示「—」。'),
+  return [
     metricCards(cards),
     h('div', { class: 'row' },
       panel('grow', '显存分配', model.vram ? `GPU 显存 ${fmtGiB(model.vram.totalMiB, 0)} GB · 每个方块代表 0.25 GB` : null,
-        model.vram ? vramPanel(model.vram) : quietEmpty(hostState, { title: '暂无显存读数', body: '接入 Prometheus 后，这里会按推理服务显示显存分配。' })),
-      panel('side', 'GPU 与服务', null, gpuFacts(hf, hostState))),
+        model.vram ? vramPanel(model.vram) : quietEmpty(st.hostState, { title: '暂无显存读数', body: '接入 Prometheus 后，这里会按推理服务显示显存分配。' })),
+      panel('side', 'GPU 与服务', null, gpuFacts(hf, st.hostState))),
     sys ? myShare(sys, me, hf?.vramTotalMiB) : null,
-    sys ? userDonuts(sys, me, hf?.vramTotalMiB) : null,
+    sys ? userDonuts(sys, me, hf?.vramTotalMiB, st.focus, (key, id) => { st.focus[key] = id; }) : null,
     sys ? hostSystem(sys, me) : null,
     panel('', '各推理服务资源占用', null, model.services
       ? (withVram.length ? servicesTable(withVram, { compact: true }) : quietEmpty('ready', { title: '暂无按服务统计的显存', body: '推理服务登记并上报进程指标后，这里会列出每个服务的显存占用。' }))
-      : quietEmpty(opsState, SERVICES_EMPTY)),
-    h('p', { class: 'muted', style: { margin: 0, 'font-size': '12.5px' } }, '调用量、Token 与延迟统计在「网关」一栏。'));
+      : quietEmpty(st.opsState, SERVICES_EMPTY)),
+    h('p', { class: 'muted', style: { margin: 0, 'font-size': '12.5px' } }, '调用量、Token 与延迟统计在「网关」一栏。'),
+  ];
+}
+
+export async function usage(ctx) {
+  const st = {
+    everyMs: savedRefreshMs(),
+    ops: null, host: null, sys: null,
+    opsState: 'ready', hostState: 'ready',
+    model: null, at: null, failed: [],
+    // 三份读数各自的时间：一份坏掉时，另外两份仍在更新，状态行要能分开说。
+    seen: { ops: null, host: null, system: null },
+    focus: {},
+  };
+  // 演示数据是常量：给它一个定时器只会每秒重画同一批数字。
+  if (ctx.demo) {
+    st.model = demoOverview();
+    st.sys = SNAP_SYSTEM;
+    return h('div', { class: 'page' },
+      pageHead('资源监控', 'GPU、主机与各推理服务的资源占用。读数只读获取，取不到的一律显示「—」。'),
+      ...usageBlocks(ctx, st));
+  }
+
+  // 内容每秒重画一次，控件（频率切换、状态行）在外面，不受影响。
+  const body = h('div', { class: 'page-body' });
+  const status = h('span', { class: 'muted tnum', 'aria-live': 'polite', style: { 'font-size': '12.5px' } }, '正在取数…');
+  const draw = () => {
+    put(clear(body), ...usageBlocks(ctx, st));
+    status.textContent = usageStatus(st);
+  };
+
+  const refresh = async () => {
+    const [ops, host, system] = await Promise.all([loadOps(), loadHost(), loadSystem()]);
+    const now = new Date();
+    const failed = [];
+    // 失败项带着「这一块上一次拿到是什么时候」，状态行才能说清屏幕上停住的是哪一块。
+    const miss = (key, label, state) => failed.push({ label, state, at: st.seen[key] });
+    let updated = 0;
+    if (ops.state === 'ready') { st.ops = ops.value; st.opsState = 'ready'; st.seen.ops = now; updated += 1; }
+    else { st.opsState = ops.state; miss('ops', '服务清单', ops.state); }
+    if (host.state === 'ready') { st.host = host.value; st.hostState = 'ready'; st.seen.host = now; updated += 1; }
+    else { st.hostState = host.state; miss('host', 'GPU 读数', host.state); }
+    if (system.state === 'ready' && system.value.cpu) { st.sys = system.value; st.seen.system = now; updated += 1; }
+    else if (system.state !== 'ready') { miss('system', '主机读数', system.state); }
+    // 这一拍失败时保留上一次的读数——「这次没取到」与「机器上什么都没有」不是一件事。
+    st.model = overviewModel({ ops: st.ops, host: st.host });
+    if (updated) st.at = now;
+    st.failed = failed;
+    draw();
+  };
+
+  await refresh();
+
+  const pick = (option) => {
+    st.everyMs = REFRESH_CHOICES.find(([label]) => label === option)?.[1] ?? 1000;
+    rememberRefreshMs(st.everyMs);
+    control.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.textContent === option)));
+    refresher.every(st.everyMs);
+    status.textContent = usageStatus(st);
+  };
+  const control = segmented('刷新频率', REFRESH_CHOICES.map(([label]) => label), refreshLabel(st.everyMs), pick);
+
+  const page = h('div', { class: 'page' },
+    pageHead('资源监控', 'GPU、主机与各推理服务的资源占用。读数只读获取，取不到的一律显示「—」。磁盘与网络的速率是两次采样之差，刷新越快窗口越短。',
+      h('div', { style: { display: 'flex', 'flex-direction': 'column', gap: '6px', 'align-items': 'flex-end' } }, control, status)),
+    body);
+
+  const refresher = createRefresher({
+    intervalMs: st.everyMs,
+    run: refresh,
+    isAttached: () => page.isConnected,
+  });
+  refresher.start();
+  return page;
 }
 
 /* ============================== 模型评测 ============================== */

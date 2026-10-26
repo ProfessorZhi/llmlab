@@ -276,12 +276,21 @@ export function windowBars(points, { labels = [], height = 120, tint = 'var(--bl
 /**
  * 环形图：``items`` = ``[{id, label, value, color, me?}]``。点图例或扇区聚焦；``me`` 的一块外扩并标「我」。
  * ``rest`` 是不属于任何人的剩余（如「空闲」），灰色、不可聚焦。
+ *
+ * ``focus`` / ``onFocus`` 是给**每秒重绘**的页面用的：聚焦状态放在页面自己的
+ * state 里，重绘时传回来。不给的话就按「我」自动高亮一次——那是第一次渲染的行为，
+ * 若每次都这样，用户点中的那一块会被下一秒的重绘悄悄清掉。
  */
-export function donutPanel(items, { title = '', fmt = fmtInt, rest = null, size = 220 } = {}) {
-  let focus = items.find((i) => i.me)?.id ?? null;
+export function donutPanel(items, { title = '', fmt = fmtInt, rest = null, size = 220, focus: keptFocus, onFocus = null } = {}) {
+  let focus = keptFocus !== undefined ? keptFocus : items.find((i) => i.me)?.id ?? null;
   const holder = h('div', { class: 'donut-row' });
   const all = [...items.filter((i) => i.value > 0), ...(rest && rest.value > 0 ? [{ ...rest, id: '__rest', color: 'var(--track)', rest: true }] : [])];
   const total = all.reduce((t, i) => t + i.value, 0);
+  const setFocus = (id) => {
+    focus = id;
+    if (onFocus) onFocus(id);
+    draw();
+  };
   const draw = () => {
     while (holder.firstChild) holder.firstChild.remove();
     const c = size / 2; const r0 = size * 0.30; const r1 = size * 0.46;
@@ -293,7 +302,7 @@ export function donutPanel(items, { title = '', fmt = fmtInt, rest = null, size 
       const d = arcPath(c + pop * Math.sin(mid), c - pop * Math.cos(mid), r0, r1 + (it.id === focus ? size * 0.015 : 0), a, a1, 0.008);
       a = a1;
       return s('path', { d, fill: it.color, opacity: focus && it.id !== focus && !it.rest ? 0.35 : 1, stroke: 'var(--card)', 'stroke-width': 1.5,
-        style: { cursor: it.rest ? 'default' : 'pointer', transition: 'opacity .2s' }, onclick: () => { if (!it.rest) { focus = focus === it.id ? null : it.id; draw(); } } });
+        style: { cursor: it.rest ? 'default' : 'pointer', transition: 'opacity .2s' }, onclick: () => { if (!it.rest) setFocus(focus === it.id ? null : it.id); } });
     });
     const f = all.find((i) => i.id === focus);
     const aria = `${title}：${all.map((i) => `${i.label} ${fmt(i.value)}`).join('，')}`;
@@ -303,7 +312,7 @@ export function donutPanel(items, { title = '', fmt = fmtInt, rest = null, size 
         s('text', { x: c, y: c + 18, 'text-anchor': 'middle', 'font-size': 20, 'font-weight': 600, fill: 'var(--label)' }, f ? `${total ? Math.round(f.value / total * 100) : 0}%` : fmt(total))),
       h('div', { class: 'legend', role: 'group', 'aria-label': `${title} 图例` }, all.map((it) => h(it.rest ? 'div' : 'button', {
         type: it.rest ? null : 'button', class: `legend-item${it.rest ? ' static' : ''}${it.me ? ' me' : ''}`, 'aria-pressed': it.rest ? null : String(focus === it.id),
-        onclick: it.rest ? null : () => { focus = focus === it.id ? null : it.id; draw(); },
+        onclick: it.rest ? null : () => setFocus(focus === it.id ? null : it.id),
       }, h('span', { class: 'swatch', style: { background: it.color, 'border-radius': '50%' } }),
         h('span', { class: 'name' }, it.label, it.me ? h('span', { class: 'me-tag' }, '我') : null),
         h('span', { class: 'share' }, total ? `${(it.value / total * 100).toFixed(1)}%` : '—'),
