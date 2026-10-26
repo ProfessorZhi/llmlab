@@ -142,7 +142,8 @@ export async function services(ctx) {
       h('a', { class: 'btn primary', href: '#/services/register' }, '手动登记')),
     body,
     discoveryPanel(ctx, 'engines'),
-    discoveryPanel(ctx, 'installed'));
+    discoveryPanel(ctx, 'installed'),
+    agentReportsPanel(ctx));
 }
 
 /* ---------- 本机发现：推理服务与模型共用 ---------- */
@@ -261,6 +262,142 @@ function discoveryPanel(ctx, kind) {
   return holder;
 }
 
+/* ---------- 每用户代理：别人自己报上来的事实 ---------- */
+
+/** ``/discovery`` 的 ``agent_reports`` ⇒ 一张扁平的表格数据。纯函数，可单测。 */
+export function flattenAgentReports(data) {
+  const rows = [];
+  const reports = Array.isArray(data?.agent_reports) ? data.agent_reports : [];
+  for (const report of reports) {
+    const base = {
+      user: report.linux_user ?? '—',
+      uid: report.uid,
+      host: report.host_id ?? '—',
+      agent: report.agent_id ?? '—',
+      receivedAt: report.received_at ?? null,
+      stale: Boolean(report.stale),
+      full: report.full !== false,
+    };
+    for (const engine of report.engines ?? []) {
+      rows.push({
+        ...base,
+        kind: 'engine',
+        object: `端口 ${engine.port}`,
+        detail: [engine.framework, ...(engine.models ?? [])].filter(Boolean).join(' · ') || '—',
+        state: engine.registered
+          ? '已登记'
+          : engine.registrable === false ? '端口不在允许列表' : '可登记',
+      });
+    }
+    for (const item of report.installed_engines ?? []) {
+      rows.push({
+        ...base,
+        kind: 'installed',
+        object: item.name ?? item.engine ?? '—',
+        detail: [item.version, item.path].filter(Boolean).join(' · '),
+        state: ENGINE_FOUND_AS[item.found_as] ?? item.found_as ?? '—',
+      });
+    }
+    for (const model of report.models ?? []) {
+      rows.push({
+        ...base,
+        kind: 'model',
+        object: model.path ?? '—',
+        detail: [
+          model.format === 'gguf' ? 'GGUF' : 'Hugging Face',
+          fmtBytes(model.size_bytes ?? 0),
+          model.architecture,
+        ].filter(Boolean).join(' · '),
+        state: model.registered ? '已登记' : '可登记',
+      });
+    }
+  }
+  return rows;
+}
+
+const AGENT_KIND_LABEL = { engine: '推理服务', installed: '已安装引擎', model: '模型' };
+
+export function agentReportsPanel(ctx) {
+  const holder = h('div', {});
+  const st = { data: null, state: null, busy: false };
+  const intro = '其他用户在各自主机账户下运行 llmlab agent 报上来的事实：正在跑的服务、盘上装着的引擎、能看到的模型。'
+    + '身份由内核给出（本机 unix socket 的 SO_PEERCRED），不是自报字段；上报不等于登记，登记仍走同一套所有权校验。';
+
+  async function load() {
+    st.busy = true; draw();
+    if (ctx.demo) {
+      st.data = {
+        agent_reports_scope: 'all',
+        agent_channel: { configured: true, path: '/run/llmlab/agent.sock', listening: true, problem: null },
+        agent_reports: [{
+          principal: 'linux:lab-01:1001', agent_id: 'lab-01', host_id: 'lab-01', linux_user: 'li', uid: 1001,
+          received_at: new Date(Date.now() - 4 * 60000).toISOString(), age_seconds: 240, stale: false, full: true,
+          engines: [{ port: 8001, framework: 'vllm', models: ['Qwen2.5-14B-Instruct'], registrable: true, registered: false }],
+          installed_engines: [{ engine: 'llama.cpp', name: 'llama.cpp', found_as: 'executable', version: null, path: '/usr/local/bin/llama-server', env: null }],
+          models: [{ path: '/opt/models/bge-m3', format: 'hf', size_bytes: 2.2 * 1024 ** 3, architecture: 'XLMRobertaModel', registered: true }],
+          problems: [], rejected: {},
+        }],
+      };
+      st.state = 'ready';
+    } else {
+      const r = await loadDiscovery();
+      st.state = r.state; st.data = r.state === 'ready' ? r.value : null;
+    }
+    st.busy = false; draw();
+  }
+
+  function channelNote() {
+    const channel = st.data?.agent_channel;
+    if (!channel) return null;
+    if (!channel.configured) {
+      return '本部署没有开代理通道（启动时用了 --no-agent-socket），所以只会有平台自己扫到的东西。';
+    }
+    if (!channel.listening) {
+      return `代理通道未监听：${channel.problem ?? '原因未知'}。通常是因为 /run/llmlab 还不存在 —— 需要运维执行装机脚本。`;
+    }
+    return `代理通道在监听：${channel.path}。任何平台账户只要在自己的身份下运行 llmlab agent 就会被看见。`;
+  }
+
+  function body() {
+    const rows = flattenAgentReports(st.data);
+    if (!rows.length) {
+      return quietEmpty('ready', {
+        title: '还没有人上报',
+        body: '在自己的 Linux 账户下运行 `llmlab agent`（不需要令牌）。它会把本机正在跑的推理服务、装着的引擎与模型报上来。',
+      });
+    }
+    const cols = ['用户', '主机', '代理', '种类', '对象', '细节', '状态', '时间'];
+    return h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
+      h('thead', {}, h('tr', {}, cols.map((t) => h('th', { scope: 'col' }, t)))),
+      h('tbody', {}, rows.map((row) => h('tr', {},
+        h('td', {}, row.user, row.uid != null ? h('span', { class: 'muted' }, ` (uid ${row.uid})`) : null),
+        h('td', { class: 'mono' }, row.host),
+        h('td', { class: 'mono' }, row.agent),
+        h('td', {}, AGENT_KIND_LABEL[row.kind] ?? row.kind),
+        h('td', { class: 'mono', style: { 'font-size': '12px', 'word-break': 'break-all' } }, row.object),
+        h('td', { class: 'muted', style: { 'font-size': '12px', 'word-break': 'break-all' } }, row.detail || '—'),
+        h('td', {}, row.stale ? h('span', { class: 'muted' }, '报告已过期') : row.state),
+        h('td', { class: 'muted' }, relTime(row.receivedAt), row.full ? null : h('span', { class: 'muted' }, '（不完整）')))))));
+  }
+
+  function draw() {
+    while (holder.firstChild) holder.firstChild.remove();
+    const note = channelNote();
+    let content;
+    if (st.busy) content = h('p', { class: 'muted' }, '正在读取上报…');
+    else if (!st.data && st.state) content = emptyState(st.state);
+    else if (!st.data) content = h('p', { class: 'muted', style: { margin: 0 } }, intro);
+    else content = body();
+    put(holder, panel('', '代理上报 · 用户自己报的本机事实', st.data ? null : intro,
+      h('div', { style: { display: 'flex', 'flex-direction': 'column', gap: '12px' } },
+        note ? h('p', { class: 'muted', style: { margin: 0, 'font-size': '12px' } }, note) : null,
+        content)));
+  }
+
+  load();
+  return holder;
+}
+
 /* ============================== 模型库 ============================== */
 export async function models(ctx) {
   let list; let state = 'ready';
@@ -319,6 +456,7 @@ export async function models(ctx) {
         : h('div', { class: 'group' }, quietEmpty('ready', { title: '还没有登记模型', body: '点击「登记模型」手动添加，或用下方的本机发现从授权目录里挑选。' })))
       : emptyState(state));
     put(root, discoveryPanel(ctx, 'models'));
+    put(root, agentReportsPanel(ctx));
   }
   draw();
   return root;

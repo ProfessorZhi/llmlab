@@ -110,6 +110,8 @@ NOISY_DIR_NAMES = frozenset(
 _SHARD = re.compile(r"^(?P<stem>.+)-(?P<index>\d{5})-of-(?P<total>\d{5})$", re.IGNORECASE)
 #: 多模态投影文件的前缀：与模型一起用，但本身不是一个可加载的模型。
 MMPROJ_PREFIX = "mmproj"
+#: llama.cpp 自带分词器词表的前缀：同样是 ``.gguf``，同样不是模型。
+VOCAB_PREFIX = "ggml-vocab-"
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$")
 
 #: 框架指纹：(路径, 必须出现的字段, 框架名)。只读、小响应；拿不准就是 ``None``。
@@ -146,6 +148,16 @@ def _json(body: bytes):
         return None
 
 
+def is_safe_model_id(value: object) -> bool:
+    """一个可以原样展示、原样回填的模型 id（没有空白、控制字符与路径穿越）。
+
+    代理上报的 ``models`` 用同一条规则：两处各写一份正则，迟早会漂移成
+    「发现了但登记不了」。
+    """
+
+    return isinstance(value, str) and bool(_SAFE_ID.match(value))
+
+
 def parse_model_ids(body: bytes) -> list[str] | None:
     """OpenAI 兼容的 ``/v1/models``（``{"data":[{"id":...}]}``）⇒ 安全的 id 列表。"""
     payload = _json(body)
@@ -154,7 +166,7 @@ def parse_model_ids(body: bytes) -> list[str] | None:
     ids = []
     for item in payload["data"]:
         model_id = item.get("id") if isinstance(item, dict) else None
-        if isinstance(model_id, str) and _SAFE_ID.match(model_id):
+        if is_safe_model_id(model_id):
             ids.append(model_id)
         if len(ids) >= MAX_MODEL_IDS:
             break
@@ -269,12 +281,18 @@ def suggest_name(raw: str | None) -> str | None:
 class LocalDiscovery:
     """可注入的本机发现器。生产缺省读真表、连真回环；测试注入 fixture。"""
 
-    allowed_ports: Iterable[int]
+    #: 端口允许列表。``None`` = 不限制（只给每用户代理用：它只报自己 uid 的监听）。
+    allowed_ports: Iterable[int] | None
     #: ``None`` = 用 :data:`DEFAULT_MODEL_ROOTS` 自动查找；空元组 = 明确不找。
     model_roots: tuple[str, ...] | None = None
     table: ProcNetListenerTable = field(default_factory=ProcNetListenerTable)
     fetch: Fetch = field(default_factory=loopback_fetch)
     uid_namer: Callable[[int], str | None] = linux_user_for_uid
+    #: 只看属于这个 uid 的监听 / 文件。``None`` = 不看归属（服务端自己的扫描）。
+    #:
+    #: 代理以用户身份运行时用它把自己限制在「我的东西」里：/proc/net/tcp 是全机的
+    #: 表，不设这一条，一个用户的代理会把整台机器报成他的。
+    restrict_uid: int | None = None
 
     # --- 推理服务 ------------------------------------------------------------
 
@@ -289,10 +307,12 @@ class LocalDiscovery:
     def engines(self, *, registered_targets: dict[tuple[str, int], bool]) -> tuple[list[EngineCandidate], str | None]:
         """``registered_targets``：``(host, port) -> 是否本人登记``，由 Registry 给。"""
         sockets, problem = self._listeners()
-        allowed = set(self.allowed_ports)
+        allowed = None if self.allowed_ports is None else set(self.allowed_ports)
         by_port: dict[int, set[int]] = {}
         for item in sockets:
-            if item.port not in allowed:
+            if allowed is not None and item.port not in allowed:
+                continue
+            if self.restrict_uid is not None and item.uid != self.restrict_uid:
                 continue
             if not _serves_loopback(item.ip):
                 continue
@@ -356,6 +376,8 @@ class LocalDiscovery:
                 if len(found) >= MAX_MODEL_CANDIDATES:
                     problems.append(f"model_candidates_capped:{MAX_MODEL_CANDIDATES}")
                     return found, problems
+                if not self._owned(candidate["path"]):
+                    continue
                 # 分片模型有一组路径；只要其中任意一片被登记过，就算这个模型已登记。
                 paths = candidate.get("paths") or [candidate["path"]]
                 found.append(
@@ -379,6 +401,19 @@ class LocalDiscovery:
                 problems.append(f"model_walk_truncated:{root}")
         return found, problems
 
+    def _owned(self, path: str) -> bool:
+        """``restrict_uid`` 为空时恒真；否则只有属主是那个 uid 的路径算数。
+
+        读不到也返回 ``False``：代理不该把一个自己 stat 不了的东西报成自己的。
+        """
+
+        if self.restrict_uid is None:
+            return True
+        try:
+            return os.stat(path).st_uid == self.restrict_uid
+        except OSError:
+            return False
+
     # --- 磁盘上的引擎 --------------------------------------------------------
 
     def installed_engines(self) -> tuple[list[InstalledEngineCandidate], list[str]]:
@@ -393,8 +428,12 @@ class LocalDiscovery:
         seen: set[tuple[str, str]] = set()
 
         def add(engine: str, name: str, found_as: str, version: str | None, path: str, env: str | None) -> None:
-            key = (engine, path)
+            # 去重键用 ``realpath``：``lib`` 与 ``lib64`` 通常是指向同一个目录的两条
+            # 名字，同一个分发包会因此出现两次（实测：一个 venv 报了两条 llama.cpp）。
+            key = (engine, os.path.realpath(path))
             if key in seen:
+                return
+            if not self._owned(path):
                 return
             seen.add(key)
             found.append(
@@ -617,6 +656,11 @@ def _walk_models(root: Path, flags: dict[str, bool] | None = None) -> Iterable[d
                 )
             elif label.lower().startswith(MMPROJ_PREFIX):
                 # ``mmproj-*.gguf`` 是多模态投影，不能单独加载，也不会被单独登记成模型。
+                continue
+            elif label.lower().startswith(VOCAB_PREFIX):
+                # ``ggml-vocab-*.gguf`` 是 llama.cpp 自带的分词器词表，不是权重：
+                # 一个源码树里躺着二十几个，报上去会把人的模型清单淹掉
+                # （实测：一个人 42 条模型里 38 条是它们）。
                 continue
             else:
                 singles.append((label, name, size))

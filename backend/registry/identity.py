@@ -51,6 +51,15 @@ SCOPE_ADMIN_READ = "registry:admin:read"
 #: ``role == admin`` 自动获得。
 SCOPE_ADMIN_MANAGE = "registry:admin:manage"
 
+#: 经本机 unix socket（``SO_PEERCRED``）上报**自己**的扫描快照。
+#:
+#: 只由内核证明的 uid 授予：``backend.registry.agent_channel`` 用对端 uid 在受信
+#: 主体目录里查到主体，构造的 ``RequesterContext`` 只带这一条 scope。网页会话的
+#: 策略（``backend.bff.scopes``）刻意**不**发它 —— 于是它既申请不到、也声明不了。
+#: 它换来的全部能力是「写一条属于自己的报告」：不产生登记、共享，也不带来读别人
+#: 数据的权力。
+SCOPE_AGENT_REPORT = "registry:agent:report"
+
 #: 本部署认识的全部 scope —— Registry **唯一**的授权词表，不因 introspection 扩容。
 #:
 #: ``TokenDirectory`` 在构造期拒绝表外的 scope（拼写错误不会静默失效）；
@@ -64,6 +73,7 @@ KNOWN_SCOPES = frozenset(
         SCOPE_ENDPOINT_INVOKE,
         SCOPE_ADMIN_READ,
         SCOPE_ADMIN_MANAGE,
+        SCOPE_AGENT_REPORT,
     }
 )
 
@@ -126,6 +136,32 @@ UID_UNMAPPED = -1
 
 def is_account_principal(principal: object) -> bool:
     return isinstance(principal, str) and principal.startswith(ACCOUNT_PRINCIPAL_PREFIX)
+
+
+#: Linux 主体的命名形状（``backend.auth_linux.handoff.linux_user_id`` 的产物）。
+_LINUX_PRINCIPAL_PREFIX = "linux:"
+
+
+def principal_host_id(principal: object) -> str | None:
+    """从 ``linux:<host>:<uid>`` 里取出 ``<host>``；不是这个形状就 ``None``。
+
+    代理上报的 ``host_id`` **必须**由服务端从这里推出。客户端自称的主机名不能
+    用：这台机器上的正式服务跑在 ``--host-id dell-test-01`` 之下，而不是真实
+    主机名 —— 采信客户端的写法，同一台机器就会在库里变成两台。
+
+    只认最后一段是十进制 uid 的形状；主机名里即便有冒号也仍然解得出来（按最右
+    一个冒号切）。
+    """
+
+    if not isinstance(principal, str) or not principal.startswith(_LINUX_PRINCIPAL_PREFIX):
+        return None
+    rest = principal[len(_LINUX_PRINCIPAL_PREFIX):]
+    head, separator, tail = rest.rpartition(":")
+    if not separator or not head:
+        return None
+    if not tail.isdigit():
+        return None
+    return head
 
 
 @dataclass(frozen=True)

@@ -53,16 +53,28 @@
 
 ## 2. 一次性安装（管理员 sudo 执行一次）
 
-提供 `deploy/install/llmlab-install.sh`（幂等、可回滚、先 `--dry-run` 打印计划）。它只做：
+`deploy/install/llmlab-install.sh` **只打印计划，不执行**（`--apply` 被拒绝，退出码 3）。
+理由见 §10.2：`docs/access-boundaries.md` §6 明确本仓库不创建 systemd 单元、不 enable、
+不注册定时任务。管理员照打印出来的清单逐条手工执行，并留存记录。
 
-1. 系统服务 `llmlabd.service`（`User=llmlab`），替代当前以 fjd 身份运行的 BFF。
-2. `/etc/tmpfiles.d/llmlab.conf`：`/run/llmlab`（llmlab:llmlab 0755）。
-3. 全局用户级服务 `/etc/systemd/user/llmlab-agent.service`，`systemctl --global enable llmlab-agent`。
-4. 对 `/etc/llmlab/users`（管理员维护的名单）里每个用户 `loginctl enable-linger <user>`。
-5. 平台区：`/data/models/platform`、`/srv/llm-lab/models`、`/opt/llm-engines`，llmlab 写、成员只读。
+清单覆盖：
 
-**禁止**：改任何用户 HOME 的权限；加 sudoers 规则；改 Strata / Caddy / Tailscale。  
-卸载：`llmlab-install.sh --uninstall` 逆序执行。
+1. `/etc/tmpfiles.d/llmlab.conf`：`/run/llmlab`（daemon 用户所有，0755），
+   让 BFF 有地方 bind socket。
+2. 全局用户级服务 `/etc/systemd/user/llmlab-agent.service`（**没有** `User=`
+   —— 用户级单元本来就以该用户自己身份运行，这正是 `SO_PEERCRED` 要的事实）。
+3. **逐用户**`loginctl enable-linger <user>` 与 `systemctl --user enable llmlab-agent`：
+   一人一次，由该用户本人或管理员执行；**不循环遍历名单、不代任何人 enable**。
+   「谁被看见」是那个人的选择。
+4. 验收命令（`llmlab agent --dry-run` / `--once` / `llmlab discover`）。
+
+系统服务 `llmlabd.service`（`User=llmlab`，替代当前以其他身份运行的 BFF）与平台区目录
+（`/data/models/platform` 等）属于发布动作，不在本脚本的计划里——它们要停机、要搬状态，
+必须走发布与回滚审批。
+
+**禁止**：改任何用户 HOME 的权限；加 sudoers 规则；改 Strata / Caddy / Tailscale。
+卸载：`llmlab-install.sh --uninstall` 打印逆序清单（先停用户单元，再撤 linger，
+再删单元与 tmpfiles 条目）。
 
 ---
 
@@ -297,12 +309,16 @@ task 推断：`*ForCausalLM` ⇒ chat；`*VLForConditionalGeneration` / 有 mmpr
 
 本机：CLI 连 `/run/llmlab/agent.sock` 取短期令牌（15 分钟，`SO_PEERCRED` 认证），无需登录。异机：`llmlab login` 一次，令牌存 `~/.config/llmlab/token`（0600）。
 
+> **状态（2026-10-26）**：socket **签发令牌**这件事**还没做**。现在已经落地的只有
+> `llmlab agent`：它不带令牌，用内核给的 uid 只做一件事——上报本机事实。其它命令
+> 仍然只认 Portal 签发的令牌（`docs/registry-cli-contract.md` §9.3）。
+
 ### 6.3 命令
 
 | 命令 | 作用 |
 | --- | --- |
 | `llmlab status` | 我的模型、build、服务、GPU、代理状态、上次同步，以及「待办」（带可执行命令） |
-| `llmlab sync [--explain] [--dry-run]` | 立即扫描并上报（幂等） |
+| ~~`llmlab sync [--explain] [--dry-run]`~~ → `llmlab agent [--once \| --watch] [--dry-run]` | 立即扫描并上报（幂等）。**已按此名实现**，理由见 §10.1；`--explain` 未做 |
 | `llmlab models [list \| show <m>]` | 列表 / 元数据（facts、位置、SSD/HDD） |
 | `llmlab engines [list \| show <b> [--flags]]` | build 列表 / 支持的参数 |
 | `llmlab serve <m> [--engine <b>] [--ctx N] [--parallel N] [--set flag=value…] [--port P] [--share lab\|private] [--stage] [--plan]` | `--plan` 只打印推荐参数与显存估算；否则启动并等待就绪，输出模型名与调用示例 |
@@ -349,7 +365,7 @@ llmlab --json keys default                            # 拿调用用的 Key
 | --- | --- | --- |
 | **S1** 发现规则 + facts + 指纹 | 纯函数：§5.2 规则、§5.3 指纹与匹配、§5.4 GGUF/HF 读取、§5.5 `--help` 解析器（llama.cpp、vLLM 各一份样本） | 合成 fixture（仿 kaidong 目录：4 个真模型 + 词表 + 6 棵源码树）⇒ 恰好 4 模型 / 2 build；移动、复制、歧义、缺失各一例；GGUF facts 与样本一致 |
 | **S2** 服务自动接入 + 默认策略 + 默认 Key | §4.1、§4.2、§4.3；`lab_settings`；控制台开关 | 假引擎 30 s 内接入；默认私有他人调不到；切 `all` 后新服务可调；`offline` 时 503 |
-| **S3** 代理 + socket + 上报 | `llmlab-agent`、`SO_PEERCRED`、§5.6 校验、`sync` 命令、安装脚本（只提供，不执行） | 未映射 uid 被拒；伪造他人路径 / 端口被拒；`full` 上报标记 missing |
+| **S3** 代理 + socket + 上报 | ✅ **已实现**：`llmlab agent`、`SO_PEERCRED`、§5.6 校验、安装计划打印器。`sync` 更名为 `agent --once` / `--watch`（§10.1） | 未映射 uid 被拒；伪造他人路径 / 端口被拒；`full` 上报标记 missing |
 | **S4** 推荐参数 + 启动 / 重启 | §4.4、§4.5、§5.7；CLI `serve` / `services` / `tune`；控制台启动面板与「应用并重启」 | `--plan` 数值与公式一致；假引擎经代理启动、就绪、接入、挂路由；重启后实测值更新；非主人启动被拒 |
 | **S5** CLI 完整化 + skill | §6 全部命令、`help --json`、`docs/agent/llmlab-cli.md` | 每个命令的 `--json` 结构有快照测试；配方在测试环境端到端跑通 |
 | **S6** GPU 看板与仲裁 | §4.7 | 与 NVML 进程表一致；管理员 stop 写审计 |
@@ -357,3 +373,168 @@ llmlab --json keys default                            # 拿调用用的 Key
 ## 9. 明确不做
 
 共享模型文件 / 发布库；checkpoint 版本树；LLM 参与发现；平台以别人身份执行；平台移动或删除用户文件；外部 HTTPS 入口（单独审批）。
+
+---
+
+## 10. 状态：S3 的落地方式（2026-10-26）
+
+> 本节记录 S3 **实际交付了什么、和规格哪里不一样、为什么**。§10.1–10.4 写的是
+> **2026-10-26 白天、部署之前**的状态（`NOT DEPLOYED`：没装过单元、没 enable 过
+> 任何人、没改过 BFF 的运行方式）；当天晚些时候通道按 §10.5 落地，落地记录与
+> 验收数据见 §10.5.5。
+
+### 10.1 与规格的差异
+
+| 规格 | 落地 | 为什么 |
+|---|---|---|
+| `sync` 命令 | `llmlab agent --once` / `--watch` | 这条命令报的是**本机现状**（不是「把账本同步下来」），叫 `sync` 会让人以为它会拉东西回去。它只发不收。 |
+| 报告里可以带 `uid` / `owner` 等 | **禁止**，带了整条丢弃（`identity_field_present`） | 归属只能有一个来源：内核 + `/proc/net/tcp`。允许自报字段等于开一条伪造的路。 |
+| `loginctl enable-linger` 对名单里每个用户 | 只**打印**命令，一人一次 | 见 §10.2。 |
+| 安装脚本先 `--dry-run` 再执行 | 只有打印；`--apply` 拒绝（退出码 3） | 见 §10.2。 |
+
+`host_id` 也改了来源：规格让代理报，落地由服务端从主体名 `linux:<host>:<uid>` 推出来。
+否则同一台机器上不同的人上报会被算成两台主机。
+
+### 10.2 安装脚本只打印
+
+`docs/access-boundaries.md` §6 是本仓库的硬约束：「不创建 systemd 单元、不注册定时
+任务」。安装要动的正是这些，所以脚本刻意**没有**执行路径。它打印的内容包括
+`/etc/tmpfiles.d/llmlab.conf`、`/etc/systemd/user/llmlab-agent.service` 的完整内容、
+逐用户的 enable 命令与验收命令；`--apply` 退出 3 并指向批准流程。
+
+`tests/security/test_install_plan_is_print_only.py` 把 `sudo` / `systemctl` /
+`loginctl` / `systemd-tmpfiles` / `rm` / `mkdir` 全换成会写标记的命令再跑一遍脚本，
+断言标记从未出现——这条用例防的是「某天有人悄悄加了一句 `systemctl enable`」。
+
+### 10.3 交付物
+
+| 层 | 文件 |
+|---|---|
+| 通道 | `backend/registry/agent_channel.py`（AF_UNIX、`SO_PEERCRED`、上限、状态） |
+| 校验/入库 | `backend/registry/agent_reports.py`、`RegistryService.report_agent`、schema v5 的 `agent_reports` 表 |
+| 服务接线 | `backend/bff/devserver.py`（`--agent-socket` / `--no-agent-socket`） |
+| CLI | `cli/llmlab/agent.py`、`llmlab agent`（不解析令牌） |
+| 控制台 | `web/console/js/pages.js` 的 `flattenAgentReports` / `agentReportsPanel` |
+| 装机 | `deploy/install/llmlab-install.sh`（打印器） |
+| 文档 | `docs/registry-cli-contract.md` §22 |
+
+**自动化证据**（全部 CPU-only、离线）：
+
+| 测试 | 条数 | 钉住的事 |
+|---|---|---|
+| `tests/registry/test_agent_channel.py` | 18 | 真 socket：握手、上限、错误透传、清理；两条用真 `SO_PEERCRED` |
+| `tests/registry/test_agent_reports.py` | 40 | 每条拒绝理由、服务端写归属、覆盖不追加、审计、可见性、v4→v5 迁移 |
+| `tests/registry/test_agent_cli.py` | 10 | 真子进程、清空 `LLMLAB_TOKEN*` 后仍能上报 |
+| `tests/web-features/agent-reports.test.js` | 14 | 「可登记 / 端口不在允许列表 / 已登记 / 已过期 / 不完整」不互相顶替 |
+| `tests/security/test_install_plan_is_print_only.py` | 7 | 装机脚本一次系统命令都不调用 |
+| `tests/bff/test_account_directory_by_uid.py` | 4 | `by_uid` 回归：空表会把所有人拒在门外 |
+
+### 10.4 没做、也不声称
+
+* **没有装**（*部署之前*的状态，已由 §10.5 落地）：`/run/llmlab` 当时不存在，
+  `/discovery` 是 `agent_socket_dir_missing`，通道没开。
+* **没有多用户证据**（*部署之前*）：跨 UID 的拒绝当时只有合成测试，没在真实多用户
+  主机上跑过；§10.5.5 是第一次真实多账户运行。
+* **S4 之后**（推荐参数、起停任务、`/api/agent/tasks`）都还没做；代理现在**只上报，
+  不接受任务**。§5.7 的「代用户起服务」没有实现。
+
+## 10.5 2026-10-26：管理员代跑 + 发布到 `/opt/llmlab`
+
+用户的要求很直接：不要等 `kaidong` 自己 `enable` 一次代理，管理员用 root **自动**
+把每个账户的现状送进平台。README 与 §10.1 里的「谁被看见是那个人的选择」因此被
+**有意偏离**了一次。记录决定、代价与回头路。
+
+### 10.5.1 为什么不能「让 BFF 自己扫」
+
+BFF 是以一个人的账户跑的进程。它去 `stat` 另一个人的家目录只会拿到 `EACCES`
+（`0700`），而提权去读别人的家目录正是 `docs/access-boundaries.md` 禁止的事。
+让它报「没有模型」也不对——那不是「空」，是「看不见」，两者在页面上长得一样。
+
+### 10.5.2 决定：root 只决定轮次，扫描仍以本人 uid 运行
+
+`deploy/inventory/host-inventory.sh` 对每个账户执行
+`runuser -u <name> -- … -m cli.llmlab agent`。内核在 `connect()` 时把**那个人的
+真实 uid** 填进 `SO_PEERCRED`，服务端的 `PrincipalDirectory.by_uid` 与
+`agent_reports` 的归属校验**一行都没改**。协议、校验、存储全部沿用 §22；本决定
+唯一新增的是「谁按下开始」。
+
+| 选项 | 代价 | 结论 |
+|---|---|---|
+| 让每个人自己 `enable`（§22.8） | 没登录过的人永远不出现；用户要先读装机清单 | 保留，仍然是首选路径 |
+| BFF 提权读别人的家目录 | 破坏进程边界；一个被攻陷的 BFF 就是全机读取 | **否决** |
+| root 代跑，扫描以本人 uid 运行 | 默认扫所有人 | **采纳**，加 `~/.config/llmlab/no-inventory` 退出 |
+
+**代价，明说**：
+
+* 默认「被看见」。退出靠用户自己在 `~/.config/llmlab/no-inventory` 放一个文件——
+  这是他的文件，不需要谁替他决定；但**默认值**变了，这一点必须写在文档里，而不是
+  只在代码注释里。
+* root 有了一个「以任意用户身份跑固定命令」的入口。它的 argv 完全由脚本拼出
+  （`env -i` 清环境、`PATH` 固定、代码目录只读），但它是 root 权限的执行路径：
+  改这个脚本等于改全机。所以它和 BFF 代码一样归入发布流程，不从开发工作树直接跑。
+
+### 10.5.3 前置条件：代码必须离开 `0700` 的家目录
+
+实测发现现有清单漏了一步：仓库通常躺在**某个人的家目录里**（`0700`/`0750`），
+**除他以外任何账户 `import cli` 都会 `ModuleNotFoundError`**，按 §22.8 装好的单元会
+以启动失败告终。
+所以代跑要求先把代码发布到任意账户可读的位置：
+
+```
+rsync -a --delete <repo>/ /opt/llmlab/
+chown -R root:root /opt/llmlab
+chmod -R a+rX,go-w /opt/llmlab
+```
+
+脚本在扫第一个人之前自己先验这一条（`runuser -u <首个非 root 账户> -- test -r`），
+不通过就打印上面三行并退出 `2`——不让每个账户各撞一次同样的错。
+
+### 10.5.4 风险与回滚
+
+| 风险 | 处理 |
+|---|---|
+| 定时器反复失败没人看 | oneshot 单元 + `TimeoutStartSec=15min`；脚本对通道不通（退出码 7）整轮中止并打印检查清单 |
+| 代码副本与仓库不一致 | `/opt/llmlab` 只是发布副本，随时可重新 `rsync`；回滚就是 `rm -rf /opt/llmlab` |
+| 有人不想被看见 | `~/.config/llmlab/no-inventory`（脚本输出里会记一行「跳过」） |
+| 加了新账户却不知道它会跑 | 没有硬编码名单：脚本遍历 `getent passwd` 里 `uid ∈ [1000, 65534)` 且家目录存在的账户 |
+
+回滚（任取其一即停）：`systemctl disable --now llmlabd-inventory.timer`；
+删 `/etc/systemd/system/llmlabd-inventory.{service,timer}` + `daemon-reload`；
+`rm -rf /opt/llmlab`。三条都不影响已经上报的数据——`agent_reports` 是「发现」，
+不是「登记」；BFF 重启会自己 `unlink` socket。
+
+### 10.5.5 落地记录（2026-10-26 14:10 +08:00）
+
+按批准的顺序执行，五步都成功：
+
+1. **发布**：`rsync -a --delete`（排除 `.git/` 与 `__pycache__/`）→ `/opt/llmlab`，
+   `chown -R root:root`、`chmod -R a+rX,go-w`。验收：另一个非 root 账户
+   `import cli.llmlab.agent` 成功。发布副本约 30 MB，不含任何 `.db`/`.env`/`.key`。
+2. **通道目录**：`/etc/tmpfiles.d/llmlab.conf` 写 `d /run/llmlab 0755 <BFF 账户> -`，
+   `systemd-tmpfiles --create` 生效。
+3. **重启 BFF**（用户级单元，带 `--state-dir/--database/--operator-policy` 等原有参数），
+   日志出现 `agent socket /run/llmlab/agent.sock (SO_PEERCRED)`。
+4. **手工代跑一轮**：`sudo /opt/llmlab/deploy/inventory/host-inventory.sh --once` → 6 个
+   账户全部上报，0 跳过 / 0 无身份 / 0 失败。
+5. **定时器**：`llmlabd-inventory.service`（oneshot）+ `.timer`（`OnBootSec=2min`、
+   `OnUnitActiveSec=5min`）写入 `/etc/systemd/system/`，`enable --now`；第一次由
+   timer 触发的运行 4.5 秒完成，退出 0。
+
+**验收数据**（`/discovery` 的 `data` 块与 `agent_reports` 表一致）：
+
+| 项 | 值 |
+|---|---|
+| `agent_channel.listening` | `true`（`/run/llmlab/agent.sock`，0666） |
+| `agent_channel.connections` / `reports` | 第一轮之后 `6` / `6`（自 BFF 启动起累计，每轮 +6；表里始终 6 行） |
+| 上报账户 | 6 个（其中 3 个名下确实什么都没有，报的是空清单） |
+| 有模型的账户 | 2 个；其中一个人 4 个真实权重（最大 63.39 GB） |
+| 扫描器卫生 | 同一个人此前报出 42 条模型，其中 38 条是 `ggml-vocab-*` 词表；过滤后正好 4 条 |
+| 引擎去重 | `lib`/`lib64` 双计数修掉后，该账户的 llama.cpp 只出现一次 |
+
+**管理员视角的复验**：本地管理员凭据文件里的口令是过期的（登录 `invalid_credentials`），
+先用 `backend.auth.bootstrap rotate --recover` 轮换，再以管理员会话请求
+`/api/v2/registry/discovery`：`agent_reports_scope` 从 `self` 变成 `all`，六条上报
+逐条可见，`kaidong` 那行是 4 个模型（`decider-4b-v2.1-Q8_0`、
+`eagle3-gpt-oss-120b-Q8_0`、`gpt-oss-120b-MXFP4`、`test-qwen0.5b-q4km`）。走的是
+控制台同一条读取路径与同一个 scope 判断，但没有在浏览器里点过——最后一眼仍建议由
+人自己看。

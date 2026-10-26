@@ -19,6 +19,7 @@ import hashlib
 import json
 import secrets
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Callable, Iterable
 
 from . import dto, gateway as gateway_mod
@@ -26,6 +27,13 @@ from . import health as health_mod
 from . import ownership as ownership_mod
 from . import preflight as preflight_mod
 from . import router as router_mod
+from .agent_reports import (
+    MAX_AGENTS_PER_PRINCIPAL,
+    PRUNE_AFTER_SECONDS,
+    STALE_AFTER_SECONDS,
+    AgentReport,
+    AgentReportValidator,
+)
 from .authz import AccessPolicy, assert_no_default_private_trap
 from .errors import (
     AccessDenied,
@@ -35,6 +43,7 @@ from .errors import (
     NotVerified,
     OwnershipUnverified,
     ProtocolUnverified,
+    RegistryError,
     RevisionConflict,
     ServiceOffline,
     UpstreamUnavailable,
@@ -55,11 +64,13 @@ from .health import (
 from .identity import (
     FORBIDDEN_IDENTITY_FIELDS,
     SCOPE_ADMIN_MANAGE,
+    SCOPE_AGENT_REPORT,
     PrincipalDirectory,
     RequesterContext,
     TokenDirectory,
     TrustedTokenIntrospector,
     is_account_principal,
+    principal_host_id,
 )
 from .ingest import OFFLINE_AFTER_MISSES
 from .models import (
@@ -248,6 +259,25 @@ def _idempotency_key(raw: object) -> str | None:
     return key
 
 
+#: 回环主机名。同一个端口在 ``target_url`` 里可能写成 ``127.0.0.1`` 或 ``localhost``，
+#: 比对「这个端口登记过没有」时两者要等价。
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost"})
+
+
+def _age_seconds(received_at: object, now: datetime) -> int | None:
+    """``received_at`` 到现在的秒数。解析不了就 ``None``（视图会按「过期」处理）。"""
+
+    if not isinstance(received_at, str):
+        return None
+    try:
+        moment = datetime.fromisoformat(received_at)
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        return None
+    return max(0, int((now - moment).total_seconds()))
+
+
 def _reject_identity_fields(payload: dict) -> None:
     """登记类请求里出现身份字段 -> 直接拒绝（同 ``identity.reject_identity_assertions``）。
 
@@ -282,6 +312,7 @@ class RegistryService:
         router: object | None = None,
         port_checker: Callable[[NormalizedTarget], tuple[bool, str]] | None = None,
         discovery: object | None = None,
+        report_validator: object | None = None,
         clock: Clock = utc_now,
     ) -> None:
         self.store = store
@@ -291,6 +322,18 @@ class RegistryService:
         self.tokens = tokens
         self.principals = principals
         self.config = config or RegistryConfig()
+        #: 每用户代理上报的校验器。缺省的端口允许列表与 ``register_engine`` 用的是
+        #: **同一份** ``config.allowed_ports``：一条报告看得到的端口，登记时也要过
+        #: 同一道门，于是 ``registrable`` 这个字段才有意义。
+        self.report_validator = (
+            report_validator
+            if report_validator is not None
+            else AgentReportValidator(allowed_ports=frozenset(self.config.allowed_ports))
+        )
+        #: 代理的 unix socket 通道。构造顺序上它需要本对象，所以由 ``devserver`` 在
+        #: 建好服务之后挂进来（``service.agent_channel = channel``）。``None`` = 本部署
+        #: 没开这条通道；``discover`` 会如实说「没开」，而不是假装用户在偷懒。
+        self.agent_channel: object | None = None
         #: ``None`` 表示**本部署没有任何观测源** —— 于是没有东西能变成 verified。
         self.prober = prober
         #: 协议轴。缺省是「说不出来」，不是「大概是」。
@@ -936,6 +979,15 @@ class RegistryService:
         """
         policy = self.policy(requester)
         policy.require_read_scope()
+        # 代理报告与本机发现是两条**独立**的来源：BFF 以 fjd 运行、读不到别人的
+        # 0700 HOME，但别人可以自己上报。所以这条分支也要带上它们。
+        agent_rows, agent_scope = self._agent_report_views(requester)
+        agent_block = {
+            "agent_reports": agent_rows,
+            "agent_reports_scope": agent_scope,
+            "agent_reports_stale_after_seconds": STALE_AFTER_SECONDS,
+            "agent_channel": self._agent_channel_status(),
+        }
         if self.discovery is None:
             return self._envelope(
                 {
@@ -944,9 +996,13 @@ class RegistryService:
                     "installed_engines": [],
                     "models": [],
                     "problems": ["discovery_not_configured"],
+                    **agent_block,
                 },
                 requester,
-                notes=["本部署没有开启本机发现；仍可手动登记。"],
+                notes=[
+                    "本部署没有开启本机发现；仍可手动登记。",
+                    "每用户代理的报告不依赖本机发现：它们由各自的用户身份上报。",
+                ],
             )
         registered_targets: dict[tuple[str, int], bool] = {}
         for engine in self.store.list_engines():
@@ -977,12 +1033,204 @@ class RegistryService:
                 "models": [item.to_dict() for item in models],
                 "model_roots": list(self.discovery.effective_model_roots()),
                 "model_roots_automatic": self.discovery.model_roots is None,
-                "allowed_ports": sorted(self.discovery.allowed_ports),
+                "allowed_ports": (
+                    sorted(self.discovery.allowed_ports)
+                    if self.discovery.allowed_ports is not None
+                    else None
+                ),
                 "problems": problems,
+                **agent_block,
             },
             requester,
             notes=["候选只是清单：登记走与手动登记相同的接口与校验。"],
         )
+
+    # -- 每用户代理上报 -----------------------------------------------------
+
+    def report_agent(self, requester: RequesterContext, payload: dict) -> AgentReport:
+        """收下一份「我这台机器上跑着什么、装了什么」的快照。**不登记任何东西。**
+
+        身份叙事只有一条：``requester.uid`` 由 unix socket 的 ``SO_PEERCRED`` 给出，
+        恰好落在受信目录的某一行上，而那一行就是 ``requester.principal``。因此：
+
+        * ``run_as_uid`` / ``run_as_user`` / ``target_url`` / ``host_id`` 全部由服务端
+          写死 —— 客户端一个字都不算（也正因如此，报告中带这些字段的条目会被整条
+          丢弃，见 ``agent_reports._asserts_identity``）；
+        * ``host_id`` 从主体名 ``linux:<host>:<uid>`` 里取，**不**用客户端自称的主机名；
+        * 这条通道只写 ``agent_reports``，永远不碰 ``engines`` / ``models`` /
+          ``model_locations``：看见不等于登记。
+        """
+
+        if not isinstance(requester, RequesterContext):
+            raise InvalidRequest("requester must be a RequesterContext")
+        if SCOPE_AGENT_REPORT not in requester.scopes:
+            # 这条 scope 不经过 ``_token_scope_policy``，HTTP 路由里也没有一条接受它。
+            raise AccessDenied(f"missing required scope {SCOPE_AGENT_REPORT}")
+        if not isinstance(requester.uid, int) or requester.uid < 0:
+            raise AccessDenied("agent reports require a kernel-attested uid")
+        if not isinstance(payload, dict):
+            raise InvalidRequest("an agent report must be a JSON object")
+        _reject_identity_fields(payload)
+
+        principal = self.principals.require(requester.principal)
+        if not principal.approved:
+            raise AccessDenied("this principal is not approved")
+        if principal.uid != requester.uid:
+            raise AccessDenied("the attested uid does not match the principal directory")
+        host_id = principal_host_id(requester.principal)
+        if host_id is None:
+            raise InvalidRequest("agent reports require a linux:<host>:<uid> principal")
+
+        received_at = self._now()
+        report = self.report_validator.validate(
+            principal=principal.principal,
+            uid=requester.uid,
+            linux_user=principal.linux_user,
+            host_id=host_id,
+            payload=payload,
+            received_at=received_at,
+        )
+        stored = self.store.upsert_agent_report(
+            principal=principal.principal,
+            agent_id=report.agent_id,
+            host_id=host_id,
+            linux_user=principal.linux_user,
+            uid=requester.uid,
+            report_version=report.report_version,
+            scanned_at=report.scanned_at,
+            received_at=received_at,
+            full=report.full,
+            report=report.snapshot(),
+            problems=list(report.problems),
+            max_per_principal=MAX_AGENTS_PER_PRINCIPAL,
+        )
+        if not stored:
+            raise Conflict(
+                f"this principal already reports from {MAX_AGENTS_PER_PRINCIPAL} agents; "
+                "reuse an existing agent_id"
+            )
+        self._prune_agent_reports(received_at)
+        violations = report.ownership_violations()
+        if violations:
+            # 被丢弃的伪造不走普通日志：它是「有人报了一个不属于他的端口/路径」，
+            # 值得留成审计。只记计数与原因，不记条目里的其余内容。
+            self._audit(
+                requester,
+                action="agent_report_ownership_violation",
+                object_type="agent_report",
+                object_id=report.agent_id,
+                detail={"violations": violations},
+            )
+        return report
+
+    def _prune_agent_reports(self, received_at: object) -> None:
+        """写路径上的过期清理。失败**不**影响这次上报。"""
+
+        try:
+            self.store.delete_agent_reports_before(
+                received_at - timedelta(seconds=PRUNE_AFTER_SECONDS)
+            )
+        except RegistryError:  # pragma: no cover - 存储故障
+            pass
+
+    def _agent_report_views(self, requester: RequesterContext) -> tuple[list[dict], str]:
+        """代理快照的对外视图，以及这本部署当前用的可见范围。"""
+
+        if requester.is_admin_read:
+            rows = self.store.list_agent_reports()
+            scope = "all"
+        else:
+            rows = self.store.list_agent_reports(principals=[requester.principal])
+            scope = "self"
+        now = self._now()
+        marks: dict[str, tuple[set, set]] = {}
+        views = []
+        for row in rows:
+            principal = row["principal"]
+            if principal not in marks:
+                marks[principal] = self._registered_marks(principal)
+            ports, paths = marks[principal]
+            report = row.get("report") or {}
+            engines = [
+                {**item, "registered": item.get("port") in ports}
+                for item in report.get("engines") or []
+                if isinstance(item, dict)
+            ]
+            models = [
+                {**item, "registered": item.get("path") in paths}
+                for item in report.get("models") or []
+                if isinstance(item, dict)
+            ]
+            age = _age_seconds(row.get("received_at"), now)
+            views.append(
+                {
+                    "principal": principal,
+                    "agent_id": row["agent_id"],
+                    "host_id": row["host_id"],
+                    "linux_user": row["linux_user"],
+                    "uid": row["uid"],
+                    "report_version": row["report_version"],
+                    "scanned_at": row["scanned_at"],
+                    "received_at": row["received_at"],
+                    # 年龄由**服务端时钟**算：客户端的 started_at 只能当参考。
+                    "age_seconds": age,
+                    "stale": age is None or age > STALE_AFTER_SECONDS,
+                    "full": row["full"],
+                    "counts": {
+                        "engines": len(engines),
+                        "installed_engines": len(report.get("installed_engines") or []),
+                        "models": len(models),
+                    },
+                    "engines": engines,
+                    "installed_engines": report.get("installed_engines") or [],
+                    "models": models,
+                    "problems": row.get("problems") or [],
+                    "rejected": report.get("rejected") or {},
+                }
+            )
+        return views, scope
+
+    def _registered_marks(self, principal: str) -> tuple[set[int], set[str]]:
+        """这个主体已经登记过的回环端口与权重路径。供视图标 ``registered``。"""
+
+        ports = set()
+        for engine in self.store.list_engines():
+            if engine.owner_principal != principal:
+                continue
+            target = engine.target or {}
+            if target.get("host") in _LOOPBACK_HOSTS:
+                ports.add(target.get("port"))
+        paths = {
+            model.weight_path
+            for model in self.store.list_models()
+            if model.owner_principal == principal and model.weight_path
+        }
+        return ports, paths
+
+    def _agent_channel_status(self) -> dict:
+        """代理通道的实况：开没开、socket 在哪、为什么没开。"""
+
+        channel = self.agent_channel
+        if channel is None:
+            return {
+                "configured": False,
+                "path": None,
+                "listening": False,
+                "problem": "agent_channel_not_configured",
+                "connections": 0,
+                "reports": 0,
+            }
+        status = getattr(channel, "status", None)
+        if status is None:  # pragma: no cover - 注入的替身没带状态
+            return {
+                "configured": True,
+                "path": getattr(channel, "path", None),
+                "listening": False,
+                "problem": "agent_channel_status_unavailable",
+                "connections": 0,
+                "reports": 0,
+            }
+        return {"configured": True, **status.to_dict()}
 
     def _engine_view(
         self, engine: Engine, policy: AccessPolicy, requester: RequesterContext, *, replay: bool = False

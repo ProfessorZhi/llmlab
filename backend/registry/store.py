@@ -56,7 +56,7 @@ from .models import (
 )
 
 #: 当前 schema 版本。**每次改动表结构都要 +1 并追加一条迁移**。
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 #: 有序迁移：(版本, SQL)。只追加，永不修改已发布的条目。
 MIGRATIONS: tuple[tuple[int, str], ...] = (
@@ -360,6 +360,34 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
             updated_by TEXT,
             updated_at TEXT
         );
+        """,
+    ),
+    (
+        5,
+        """
+        -- 每用户代理上报的**最新**快照。一行 = 一个 (主体, 代理)；新上报覆盖旧行。
+        --
+        -- 为什么不逐条建表：报告是一个整体（同一个进程同一时刻看到的全貌）。把
+        -- 条目拆成行会让「这次没看见」与「上次看见过」混在一起，而本切片明确
+        -- 不消费 full 语义（没有 model_locations 的 missing 标记）。
+        CREATE TABLE IF NOT EXISTS agent_reports (
+            principal      TEXT NOT NULL,
+            agent_id       TEXT NOT NULL,
+            host_id        TEXT NOT NULL,
+            linux_user     TEXT NOT NULL,
+            uid            INTEGER NOT NULL,
+            report_version INTEGER NOT NULL,
+            scanned_at     TEXT,
+            received_at    TEXT NOT NULL,
+            full           INTEGER NOT NULL,
+            report_json    TEXT NOT NULL,
+            problems_json  TEXT NOT NULL,
+            PRIMARY KEY (principal, agent_id)
+        );
+
+        -- 过期清理按 received_at 扫；它每次写入都会跑一次。
+        CREATE INDEX IF NOT EXISTS agent_reports_received
+            ON agent_reports (received_at);
         """,
     ),
 )
@@ -1005,6 +1033,125 @@ class Store:
             "SELECT key, value FROM lab_settings ORDER BY key"
         ).fetchall()
         return {row["key"]: row["value"] for row in rows}
+
+    # -- 每用户代理报告（agent_reports）------------------------------------
+
+    def upsert_agent_report(
+        self,
+        *,
+        principal: str,
+        agent_id: str,
+        host_id: str,
+        linux_user: str,
+        uid: int,
+        report_version: int,
+        scanned_at: str | None,
+        received_at: object,
+        full: bool,
+        report: dict,
+        problems: list[str],
+        max_per_principal: int | None = None,
+    ) -> bool:
+        """写入一个代理的最新快照。同一 ``(principal, agent_id)`` 覆盖。
+
+        返回 ``False`` 表示这是**新的** ``agent_id``，且该主体已有的代理数已经到
+        上限 —— 调用方把它翻译成 ``Conflict``。上限只在新增时检查：覆盖已有行
+        永远不会被拒绝，否则一个主体闹到上限之后就再也上报不了。
+
+        计数与写入在同一个 ``BEGIN IMMEDIATE`` 事务里：两条并发上报不可能一起
+        越过上限。
+        """
+
+        with self.transaction() as connection:
+            existing = connection.execute(
+                "SELECT 1 FROM agent_reports WHERE principal = ? AND agent_id = ?",
+                (principal, agent_id),
+            ).fetchone()
+            if existing is None and max_per_principal is not None:
+                count = int(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM agent_reports WHERE principal = ?",
+                        (principal,),
+                    ).fetchone()[0]
+                )
+                if count >= int(max_per_principal):
+                    return False
+            connection.execute(
+                "INSERT INTO agent_reports "
+                "(principal, agent_id, host_id, linux_user, uid, report_version, "
+                " scanned_at, received_at, full, report_json, problems_json) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(principal, agent_id) DO UPDATE SET "
+                "host_id = excluded.host_id, linux_user = excluded.linux_user, "
+                "uid = excluded.uid, report_version = excluded.report_version, "
+                "scanned_at = excluded.scanned_at, received_at = excluded.received_at, "
+                "full = excluded.full, report_json = excluded.report_json, "
+                "problems_json = excluded.problems_json",
+                (
+                    principal,
+                    agent_id,
+                    host_id,
+                    linux_user,
+                    int(uid),
+                    int(report_version),
+                    scanned_at,
+                    isoformat(received_at),
+                    1 if full else 0,
+                    _dumps(report),
+                    _dumps(list(problems)),
+                ),
+            )
+        return True
+
+    def list_agent_reports(
+        self, *, principals: Iterable[str] | None = None
+    ) -> list[dict]:
+        """最新的代理快照。
+
+        ``principals=None`` 表示**全部主体** —— 只有已判过 ``registry:admin:read``
+        的调用方才可以这样问。传一个集合则只返回其中的主体。
+        """
+
+        query = "SELECT * FROM agent_reports"
+        params: tuple = ()
+        if principals is not None:
+            names = sorted(set(principals))
+            if not names:
+                return []
+            placeholders = ",".join("?" for _ in names)
+            query += f" WHERE principal IN ({placeholders})"
+            params = tuple(names)
+        query += " ORDER BY principal, agent_id"
+        rows = self.connection.execute(query, params).fetchall()
+        return [
+            {
+                "principal": row["principal"],
+                "agent_id": row["agent_id"],
+                "host_id": row["host_id"],
+                "linux_user": row["linux_user"],
+                "uid": int(row["uid"]),
+                "report_version": int(row["report_version"]),
+                "scanned_at": row["scanned_at"],
+                "received_at": row["received_at"],
+                "full": bool(row["full"]),
+                "report": _loads(row["report_json"]),
+                "problems": _loads(row["problems_json"]),
+            }
+            for row in rows
+        ]
+
+    def delete_agent_reports_before(self, before: object) -> int:
+        """删掉 ``received_at`` 早于 ``before`` 的行。返回删除数。
+
+        只在**写路径**里调用：一条 GET 不应该顺手删数据 —— 管理员可能正要看那条
+        过期报告来解释「他的代理什么时候停的」。
+        """
+
+        with self.transaction() as connection:
+            cursor = connection.execute(
+                "DELETE FROM agent_reports WHERE received_at < ?", (isoformat(before),)
+            )
+            return int(cursor.rowcount or 0)
 
     # -- 模型位置（model_locations）----------------------------------------
 

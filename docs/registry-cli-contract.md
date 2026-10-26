@@ -392,6 +392,8 @@ llmlab endpoints   list | register --name N --deployment D | get ID | verify ID
 llmlab usage       --mine        （别名：llmlab logs --mine）
 llmlab invoke      ID [--prompt TEXT | --payload JSON]
 llmlab routing     config | snapshot      （只读；需 registry:admin:read，见 §21）
+llmlab agent       [--once] [--watch] [--interval S] [--root P]... [--socket P]
+                   [--agent-id ID] [--dry-run]     （**不读令牌**；见 §22）
 ```
 
 `repoint` / `rollback` 省略 `--expected-revision` 时会先读一次再用读到的值；
@@ -430,6 +432,9 @@ token 文件必须是：**属主本人**的 `0600` **普通文件**，且**不�
 
 CLI **不**读 Linux 账密、**不**调 `sudo`、**不**开远端 shell、**不**回落到
 「先试试免密」。token 从不进日志、不进异常消息、不进 `--json` 输出。
+
+唯一的例外是 `llmlab agent`：它证明身份的凭据是**内核给的 uid**（unix socket 的
+`SO_PEERCRED`），因此它不读、也不接受任何令牌，在没有凭据的情况下照常工作（§22.7）。
 
 `invoke` 只到**授权网关**：服务端先做行级 ACL，再由 Gateway adapter 转发；
 CLI 不直连上游推理端口，也不持有 Gateway 的 key。
@@ -977,6 +982,10 @@ helper（预检能过的目标，登记的目标校验也能过）。请求：
 * **已安装的引擎**（`installed_engines`）：磁盘上装着的推理引擎，**跑没跑都列**——一个没启动的 vLLM 仍然说明这台机器能跑什么，而它没有端口、没有 `target_url`，因此**不可登记**（能登记的是有地址的**服务**）。识别三处：`PATH` 与 `/usr/local/bin`、`/opt/*/bin`、`~/.local/bin` 里已知引擎的可执行文件；模型根目录下虚拟环境（有 `pyvenv.cfg`）里的 `bin/` 可执行文件与 `site-packages/*.dist-info`；`/opt`、`/usr/local` 与模型根目录下**以引擎命名且有构建入口**的源码树。发现**不执行**找到的程序，版本只从 pip 的 `dist-info` 目录名与运行中解释器的元数据读；可执行文件的版本因此是 `null`。
 * 每个候选带 `registered` / `registered_by_me`；**没有写入路径**。登记仍走 `POST /engines` / `POST /models`（`llmlab discover --register PORT` / `--register-model PATH` 只是把候选填进这两个调用）。
 * 本部署未装配发现器时返回 `configured: false`（不是空清单，也不是错误）。
+* 信封里另有三块**不是本机发现**的内容：`agent_reports`（其他用户以自己身份上报的
+  事实）、`agent_reports_scope`（你拿到的是全部还是只有自己的）、`agent_channel`
+  （通道开没开、为什么没开）。它们只描述「别人报了什么」，不是「平台承诺了什么」，
+  详见 §22.6。
 
 ### 18.4 强制档
 
@@ -1171,3 +1180,265 @@ engine 有 `secret_ref`，且路由挂在 Endpoint 上，而观测到的服务�
 Gateway 的判定做决定」。上真机还需要：一个运维建好的、Gateway 读得到且 Registry
 组可写的快照目录，以及一份 `engine_id -> {file, var}` 的 `engine_secret_refs` 配置。
 这两件事**都不在本轮做**（`NOT DEPLOYED / NO RUNTIME VERIFICATION`）。
+
+## 22. 每用户代理：unix socket、`SO_PEERCRED`、只发现不登记
+
+> 对应设计规格 D9 与 `docs/design-lab-resource-agent-and-service-sharing-2026-10-23.md` §2。
+> 它回答一个很具体的问题：服务以平台账户运行时读不到其他用户 0700 的 HOME，
+> 那「他这台机器上跑着什么、装了什么」怎么被看见？
+> 答案是他以**自己的身份**上报，平台用**内核给的 uid** 认他。
+
+### 22.1 为什么不是 HTTP + token
+
+令牌能证明「某个主体签过一条凭据」，证明不了「这条连接来自他以那个 uid 运行的
+进程」。而这条通道要证明的恰好是后者。unix socket 的 `SO_PEERCRED` 由内核在
+`connect()` 时填好：客户端不能伪造，也不需要保管任何东西——用户不设密码、不发
+令牌、不写密钥文件，就能让自己的机器被看见。
+
+配套的结构性约束：
+
+* `SCOPE_AGENT_REPORT = "registry:agent:report"` **只在这条 socket 上存在**。
+  网页会话的令牌签发策略不产出它，HTTP 路由里也没有任何一条接受它。
+* 通道**只识别**主体目录里已批准（`approved`）且未被停用的 uid。系统账户、
+  root、没有平台身份的人，连一句 `hello` 都收不到。
+
+### 22.2 帧与上限（`backend/registry/agent_channel.py`）
+
+缺省路径 `/run/llmlab/agent.sock`（`--agent-socket PATH` 可改，`--no-agent-socket` 关闭）。
+每一行是一个 JSON 对象，一条连接上：
+
+| 限制 | 值 | 为什么 |
+|---|---|---|
+| 单行 | 1 MiB | 典型报告远小于它，超过就是客户端坏了 |
+| 每条连接消息数 | 8 | 现在的用法是 `hello → report → 断开` |
+| 空闲超时 | 30 s | 连上不说话的客户端不该占着一个线程 |
+| 并发连接 | 8 | 一台机器上不会有 8 个代理同时上报 |
+| socket 文件权限 | `0666` | 本机谁都能 `connect`；身份在下一步判定，不靠目录权限 |
+
+握手：客户端先发 `{"type":"hello"}`，收到
+`{"ok":true,"data":{"protocol_version":1,"principal":"linux:<host>:<uid>","uid":…,"linux_user":…}}`，
+之后才允许 `{"type":"report", …}`。协议里的身份字段**只出现在服务端的回执里**。
+
+通道级错误码（`agent.*`，与 `registry.*` 分开，因为它们不来自 Registry）：
+
+| code | 含义 |
+|---|---|
+| `agent.uid_not_mapped` | 内核给的 uid 在主体目录里没有已批准的身份，立即断开 |
+| `agent.hello_required` | 没握手就发 `report` |
+| `agent.message_too_large` | 一行超过 1 MiB（不缓冲完整内容就拒） |
+| `agent.protocol_error` | 不是 JSON 对象 / 认不出的 `type` |
+
+`registry.*` 的错误按 `contract_code` 原样透传（如 `registry.access_denied`、
+`registry.conflict`）。存储层的话术（含路径与表名）**不发回客户端**，与 HTTP 那条路一致。
+
+socket 绑不上（目录不存在、权限不足）**不会**让服务起不来：原因记进状态，`/discovery`
+的 `agent_channel` 如实写出来（见 §22.6）。
+
+### 22.3 载荷：代理只说事实，不说归属
+
+`report_version = 1`。顶层字段：`agent_id`（`[A-Za-z0-9][A-Za-z0-9._-]{0,63}`）、
+`scanned_at`（带时区的 ISO 时间，可选）、`full`（布尔：扫描有没有被截断）、
+`engines` / `installed_engines` / `models` / `problems`。
+
+| 桶 | 客户端能说什么 | 上限（超出**截断**并写一条 problem） |
+|---|---|---|
+| `engines[]` | `port`、`framework`、`models[]`（模型 id）、`suggested_name` | 64 |
+| `installed_engines[]` | `engine`、`name`、`found_as`、`version`、`path`、`env` | 64 |
+| `models[]` | `path`、`format`（`hf`/`gguf`）、`size_bytes`、`architecture`、`model_type`、`suggested_name` | 200 |
+| `problems[]` | 自由文本（≤512 字符，最多 50 条） | 50 |
+
+**这些字段一个都不能出现**：`uid`、`owner`、`run_as_uid`、`run_as_user`、
+`target_url`、`registered`、`registered_by_me`。带了任意一个，**整条条目被丢弃**
+（`identity_field_present`）——这是伪造归属的形状，不是「多写了一个字段」。
+
+`agent_id` 只用来区分同一个人的多台机器，**不承担身份**。`host_id` 不是客户端字段：
+它由服务端从主体名 `linux:<host>:<uid>` 推出来（`principal_host_id`），所以同一台
+机器上不同的人上报，落到同一个 `host_id`。
+
+### 22.4 归属由服务端证明（`backend/registry/agent_reports.py`）
+
+这是整条通道的实质：**相信内核说了谁，但没说要相信他说的每件事**。
+
+**端口**：报上来的 `port` 必须出现在 `/proc/net/tcp(6)` 的 LISTEN 表里，且该端口
+**恰好只有一个 uid**，并且就是上报者。
+
+| 理由 | 触发 |
+|---|---|
+| `proc_net_unavailable` | 读不到 / 读不懂 LISTEN 表 → 该桶整桶 fail closed |
+| `port_not_listening` | 表里没有这个端口的监听 |
+| `port_uid_ambiguous` | 同一端口有多个 uid 在听（v4/v6 双栈或 socket 复用） |
+| `port_uid_mismatch` | 端口归别人 —— 这正是「代理想替别人登记」的样子 |
+
+**路径**（模型与已安装引擎）：
+
+| 理由 | 触发 |
+|---|---|
+| `path_uid_mismatch` | `stat()` 成功但属主不是上报者 |
+| `path_other_user_home` | 词法上落在别人的 `/home/<name>` 或 `/data/home/<name>` 下；`realpath` 之后再查一次，堵住软链逃逸 |
+| `path_unverifiable` | `stat()` 拿不到（`PermissionError`）且**不在**自己 HOME 下 |
+| `path_missing` | 文件不存在 |
+| `path_duplicate` | 同一份报告里同一个路径出现两次 |
+| `stat_budget_exhausted` | 一次校验超过 600 次 `stat`（见下） |
+
+`PermissionError` 只在路径词法上位于**上报者自己的** HOME 之下时才被接受——那是
+「他自己有权，平台没权」的正常情形，不是可疑。
+
+各桶的条目上限把 `stat` 次数在结构上压在 ≤328 次（200 模型 + 64 已安装 × 2），
+所以 `MAX_STAT_PATHS = 600` 是**兜底**而不是日常会走到的分支。
+
+写回服务端的字段（客户端无从声明）：`target_url`（`http://127.0.0.1:<port>`）、
+`run_as_uid`、`run_as_user`、`registrable`（端口是否在登记的 `allowed_ports` 里）、
+`openai_compatible`（有没有模型 id）。当条目被以 `port_uid_mismatch` /
+`path_uid_mismatch` / `path_other_user_home` 拒绝时，平台记一条审计
+`agent_report_ownership_violation`——干净的报告不记审计，否则日志会被正常上报淹掉。
+
+### 22.5 上报 ≠ 登记
+
+一份报告只写 `agent_reports` 表（主键 `(principal, agent_id)`，同一代理**覆盖**而不是
+追加）。`engines` / `models` 表**一个字节都不动**。要登记，仍然走同一套所有权校验的
+`POST /engines` / `POST /models`；网页上的「可登记 / 端口不在允许列表」只是提示，
+不是一条捷径。
+
+其它边界值：一个主体最多 8 个 `agent_id`（再多是 `registry.conflict`）；报告超过
+30 分钟标 `stale`（30 个上报周期，短暂重启不该立刻看起来像死了）；写路径顺手清理
+超过 30 天的行——报告是「现在在哪」的快照，不是历史。
+
+### 22.6 `/discovery` 信封新增（见 §18.3.3）
+
+```
+"agent_reports": [ { principal, agent_id, host_id, linux_user, uid,
+                     report_version, scanned_at, received_at, age_seconds,
+                     stale, full, counts, problems, rejected,
+                     engines[], installed_engines[], models[] } ],
+"agent_reports_scope": "all" | "self",
+"agent_reports_stale_after_seconds": 1800,
+"agent_channel": { "configured": bool, "path", "listening",
+                   "problem", "connections", "reports" }
+```
+
+* **可见性**：管理员读看到全部；其他人只看到**自己**的（`self`）。这是刻意的——
+  报告里含别人的路径与端口，作用域写在信封里，前端与 CLI 据此说明自己拿到的是哪一份。
+* 每个条目上的 `registered` / `registered_by_me` 由服务端**现算**（回环端口与权重
+  路径是否已在 `engines` / `models` 里），不是代理说的。
+* `agent_channel.configured: false` 表示这个部署根本没开通道（`--no-agent-socket`），
+  与「开了但没监听」是两件事，`problem` 会给出后者。
+
+### 22.7 CLI：`llmlab agent`
+
+```
+llmlab agent [--once] [--watch] [--interval 300] [--root PATH]...
+             [--socket PATH] [--agent-id ID] [--dry-run] [--json]
+```
+
+* **永远不解析令牌**：这条命令在凭据解析之前就分支出去了。缺 token 不影响它，
+  它也不读 `--token`（帮助里没有这个选项）。
+* 以 `restrict_uid=os.getuid()` 运行：只看自己的监听、只 `stat` 自己的路径。
+* 缺省根：`~` 与（存在时）`/data/home/<me>`。共享根不默认扫——以用户身份扫 `/data`
+  等于把别人的模型算成「我的」；要报共享盘用 `--root` 显式点名。
+* 退出码（见 §9.2 的同一张表）：`7` 连不上 socket（附装机的提示）、`3` 身份被拒
+  （`agent.uid_not_mapped` 会额外提示去找管理员）、`5` 冲突、`2` 用法错误。
+* `--watch` 的最小间隔 10 秒；连续失败 5 次后放弃（断线重试是常态，死循环不是），
+  `Ctrl-C` 视作正常结束（0）。
+
+### 22.8 装机：只打印计划
+
+`deploy/install/llmlab-install.sh` 是**计划打印器**：建 `/run/llmlab`（tmpfiles）、
+全局用户级单元 `/etc/systemd/user/llmlab-agent.service`、逐用户的
+`loginctl enable-linger` 与 `systemctl --user enable`——全部只打印命令与文件内容。
+
+`--apply` **被拒绝**（退出码 3）。原因是这些东西都在 `docs/access-boundaries.md` §6
+的禁区里：本仓库不创建 systemd 单元、不 enable、不改别人的账户状态。执行由获得
+授权的管理员照清单手工完成，一人一次，且**不为任何用户代 enable**：
+「谁被看见」是那个人的选择，不是一次批量操作的结果。
+
+`tests/security/test_install_plan_is_print_only.py` 用被替换掉的
+`sudo`/`systemctl`/`loginctl`/`systemd-tmpfiles`/`rm`/`mkdir` 跑一遍脚本，
+证明它真的一次系统命令都没调用——不是「读起来像只打印」。
+
+### 22.8.1 管理员代跑：root 发起，内核仍然认证本人
+
+`§22.8` 的方案要求「本人先 enable」，于是没登录过的人永远不出现在平台上。
+`deploy/inventory/host-inventory.sh` 走的是另一条路：**root 逐个账户 `runuser -u
+<name>`，把代理以那个人的 uid 跑一次**。
+
+这不改变信任模型，只改变「谁决定轮次」：
+
+| | 每用户单元（§22.8） | 管理员代跑（本节） |
+|---|---|---|
+| 谁发起 | 用户自己的 `systemd --user` | root（timer 或手工） |
+| 扫描以谁的 uid 运行 | 本人 | **仍然是本人**（`runuser`） |
+| `SO_PEERCRED` 里的 uid | 本人 | 本人（内核给的真实 uid） |
+| 服务端归属 | `PrincipalDirectory.by_uid` | 同左，一行未改 |
+| 端口/路径复核 | `/proc/net/tcp` + `stat` | 同左，一行未改 |
+| 协议 | — | **一个字节都没改** |
+
+root 只做一件事：决定「现在轮到谁」。命令行是
+
+```
+sudo runuser -u <name> -- env -i HOME=<home> PYTHONPATH=<repo> \
+    /usr/bin/python3 -s -B -m cli.llmlab agent \
+        --socket /run/llmlab/agent.sock --root <home> [--root /data/home/<name>] [--dry-run]
+```
+
+* **退出码映射**：`0` 已上报 · `3` 没有平台身份（不算失败，只是还没开账户）·
+  `7` 通道不通（**整轮中止**：同一个错误刷 N 遍只是噪音，附带三点检查清单）·
+  其它 → 该账户失败，继续下一个。
+* **每个账户有超时**（`--timeout`，默认 120 秒，最小 1）：`timeout 0` 是「不限时」，
+  会把下一次 timer 触发一直挡在后面，所以拒绝 0。
+* **前置条件是代码可读**：仓库通常在某个人的家目录里（0700/0750），别的账户连
+  `import cli` 都做不到，会得到 `ModuleNotFoundError: No module named 'cli'`。
+  脚本在扫第一个人之前先用 `runuser -u <第一个非 root 账户> -- test -r
+  <repo>/cli/llmlab/agent.py` 验一遍，不通过就打印发布命令（`rsync` →
+  `chown -R root:root` → `chmod -R a+rX,go-w`）并以 `2` 退出。
+* **它写不了任何东西**：不建目录、不 chmod、不动任何人的 HOME、不碰 systemd。
+  定时器由管理员按 `llmlab-install.sh --host-scan` 打印的清单另建
+  （`llmlabd-inventory.service` + `.timer`，5 分钟一次）。
+
+**与「谁被看见是那个人的选择」的偏离，以及它的补偿**：代跑默认扫所有
+`uid ∈ [1000, 65534)` 且家目录存在的账户。补偿是每个账户仍可退出——在自己的家目录里
+放
+
+```
+~/.config/llmlab/no-inventory
+```
+
+这个文件存在，脚本就跳过该账户（输出里记一行「跳过」）。默认「被看见」，但
+选择权仍在人手里；这是他**自己的**文件，不需要任何人代他决定。
+
+**上报 ≠ 登记**（§22.5）：代跑只让平台知道「这台机器的这个人那儿有什么」，
+把其中任何一项变成平台上的登记，仍然要本人或管理员显式登记。
+
+`tests/security/test_host_inventory_script.py` 用替身 `id` / `getent` / `runuser`
+跑脚本，逐条断言每次扫描的 argv 里写着 `-u <那个人>`、`HOME=<那个人的家>`、
+`PYTHONPATH=<代码目录>`、`--root <那个人的家>`——「以 fjd 的身份扫别人的目录」
+会在这里变成一条看得见的 argv。另有用例覆盖：非 root 拒绝执行（`2`，且一次
+`runuser` 都没发生）、通道不通整轮中止（`7`）、`no-inventory` 跳过、
+`--dry-run` 透传、扫描前后每个家目录的文件清单不变。
+
+### 22.9 验证了什么、没验证什么
+
+**CPU-only、真实 socket 的合成证据**：
+
+* `tests/registry/test_agent_channel.py`（18 条）：真的 AF_UNIX 监听器，握手、上限、
+  错误透传、退出清理；其中两条**不替换** `peer_uid`，让内核真的回答一次
+  `SO_PEERCRED`，证明这条通道在当前内核上可用。
+* `tests/registry/test_agent_reports.py`（40 条）：校验的每一条拒绝理由、服务端的
+  归属写入、覆盖而非追加、审计、可见性、v4→v5 迁移。
+* `tests/registry/test_agent_cli.py`（10 条）：真子进程跑 `python3 -m cli.llmlab agent`，
+  环境里清掉全部 `LLMLAB_TOKEN*`，证明**没有令牌也能上报**。
+* `tests/web-features/agent-reports.test.js`（14 条）：控制台表格行的语义。
+* `tests/security/test_host_inventory_script.py`（11 条）：替身 `id`/`getent`/`runuser`
+  下逐条核对每一次扫描的 argv；非 root 拒绝、通道不通整轮中止、`no-inventory` 跳过、
+  扫描前后家目录文件清单不变。
+
+**真实主机上的第一次运行（2026-10-26 14:10 +08:00）**：`§22.8.1` 的代跑在本机以
+6 个账户跑通——`/discovery` 的 `agent_channel.listening=true`，
+`connections`/`reports` 是**自 BFF 启动起累计**的计数器，第一轮之后是 `6`/`6`
+（每多跑一轮各加 6），而 `agent_reports` 表按 `(principal, agent_id)` 覆盖，始终 6 行，
+与代跑输出逐行对应。
+定时器（5 分钟）由管理员安装，第一次触发 4.5 秒完成。细节见设计文档 §10.5.5。
+
+**仍然没验证、也不声称的**：真实的 per-user 单元（`§22.8` 那条路依然**没有装过**，
+本次落地走的是 `§22.8.1`）、跨账户的真实并发上报，以及浏览器里的控制台画面。
+管理员视角是复验过的（`agent_reports_scope=all`、六条上报逐条可见），走的是控制台
+同一条读取路径，但没有在页面上点过。

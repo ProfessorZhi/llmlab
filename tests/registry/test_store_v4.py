@@ -158,10 +158,11 @@ class _StoreCase(unittest.TestCase):
 
 
 class SchemaV4Test(_StoreCase):
-    def test_a_fresh_database_is_v4_and_has_every_new_table_and_column(self) -> None:
-        self.assertEqual(self.store.schema_version(), 4)
-        self.assertEqual(SCHEMA_VERSION, 4)
-        self.assertEqual(self.store.applied_migrations(), (1, 2, 3, 4))
+    def test_a_fresh_database_is_v5_and_has_every_new_table_and_column(self) -> None:
+        # v5 只加了一张 ``agent_reports``：每用户代理上报的快照。这会随时间往上
+        # 走，所以断言写的是「当前版本」而不是「4」；本文件关心的仍是 v4 那一批列。
+        self.assertEqual(self.store.schema_version(), SCHEMA_VERSION)
+        self.assertEqual(self.store.applied_migrations(), tuple(range(1, SCHEMA_VERSION + 1)))
 
         def columns(table: str) -> set[str]:
             return {
@@ -225,6 +226,22 @@ class SchemaV4Test(_StoreCase):
         )
         self.assertEqual(
             columns("lab_settings"), {"key", "value", "updated_by", "updated_at"}
+        )
+        self.assertEqual(
+            columns("agent_reports"),
+            {
+                "principal",
+                "agent_id",
+                "host_id",
+                "linux_user",
+                "uid",
+                "report_version",
+                "scanned_at",
+                "received_at",
+                "full",
+                "report_json",
+                "problems_json",
+            },
         )
 
         indexes = {
@@ -321,8 +338,8 @@ class SchemaV4Test(_StoreCase):
         upgraded = Store(legacy_db)
         self.addCleanup(upgraded.close)
 
-        self.assertEqual(upgraded.schema_version(), 4)
-        self.assertEqual(upgraded.applied_migrations(), (1, 2, 3, 4))
+        self.assertEqual(upgraded.schema_version(), SCHEMA_VERSION)
+        self.assertEqual(upgraded.applied_migrations(), tuple(range(1, SCHEMA_VERSION + 1)))
 
         engine = upgraded.engine_by_id("e_legacy")
         self.assertIsNotNone(engine)

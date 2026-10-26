@@ -185,6 +185,24 @@ class ModelDiscoveryTests(unittest.TestCase):
         self.assertIn("vision-q4", names)
         self.assertFalse(any("mmproj" in name for name in names), names)
 
+    def test_a_tokenizer_vocabulary_is_not_a_model(self):
+        """``ggml-vocab-*.gguf`` 与模型同格式，但一个源码树里能躺二十几个。
+
+        实测：一个人 42 条模型里 38 条是 llama.cpp 自带词表——清单被它们淹掉之后，
+        「有哪些模型」这个问题就没人答得出来了。
+        """
+
+        vocab_dir = self.root / "llama.cpp-src" / "models"
+        vocab_dir.mkdir(parents=True)
+        (vocab_dir / "ggml-vocab-llama-spm.gguf").write_bytes(b"w" * 10)
+        (vocab_dir / "ggml-vocab-qwen2.gguf").write_bytes(b"w" * 10)
+
+        found, _ = self.discovery(self.root).models(registered_paths={})
+
+        self.assertFalse(
+            any("ggml-vocab" in c.path for c in found), [c.path for c in found]
+        )
+
     def test_registering_one_shard_marks_the_whole_model(self):
         shard_dir = self.root / "split2"
         shard_dir.mkdir()
@@ -309,6 +327,23 @@ class InstalledEngineTests(unittest.TestCase):
         self.assertEqual(by_kind["executable"].version, None)
         self.assertEqual(by_kind["python_package"].version, "0.6.3")
         self.assertEqual(by_kind["python_package"].env, str(env))
+
+    def test_lib_and_lib64_are_one_installation_not_two(self):
+        """``lib64`` 通常是指向 ``lib`` 的符号链接，同一份分发包会被数两遍。
+
+        地点不同但东西相同，于是「装了几个 llama.cpp」变成 2——而人只装了一次。
+        """
+
+        env = self.venv(executable="vllm")
+        site = env / "lib" / "python3.12" / "site-packages"
+        (site / "llama_cpp_python-0.3.36.dist-info").mkdir(parents=True)
+        os.symlink(env / "lib", env / "lib64")
+
+        found, _ = self.discovery().installed_engines()
+
+        llama = [item for item in found if item.engine == "llama.cpp"]
+        self.assertEqual(len(llama), 1, [item.path for item in llama])
+        self.assertEqual(llama[0].version, "0.3.36")
 
     def test_a_directory_without_pyvenv_cfg_is_not_a_virtualenv(self):
         fake = self.root / "looks-like-venv" / "bin"

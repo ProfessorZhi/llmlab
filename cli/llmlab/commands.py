@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
+import time
 from typing import Callable
 
 from .client import ApiClient
@@ -640,6 +642,37 @@ def cmd_status(client: ApiClient, args: argparse.Namespace, as_json: bool) -> in
     return EXIT_OK
 
 
+def _print_agent_reports(payload: dict) -> None:
+    """``discover`` 里的「别人自己报上来的」那一块。没有就什么都不打。"""
+
+    reports = payload.get("agent_reports") or []
+    if not reports:
+        return
+    if payload.get("agent_reports_scope") == "all":
+        heading = "agent reports (every user on this host):"
+    else:
+        heading = "agent reports (yours; an admin sees everyone's):"
+    print(heading)
+    rows = []
+    for report in reports:
+        counts = report.get("counts") or {}
+        age = report.get("age_seconds")
+        rows.append(
+            [
+                _fmt(report.get("linux_user")),
+                f"uid {report.get('uid')}",
+                _fmt(report.get("host_id")),
+                _fmt(report.get("agent_id")),
+                f"{counts.get('engines', 0)}/{counts.get('installed_engines', 0)}/{counts.get('models', 0)}",
+                NULL if age is None else f"{int(age) // 60}m",
+                "stale" if report.get("stale") else "fresh",
+            ]
+        )
+    _table(rows, ["USER", "UID", "HOST", "AGENT", "RUN/DISK/MODELS", "AGE", "STATE"])
+    print("note: a report is a discovery, not a registration; registering still goes")
+    print("      through the same ownership checks as `engines register` / `models register`.")
+
+
 def cmd_discover(client: ApiClient, args: argparse.Namespace, as_json: bool) -> int:
     """``discover``：本机候选清单；``--register`` / ``--register-model`` 直接登记其中一个。
 
@@ -686,50 +719,127 @@ def cmd_discover(client: ApiClient, args: argparse.Namespace, as_json: bool) -> 
         return EXIT_OK
 
     def render(payload: dict) -> None:
-        if not payload.get("configured"):
-            print("discovery is not enabled on this deployment; register manually with `engines register` / `models register`")
-            return
-        engines = payload.get("engines") or []
-        rows = [
-            [
-                str(item["port"]),
-                _fmt(item.get("run_as_user") or item.get("run_as_uid")),
-                _fmt(item.get("framework")),
-                ", ".join(item.get("models") or []) or ("—" if item.get("openai_compatible") else "not OpenAI-compatible"),
-                "mine" if item.get("registered_by_me") else ("taken" if item.get("registered") else "available"),
+        configured = payload.get("configured")
+        if not configured:
+            print(
+                "this deployment does not scan its own host; register manually with "
+                "`engines register` / `models register`"
+            )
+        else:
+            engines = payload.get("engines") or []
+            rows = [
+                [
+                    str(item["port"]),
+                    _fmt(item.get("run_as_user") or item.get("run_as_uid")),
+                    _fmt(item.get("framework")),
+                    ", ".join(item.get("models") or [])
+                    or ("—" if item.get("openai_compatible") else "not OpenAI-compatible"),
+                    "mine"
+                    if item.get("registered_by_me")
+                    else ("taken" if item.get("registered") else "available"),
+                ]
+                for item in engines
             ]
-            for item in engines
-        ]
-        print("inference services:")
-        _table(rows, ["PORT", "RUN AS", "FRAMEWORK", "MODELS", "STATE"])
-        models = payload.get("models") or []
-        rows = [
-            [
-                item["path"],
-                item["format"],
-                _fmt(item.get("architecture")),
-                f"{item.get('size_bytes', 0) / 1024**3:.1f} GiB",
-                "registered" if item.get("registered") else "available",
+            print("inference services:")
+            _table(rows, ["PORT", "RUN AS", "FRAMEWORK", "MODELS", "STATE"])
+            models = payload.get("models") or []
+            rows = [
+                [
+                    item["path"],
+                    item["format"],
+                    _fmt(item.get("architecture")),
+                    f"{item.get('size_bytes', 0) / 1024**3:.1f} GiB",
+                    "registered" if item.get("registered") else "available",
+                ]
+                for item in models
             ]
-            for item in models
-        ]
-        print("models:")
-        _table(rows, ["PATH", "FORMAT", "ARCH", "SIZE", "STATE"])
-        installed = payload.get("installed_engines") or []
-        rows = [
-            [
-                item["name"],
-                _fmt(item.get("version")),
-                item.get("found_as", "—"),
-                item["path"],
+            print("models:")
+            _table(rows, ["PATH", "FORMAT", "ARCH", "SIZE", "STATE"])
+            installed = payload.get("installed_engines") or []
+            rows = [
+                [
+                    item["name"],
+                    _fmt(item.get("version")),
+                    item.get("found_as", "—"),
+                    item["path"],
+                ]
+                for item in installed
             ]
-            for item in installed
-        ]
-        print("installed engines (on disk, running or not):")
-        _table(rows, ["ENGINE", "VERSION", "FOUND AS", "PATH"])
-        for problem in payload.get("problems") or []:
-            print(f"note: {problem}")
-        print("register one with: llmlab discover --register PORT [--name NAME]  |  --register-model PATH")
+            print("installed engines (on disk, running or not):")
+            _table(rows, ["ENGINE", "VERSION", "FOUND AS", "PATH"])
+            for problem in payload.get("problems") or []:
+                print(f"note: {problem}")
+
+        # 别人的代理报上来的事实。它**不依赖**本机发现：服务端读不到那个人的
+        # HOME，是那个人自己报的。所以这一块在 configured=false 时也要打印。
+        _print_agent_reports(payload)
+        channel = payload.get("agent_channel") or {}
+        if channel and not channel.get("listening"):
+            print(f"agent channel: off ({channel.get('problem') or 'not started'})")
+        elif channel.get("listening"):
+            print(f"agent channel: {channel.get('path')} (listening)")
+
+        if configured:
+            print(
+                "register one with: llmlab discover --register PORT [--name NAME]  |  "
+                "--register-model PATH"
+            )
 
     _print_envelope(envelope, as_json, default_render=render)
     return EXIT_OK
+
+
+#: ``agent --watch`` 的最小间隔。扫描会走目录树，太勤没有意义。
+MIN_AGENT_INTERVAL = 10.0
+#: 连续失败多少次后放弃（``--watch`` 下）。断线重试是常态，但死循环不是。
+MAX_AGENT_FAILURES = 5
+
+
+def cmd_agent(args: argparse.Namespace, as_json: bool) -> int:
+    """``agent``：以**自己的**身份把本机事实报给平台。**不需要 token。**
+
+    这是唯一一条不走 HTTP 的命令：身份由平台的 unix socket 用 ``SO_PEERCRED``
+    从内核取出，所以没有凭据可配，也没有 ``--token``。
+    """
+
+    from . import agent as agent_mod
+
+    socket_path = args.socket or agent_mod.DEFAULT_SOCKET
+    roots = tuple(args.root) if args.root else None
+    interval = max(MIN_AGENT_INTERVAL, float(args.interval))
+
+    def once() -> None:
+        payload = agent_mod.collect_report(agent_id=args.agent_id, roots=roots)
+        if args.dry_run:
+            agent_mod.describe(payload)
+            return
+        receipt = agent_mod.send_report(payload, socket_path=socket_path)
+        if as_json:
+            print(json.dumps({"report": payload, "receipt": receipt}, ensure_ascii=False, sort_keys=True))
+        else:
+            print(agent_mod.human_summary(payload, receipt))
+
+    if not args.watch:
+        once()
+        return EXIT_OK
+
+    failures = 0
+    try:
+        while True:
+            try:
+                once()
+                failures = 0
+            except CliError as exc:
+                failures += 1
+                print(f"llmlab agent: {exc.message}", file=sys.stderr)
+                if exc.hint:
+                    print(f"llmlab agent: hint: {exc.hint}", file=sys.stderr)
+                if failures >= MAX_AGENT_FAILURES:
+                    print(
+                        f"llmlab agent: giving up after {failures} consecutive failures",
+                        file=sys.stderr,
+                    )
+                    raise
+            time.sleep(interval)
+    except KeyboardInterrupt:  # pragma: no cover - 交互式退出
+        return EXIT_OK

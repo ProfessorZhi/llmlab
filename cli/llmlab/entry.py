@@ -43,6 +43,7 @@ HANDLERS = {
     "routing": commands.cmd_routing,
     "status": commands.cmd_status,
     "discover": commands.cmd_discover,
+    "agent": commands.cmd_agent,
 }
 
 
@@ -123,6 +124,51 @@ def build_parser() -> argparse.ArgumentParser:
     discover.add_argument("--register", type=int, metavar="PORT", help="把这个端口上的候选推理服务登记到自己名下")
     discover.add_argument("--register-model", metavar="PATH", help="把这个路径上的候选模型登记到自己名下")
     discover.add_argument("--name", help="登记时使用的名称（缺省用建议名）")
+
+    agent_common = argparse.ArgumentParser(add_help=False)
+    # ``agent`` 只认输出格式这一个全局选项：它没有 token 可给，把 ``--token``
+    # 摆在帮助里只会让人以为这里漏了什么。
+    agent_common.add_argument(
+        "--json", action="store_true", default=argparse.SUPPRESS, help="以 JSON 输出（供 Agent 使用）"
+    )
+
+    agent = subparsers.add_parser(
+        "agent",
+        parents=[agent_common],
+        help=(
+            "以**自己的身份**把本机跑着/装着的推理服务与模型报给平台（走 unix socket "
+            "的 SO_PEERCRED，不需要 token）"
+        ),
+    )
+    agent.add_argument(
+        "--once",
+        action="store_true",
+        help="报一次就退出（缺省行为；写在这里是为了让脚本更好读）",
+    )
+    agent.add_argument("--watch", action="store_true", help="持续上报（配合 --interval）")
+    agent.add_argument(
+        "--interval",
+        type=float,
+        default=60.0,
+        metavar="SECONDS",
+        help="--watch 时两次上报之间的秒数（下限 10）",
+    )
+    agent.add_argument(
+        "--root",
+        action="append",
+        metavar="DIR",
+        help=(
+            "扫描的模型根目录（可重复）。缺省只扫自家 HOME 与 /data/home/<我>；"
+            "共享盘要显式点名"
+        ),
+    )
+    agent.add_argument("--socket", metavar="PATH", help="平台的代理 socket 路径")
+    agent.add_argument("--agent-id", metavar="ID", help="本机代理标识（缺省用主机名）")
+    agent.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="只扫描并打印将要发送的内容，不连接 socket",
+    )
 
     models = subparsers.add_parser("models", parents=[common], help="Model 的登记")
     models_sub = models.add_subparsers(dest="models_command")
@@ -248,7 +294,22 @@ def run(argv: list[str] | None = None) -> int:
         parser.print_help()
         return EXIT_USAGE
 
-    # 每个命令都是租户作用域的，所以**全部**需要凭据（whoami/status 也一样）。
+    # ``agent`` 是唯一不需要凭据的命令：它的身份来自 unix socket 的 SO_PEERCRED，
+    # 没有 token 可给。放在解析 token **之前**，否则一个没有 token 的用户会被
+    # 「没有凭据」挡在门外 —— 而他要做的恰恰是「不持有任何凭据也被看见」。
+    if args.command == "agent":
+        try:
+            return handler(args, bool(getattr(args, "json", False)))
+        except CliError as exc:
+            print(f"{PROG}: error: {exc.message}", file=sys.stderr)
+            if exc.hint:
+                print(f"{PROG}: hint: {exc.hint}", file=sys.stderr)
+            return exc.exit_code
+        except KeyboardInterrupt:  # pragma: no cover
+            print(f"{PROG}: interrupted", file=sys.stderr)
+            return 130
+
+    # 其余每个命令都是租户作用域的，所以**全部**需要凭据（whoami/status 也一样）。
     # 用 getattr 读全局选项：它们用 SUPPRESS 注册，没写就没有该属性。
     try:
         api_base = resolve_api_base(getattr(args, "api_base", None))

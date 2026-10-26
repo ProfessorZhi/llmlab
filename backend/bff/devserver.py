@@ -41,6 +41,7 @@ from ..gateway.proxy import GatewayApplication, GatewayCore, parse_secret_refs
 from ..gateway.service import GatewayService
 from ..gateway.store import GatewayStore
 from ..registry.api import RegistryApplication
+from ..registry.agent_channel import AgentChannel
 from ..runtime.params import ParamStore
 from ..registry.identity import Principal, PrincipalDirectory, TrustedTokenIntrospector
 from ..registry.health import LoopbackHttpProber, LoopbackProtocolProber, StaticProber
@@ -101,6 +102,10 @@ DEFAULT_HOST_ID = "dell-test-01"
 DEFAULT_PORT = 8790
 DEFAULT_DATABASE = ":memory:"
 
+#: 每用户代理上报用的 socket。``/run/llmlab`` 只能由 root 建（装机脚本用
+#: systemd-tmpfiles 建它），所以目录不存在时这条通道**只是不开**，服务照常起。
+DEFAULT_AGENT_SOCKET = "/run/llmlab/agent.sock"
+
 
 class _ThreadingWSGIServer(socketserver.ThreadingMixIn, wsgiref.simple_server.WSGIServer):
     daemon_threads = True
@@ -151,6 +156,8 @@ def build_application(
     host_users: tuple[tuple[str, int], ...] = HOST_USERS,
     gateway_state_dir: str | None = None,
     gateway_key_owners: str | None = None,
+    #: 每用户代理的 unix socket 路径；``None`` = 不建这条通道。
+    agent_socket: str | None = DEFAULT_AGENT_SOCKET,
 ) -> OpsApplication:
     """把三块拼起来。**只建对象，不开端口。**
 
@@ -269,9 +276,20 @@ def build_application(
         admin_names=admin_names,
         accounts=accounts,
         allowed_logins=allowed_logins,
+        host_users=host_users,
     )
 
-    return OpsApplication(
+    # 每用户代理通道。通道要拿 ``service`` 上报，所以只能先建服务再挂通道；
+    # ``discover`` 从这里读出「开没开 / 为什么没开」。**不在这里 start()**：本函数
+    # 只建对象（测试用它建应用时不该多出一个 socket）。
+    agent_channel = None
+    if agent_socket:
+        agent_channel = AgentChannel(
+            path=agent_socket, service=service, principals=principals
+        )
+        service.agent_channel = agent_channel
+
+    app = OpsApplication(
         auth_app=auth_app,
         service=service,
         accounts=accounts,
@@ -293,6 +311,9 @@ def build_application(
         gateway_app=GatewayApplication(gateway_core),
         param_store=param_store,
     )
+    # ``main()`` 用它来 start/stop；``None`` = 本部署没开这条通道。
+    app.agent_channel = agent_channel
+    return app
 
 
 def _visible_endpoints(service):
@@ -562,26 +583,31 @@ def build_linux_service(
     admin_names: tuple[str, ...] = (),
     accounts=None,
     allowed_logins: tuple[str, ...] | None = None,
+    host_users: tuple[tuple[str, int], ...] = HOST_USERS,
 ):
     """装一个**能失败得诚实**的 Linux 登录服务。
 
     两点刻意为之：
 
     * 策略与允许名单是**内存**造的。生产里那份是 root 拥有的文件；这个进程没有、
-      也不假装有。默认**没有任何管理员**——``--platform-admin carol`` 才在本次进程
+      也不假装有。默认**没有任何管理员**——``--platform-admin <user>`` 才在本次进程
       的内存里加一条，且它随进程消失。
     * broker 指向一个不存在的 socket，因此每次登录都会以 503
       ``pam_unavailable`` 收场。这是本构建里唯一诚实的结局：真 PAM 后端没有实现
       （``backend/auth_linux/pam_backend.py`` 只提供 ``UnavailablePamBackend``），
       一个返回 ``authenticated`` 的测试替身**不能**当作「密码能用」的证据。
+
+    ``host_users`` 是**这台机器上的人**，``HOST_USERS`` 只是它的夹具缺省。允许名单
+    与管理员授权都必须从前者算：拿夹具当部署，名单里就是四个并不存在的人，而真正
+    要登录的人一个都不在里面（``--platform-admin`` 也会静默地什么也没授权）。
     """
     from ..auth_linux import broker_client, throttle as linux_throttle
 
     accounts = accounts if accounts is not None else linux_accounts.SystemPwdSource()
-    names = allowed_logins if allowed_logins is not None else tuple(n for n, _ in HOST_USERS)
+    names = allowed_logins if allowed_logins is not None else tuple(n for n, _ in host_users)
     allowlist = linux_policy.Allowlist(frozenset(names))
     entries = frozenset(
-        (uid, name) for name, uid in HOST_USERS if name in set(admin_names)
+        (uid, name) for name, uid in host_users if name in set(admin_names)
     )
     admin_grant = linux_policy.AdminGrant(host_id=host_id, entries=entries)
 
@@ -689,6 +715,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-model-scan",
         action="store_true",
         help="关闭模型目录的自动查找（推理服务的发现不受影响）",
+    )
+    parser.add_argument(
+        "--agent-socket",
+        default=DEFAULT_AGENT_SOCKET,
+        metavar="PATH",
+        help=(
+            "每用户代理上报的 unix socket（内核给出对端 uid）。目录不存在时这条通道"
+            f"只是不开，服务照常启动。缺省 {DEFAULT_AGENT_SOCKET}"
+        ),
+    )
+    parser.add_argument(
+        "--no-agent-socket",
+        action="store_true",
+        help="完全不建代理通道（本机没有 /run/llmlab，或者不想开这条入口时）",
     )
     parser.add_argument(
         "--engine-secret-ref",
@@ -800,6 +840,7 @@ def main(argv: list[str] | None = None) -> int:
         host_users=host_users,
         gateway_state_dir=args.gateway_state_dir,
         gateway_key_owners=args.gateway_key_owners,
+        agent_socket=None if args.no_agent_socket else args.agent_socket,
     )
 
     if args.synthetic_logins:
@@ -811,6 +852,14 @@ def main(argv: list[str] | None = None) -> int:
             "  real PAM is NOT implemented: a login attempt ends in 503 pam_unavailable.",
             file=sys.stderr,
         )
+
+    channel = getattr(app, "agent_channel", None)
+    if channel is not None:
+        status = channel.start()
+        if status.listening:
+            print(f"  agent socket {status.path} (SO_PEERCRED)", file=sys.stderr)
+        else:
+            print(f"  agent socket off: {status.problem}", file=sys.stderr)
 
     server = wsgiref.simple_server.make_server(
         host, port, app, server_class=_ThreadingWSGIServer
@@ -827,11 +876,16 @@ def main(argv: list[str] | None = None) -> int:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nstopped", file=sys.stderr)
+    finally:
+        server.server_close()
+        if channel is not None:
+            channel.stop()
     return 0
 
 
 __all__ = [
     "ALLOWED_BIND_HOSTS",
+    "DEFAULT_AGENT_SOCKET",
     "DEFAULT_HOST_ID",
     "DEFAULT_PORT",
     "HOST_USERS",

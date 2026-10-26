@@ -64,6 +64,19 @@ class AccountAwareDirectory(PrincipalDirectory):
             raise Unauthenticated(f"principal {principal!r} is not in the trusted directory")
         return found
 
+    def by_uid(self, uid: int) -> Principal | None:
+        """``uid -> Principal`` 只可能命中静态 Linux 目录：平台账户没有 uid。
+
+        必须显式委托。``super().__init__(())`` 把父类的 ``_by_uid`` 建成空表，
+        而父类的 ``by_uid`` 只读那张表 —— 不覆盖的话，这台机器上**每一个**真实
+        Linux 用户在这里都查不到，代理通道会以「uid 未映射」拒掉所有人。
+        """
+        return self._static.by_uid(uid)
+
+    def uids(self) -> frozenset[int]:
+        """与 :meth:`by_uid` 同一个理由：父类的表是空的。"""
+        return self._static.uids()
+
     def approved_principals(self) -> frozenset[str]:
         accounts = {
             account.user.id for account in self._accounts.list_accounts() if account.user.is_active
