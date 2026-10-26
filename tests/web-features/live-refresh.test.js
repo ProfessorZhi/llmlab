@@ -219,6 +219,41 @@ test('存过的节奏能用；存进去的值不在选项里就回到每秒', ()
   }
 });
 
+test('新用户（浏览器里从没存过）拿到的是每秒，不是「暂停」', () => {
+  // 真实的 localStorage 在没有这个键时返回 null；Number(null) 是 0，而 0 就是「暂停」。
+  // 这一条防的就是「默认节奏变成不刷新、页面看起来正常但数字不动」。
+  const seen = [];
+  globalThis.localStorage = {
+    getItem: (key) => { seen.push(key); return null; },
+    setItem: () => {},
+  };
+  try {
+    assert.equal(savedRefreshMs(), 1000);
+    assert.equal(savedRefreshMs(), 1000, '每次都重新读，不会记住上一次的结果');
+  } finally {
+    delete globalThis.localStorage;
+  }
+  assert.ok(seen.length >= 2);
+});
+
+test('浏览器里空字符串也不当成「暂停」', () => {
+  globalThis.localStorage = { getItem: () => '', setItem: () => {} };
+  try {
+    assert.equal(savedRefreshMs(), 1000);
+  } finally {
+    delete globalThis.localStorage;
+  }
+});
+
+test('显式选了「暂停」才是不刷新', () => {
+  globalThis.localStorage = { getItem: () => '0', setItem: () => {} };
+  try {
+    assert.equal(savedRefreshMs(), 0, '存过 0 就是用户真的按了暂停');
+  } finally {
+    delete globalThis.localStorage;
+  }
+});
+
 test('资源监控页真的接上了这支定时器，而不是自己另写一个 setInterval', () => {
   const source = readFileSync(join(here, '../../web/console/js/pages.js'), 'utf8');
 

@@ -30,10 +30,15 @@ export const STATE_SHORT = Object.freeze({
 const clockOf = (d = new Date()) => [d.getHours(), d.getMinutes(), d.getSeconds()]
   .map((n) => String(n).padStart(2, '0')).join(':');
 
-/** 上一次选中的节奏；没有、读不了、或者不在选项里，都回到「每秒」。 */
+/** 上一次选中的节奏；没有、读不了、或者不在选项里，都回到「每秒」。
+ *
+ *  ``Number(null)`` 是 ``0``，而 ``0`` 恰好是「暂停」——没存过偏好时必须先认出
+ *  ``null``，否则新用户的默认节奏会悄悄变成不刷新。
+ */
 export function savedRefreshMs() {
   try {
-    const ms = Number(localStorage.getItem(REFRESH_KEY));
+    const raw = localStorage.getItem(REFRESH_KEY);
+    const ms = raw === null || raw === '' ? NaN : Number(raw);
     return REFRESH_CHOICES.some(([, value]) => value === ms) ? ms : 1000;
   } catch { return 1000; }
 }

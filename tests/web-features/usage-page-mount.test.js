@@ -119,6 +119,22 @@ test('只坏一份时其余照常显示，状态行只点名坏的那一份', as
   }
 });
 
+test('没存过偏好的浏览器：页面自己按 1 秒排拍，状态行写「每秒」', async () => {
+  const delays = [];
+  const realSet = globalThis.setTimeout;
+  // 把定时器换成只记录不执行：既能断言「排了一拍 1 秒」，又不会让测试进程挂着。
+  globalThis.setTimeout = (fn, ms) => { delays.push(ms); return 0; };
+  globalThis.localStorage = { getItem: () => null, setItem: () => {} };
+  try {
+    const page = await usage(ctx);
+    assert.ok(delays.includes(1000), `页面没有按 1 秒排拍，实际排了 ${JSON.stringify(delays)}`);
+    assert.match(textOf(page), /自动刷新：每秒/);
+  } finally {
+    globalThis.setTimeout = realSet;
+    globalThis.localStorage = { getItem: () => '0', setItem: () => {} };
+  }
+});
+
 test('演示数据不挂定时器，也不出现刷新频率控件', async () => {
   const page = await usage({ ...ctx, demo: true });
 
