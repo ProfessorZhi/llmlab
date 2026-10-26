@@ -80,5 +80,31 @@ class TheDirectoryFollowsHostUsers(unittest.TestCase):
                     self.assertEqual(principal.linux_user, name)
 
 
+class TheHostIdIsThisMachine(unittest.TestCase):
+    """``host_id`` 缺省取真实主机名：代理上报的就是它，两边不该有两个答案。
+
+    曾经这里是一个占位名（``dell-test-01``），于是「代理上报」表里同一台机器
+    出现两列主机名：``host_id`` 是占位值，``agent_id`` 是真实主机名。
+    """
+
+    def with_hostname(self, value: str) -> str:
+        original = devserver.socket.gethostname
+        devserver.socket.gethostname = lambda: value
+        self.addCleanup(setattr, devserver.socket, "gethostname", original)
+        return devserver.machine_host_id()
+
+    def test_the_default_is_the_real_hostname(self):
+        self.assertEqual(devserver.DEFAULT_HOST_ID, devserver.machine_host_id())
+        self.assertEqual(
+            devserver.machine_host_id(), devserver.socket.gethostname().split(".")[0]
+        )
+
+    def test_the_domain_part_is_dropped_like_the_agent_does(self):
+        self.assertEqual(self.with_hostname("lab-07.example.org"), "lab-07")
+
+    def test_an_empty_hostname_still_names_a_host(self):
+        self.assertEqual(self.with_hostname(""), "localhost")
+
+
 if __name__ == "__main__":
     unittest.main()

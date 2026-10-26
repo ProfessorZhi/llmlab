@@ -51,6 +51,54 @@ class AccountDirectoryByUidTests(unittest.TestCase):
         self.assertIsNotNone(found)
         self.assertEqual(found.linux_user, "carol")
 
+    # -- linux 用户 -> 平台账户 -------------------------------------------------
+
+    def create_account(self, username: str, linux_user: str | None):
+        """直接建一行账户：这里要的是「表里有没有人认领这个名字」，不是创建接口。"""
+
+        return self.directory._accounts.store.create(
+            username=username,
+            display_name=username,
+            role="member",
+            linux_user=linux_user,
+            password_hash="synthetic-not-a-real-hash",
+            created_by="test",
+            now=0.0,
+        )
+
+    def test_a_linux_user_is_resolved_to_its_account(self) -> None:
+        created = self.create_account("alice-acct", "alice")
+
+        found = self.directory.account_for_linux_user("alice")
+
+        self.assertIsNotNone(found)
+        self.assertEqual(found.principal, created.user.id)
+        self.assertTrue(found.is_account)
+
+    def test_a_linux_user_nobody_claims_has_no_account(self) -> None:
+        self.create_account("alice-acct", "alice")
+
+        self.assertIsNone(self.directory.account_for_linux_user("carol"))
+
+    def test_an_account_without_a_linux_user_claims_nobody(self) -> None:
+        self.create_account("alice-acct", None)
+
+        self.assertIsNone(self.directory.account_for_linux_user("alice"))
+
+    def test_two_accounts_claiming_one_linux_user_answer_none(self) -> None:
+        """归属只能有一个答案：撞了就**不猜**，宁可不登记。"""
+
+        self.create_account("alice-one", "alice")
+        self.create_account("alice-two", "alice")
+
+        self.assertIsNone(self.directory.account_for_linux_user("alice"))
+
+    def test_a_disabled_account_no_longer_owns_new_models(self) -> None:
+        created = self.create_account("alice-acct", "alice")
+        self.directory._accounts.db.set_user_status(created.user.id, "disabled")
+
+        self.assertIsNone(self.directory.account_for_linux_user("alice"))
+
 
 if __name__ == "__main__":
     unittest.main()

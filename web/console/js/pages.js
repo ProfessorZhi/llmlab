@@ -264,6 +264,9 @@ function discoveryPanel(ctx, kind) {
 
 /* ---------- 每用户代理：别人自己报上来的事实 ---------- */
 
+/** 折叠行里最多列出几个端口：再多就只是噪音，读者要的是「还有多少个」。 */
+const FOLDED_PORTS_SHOWN = 6;
+
 /** ``/discovery`` 的 ``agent_reports`` ⇒ 一张扁平的表格数据。纯函数，可单测。 */
 export function flattenAgentReports(data) {
   const rows = [];
@@ -278,7 +281,15 @@ export function flattenAgentReports(data) {
       stale: Boolean(report.stale),
       full: report.full !== false,
     };
+    // 非推理端口（Web 面板、调试端口、别的守护进程）不逐条占一行：一台机器
+    // 随时能报出七八个，把真正可登记的推理服务淹掉。折叠成一行，数量与端口
+    // 照样看得到——「看不见」和「不逐条列」是两件事。
+    const folded = [];
     for (const engine of report.engines ?? []) {
+      if (engine.registrable === false && !engine.registered) {
+        folded.push(engine.port);
+        continue;
+      }
       rows.push({
         ...base,
         kind: 'engine',
@@ -287,6 +298,16 @@ export function flattenAgentReports(data) {
         state: engine.registered
           ? '已登记'
           : engine.registrable === false ? '端口不在允许列表' : '可登记',
+      });
+    }
+    if (folded.length) {
+      const shown = folded.slice(0, FOLDED_PORTS_SHOWN).join('、');
+      rows.push({
+        ...base,
+        kind: 'folded',
+        object: `另有 ${folded.length} 个监听端口（不在允许列表）`,
+        detail: folded.length > FOLDED_PORTS_SHOWN ? `${shown}…` : shown,
+        state: '端口不在允许列表',
       });
     }
     for (const item of report.installed_engines ?? []) {
@@ -315,7 +336,7 @@ export function flattenAgentReports(data) {
   return rows;
 }
 
-const AGENT_KIND_LABEL = { engine: '推理服务', installed: '已安装引擎', model: '模型' };
+const AGENT_KIND_LABEL = { engine: '推理服务', folded: '其他端口', installed: '已安装引擎', model: '模型' };
 
 export function agentReportsPanel(ctx) {
   const holder = h('div', {});

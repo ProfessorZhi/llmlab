@@ -1181,7 +1181,7 @@ Gateway 的判定做决定」。上真机还需要：一个运维建好的、Gat
 组可写的快照目录，以及一份 `engine_id -> {file, var}` 的 `engine_secret_refs` 配置。
 这两件事**都不在本轮做**（`NOT DEPLOYED / NO RUNTIME VERIFICATION`）。
 
-## 22. 每用户代理：unix socket、`SO_PEERCRED`、只发现不登记
+## 22. 每用户代理：unix socket、`SO_PEERCRED`、看见不等于登记
 
 > 对应设计规格 D9 与 `docs/design-lab-resource-agent-and-service-sharing-2026-10-23.md` §2。
 > 它回答一个很具体的问题：服务以平台账户运行时读不到其他用户 0700 的 HOME，
@@ -1292,12 +1292,45 @@ socket 绑不上（目录不存在、权限不足）**不会**让服务起不来
 `path_uid_mismatch` / `path_other_user_home` 拒绝时，平台记一条审计
 `agent_report_ownership_violation`——干净的报告不记审计，否则日志会被正常上报淹掉。
 
-### 22.5 上报 ≠ 登记
+### 22.5 上报 ≠ 登记（模型是唯一的例外）
 
 一份报告只写 `agent_reports` 表（主键 `(principal, agent_id)`，同一代理**覆盖**而不是
-追加）。`engines` / `models` 表**一个字节都不动**。要登记，仍然走同一套所有权校验的
-`POST /engines` / `POST /models`；网页上的「可登记 / 端口不在允许列表」只是提示，
+追加）。`engines` / `model_locations` 表**一个字节都不动**。要登记一个服务，仍然走
+同一套所有权校验的 `POST /engines`；网页上的「可登记 / 端口不在允许列表」只是提示，
 不是一条捷径。
+
+**模型例外**（§22.5.1）：报告里的权重文件会以**上报者的平台账户**名义落成 `models`
+行。理由是两个说法不能同时成立——「本机发现了 4 个模型」与「我的模型库里 0 个」。
+服务那一半没有这个矛盾：一台机器上 8081（Caddy）、9000（评测服务）之类的监听端口
+每天都可能变，把「有人在听」直接变成「平台对外提供一个服务」是把风险推给平台，
+而不是把方便给用户。
+
+#### 22.5.1 自动登记的模型行（`backend/registry/reported_models.py`）
+
+| 问题 | 答案 | 依据 |
+| --- | --- | --- |
+| 所有者是谁 | 上报者的**平台账户**（`account:<id>`，`owner_uid=-1`） | 模型库是账户的视图；`linux:<host>:<uid>` 只是这条通道的身份 |
+| 怎么找到账户 | `PrincipalDirectory.account_for_linux_user()`，由 `AccountAwareDirectory` 用账户库实现 | 停用账户不算；两个账户认领同一个 Linux 用户时**返回 None**（不猜） |
+| 谁不会被登记 | 没有账户的 Linux 用户（系统账户、还没开账户的人） | 没有可归属的所有者，就不替谁做主 |
+| 行里写什么 | `name`、`weight_path`、`weight_path_sha256`、`format`、`size_bytes`、`source=auto` | 路径经过 `agent_reports._path` 的校验：本人 home 内、服务端 stat 过、uid 相符 |
+| 什么是**不**做的 | 不打开、不移动、不复制文件；`health` 固定是 `unknown`，理由写着 `never opened` | 与手工登记同一条边界：模型只是引用 |
+| 重复上报 | 同路径 → 沿用原行；同名 → 沿用原行（**只补空，不覆盖**） | 每 5 分钟一轮，账本不能跟着涨 |
+| 审计 | 只在**新建**行时写一条 `agent_models_adopted`（detail 里是 owner 与新行 id） | 没有新行的轮次不该在审计表里留痕 |
+
+去重按 **(owner, 名字)** 和 **(owner, 路径)** 两条：一个模型在别的账户名下存在，
+不构成「已经登记过」——那是别人的资源。名字来自代理上报的 `suggested_name`
+（清洗成 Registry 允许的形状），拿不到就用文件名去扩展名；两者都洗不出来就跳过
+这一条（没有名字的模型行在库里搜不到、也打不开）。
+
+`/discovery` 里每个模型条目的 `registered` 因此也会因为**账户**名下的行而变真：
+`_registered_marks()` 把「linux 主体」和「它对应的账户」两边的端口/路径都并进来。
+只认 linux 主体的话，刚被自动登记的那几行在报告里仍然显示「未登记」——同一件事
+有两个答案。
+
+`tests/registry/test_reported_models.py`（11 条）钉住落成规则，
+`tests/registry/test_agent_reports.py` 里另外 7 条钉住服务端接线（账户归属、
+没有账户时什么都不写、重复上报不重复建行、审计只记一次、报告视图翻成「已登记」、
+账户能看到自己认领的 linux 主体的上报、别人家的上报看不见）。
 
 其它边界值：一个主体最多 8 个 `agent_id`（再多是 `registry.conflict`）；报告超过
 30 分钟标 `stale`（30 个上报周期，短暂重启不该立刻看起来像死了）；写路径顺手清理
@@ -1318,8 +1351,12 @@ socket 绑不上（目录不存在、权限不足）**不会**让服务起不来
 
 * **可见性**：管理员读看到全部；其他人只看到**自己**的（`self`）。这是刻意的——
   报告里含别人的路径与端口，作用域写在信封里，前端与 CLI 据此说明自己拿到的是哪一份。
+  「自己」不止一个主体：人以账户登录、代理以 `linux:<host>:<uid>` 上报，所以账户
+  看到的是它认领的那个 linux 主体的报告（`_own_report_principals`）。只比账户名的话，
+  用户自己的控制台里永远空着——而同一批模型此刻正在他的模型库里。
 * 每个条目上的 `registered` / `registered_by_me` 由服务端**现算**（回环端口与权重
-  路径是否已在 `engines` / `models` 里），不是代理说的。
+  路径是否已在 `engines` / `models` 里），不是代理说的。算的时候把「这个 linux
+  主体」和「它对应的平台账户」两边的行都算进来（§22.5.1）。
 * `agent_channel.configured: false` 表示这个部署根本没开通道（`--no-agent-socket`），
   与「开了但没监听」是两件事，`problem` 会给出后者。
 
@@ -1405,8 +1442,9 @@ sudo runuser -u <name> -- env -i HOME=<home> PYTHONPATH=<repo> \
 这个文件存在，脚本就跳过该账户（输出里记一行「跳过」）。默认「被看见」，但
 选择权仍在人手里；这是他**自己的**文件，不需要任何人代他决定。
 
-**上报 ≠ 登记**（§22.5）：代跑只让平台知道「这台机器的这个人那儿有什么」，
-把其中任何一项变成平台上的登记，仍然要本人或管理员显式登记。
+**上报 ≠ 登记**（§22.5）：代跑让平台知道「这台机器的这个人那儿有什么」；其中
+**模型**会按 §22.5.1 落到本人账户名下，**服务**则要本人或管理员显式登记——代跑
+不改变这条边界。
 
 `tests/security/test_host_inventory_script.py` 用替身 `id` / `getent` / `runuser`
 跑脚本，逐条断言每次扫描的 argv 里写着 `-u <那个人>`、`HOME=<那个人的家>`、
@@ -1422,11 +1460,14 @@ sudo runuser -u <name> -- env -i HOME=<home> PYTHONPATH=<repo> \
 * `tests/registry/test_agent_channel.py`（18 条）：真的 AF_UNIX 监听器，握手、上限、
   错误透传、退出清理；其中两条**不替换** `peer_uid`，让内核真的回答一次
   `SO_PEERCRED`，证明这条通道在当前内核上可用。
-* `tests/registry/test_agent_reports.py`（40 条）：校验的每一条拒绝理由、服务端的
-  归属写入、覆盖而非追加、审计、可见性、v4→v5 迁移。
+* `tests/registry/test_agent_reports.py`（46 条）：校验的每一条拒绝理由、服务端的
+  归属写入、覆盖而非追加、审计、可见性、v4→v5 迁移，以及 §22.5.1 的自动登记接线。
+* `tests/registry/test_reported_models.py`（11 条）：上报条目落成账户名下 `models`
+  行的规则（命名、去重、不覆盖、别的主体的行不被借走、没有所有者就不写）。
 * `tests/registry/test_agent_cli.py`（10 条）：真子进程跑 `python3 -m cli.llmlab agent`，
   环境里清掉全部 `LLMLAB_TOKEN*`，证明**没有令牌也能上报**。
-* `tests/web-features/agent-reports.test.js`（14 条）：控制台表格行的语义。
+* `tests/web-features/agent-reports.test.js`（17 条）：控制台表格行的语义——
+  包括「非允许端口折叠成一行、数量与端口照列」。
 * `tests/security/test_host_inventory_script.py`（11 条）：替身 `id`/`getent`/`runuser`
   下逐条核对每一次扫描的 argv；非 root 拒绝、通道不通整轮中止、`no-inventory` 跳过、
   扫描前后家目录文件清单不变。

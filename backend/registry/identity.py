@@ -146,8 +146,9 @@ def principal_host_id(principal: object) -> str | None:
     """从 ``linux:<host>:<uid>`` 里取出 ``<host>``；不是这个形状就 ``None``。
 
     代理上报的 ``host_id`` **必须**由服务端从这里推出。客户端自称的主机名不能
-    用：这台机器上的正式服务跑在 ``--host-id dell-test-01`` 之下，而不是真实
-    主机名 —— 采信客户端的写法，同一台机器就会在库里变成两台。
+    用：主体名里的 ``<host>`` 是部署时 ``--host-id`` 定下的那一份，采信客户端的
+    写法，同一台机器就会在库里变成两台（这也是 ``--host-id`` 缺省取真实主机名的
+    理由：代理就在本机跑，两边的答案本来就该是同一个）。
 
     只认最后一段是十进制 uid 的形状；主机名里即便有冒号也仍然解得出来（按最右
     一个冒号切）。
@@ -324,6 +325,15 @@ class PrincipalDirectory:
         if found is None:
             raise Unauthenticated(f"principal {principal!r} is not in the trusted directory")
         return found
+
+    def account_for_linux_user(self, linux_user: str) -> Principal | None:
+        """这个 Linux 用户对应的**平台账户**主体，没有就 ``None``。
+
+        静态目录只装 Linux 主体，账户由 :class:`AccountAwareDirectory` 接进来；
+        所以基类永远回答「没有」——它没有别的答案可给，而不是「查不到就叫账户」。
+        """
+
+        return None
 
     def approved_principals(self) -> frozenset[str]:
         """``all-approved-platform-users`` 的**唯一**成员来源。"""

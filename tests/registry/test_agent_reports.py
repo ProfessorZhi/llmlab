@@ -8,7 +8,9 @@
 * 客户端自带 ``uid`` / ``run_as_user`` / ``target_url`` / ``registered`` -> 整条丢弃；
 * ``host_id`` 从主体名 ``linux:<host>:<uid>`` 推出，客户端自称的不算。
 
-上报**不登记**：无论报告里有什么，``engines`` / ``models`` 都不会多出一行。
+上报只登记**模型**，而且只登记在**上报者的平台账户**名下（``source=auto``，
+只是路径引用）：端口那一半永远只写 ``agent_reports``——「看见一个端口」不等于
+「我要对外提供这个服务」。linux 用户没有账户时不登记任何东西。
 """
 
 from __future__ import annotations
@@ -31,6 +33,8 @@ from backend.registry.agent_reports import (
 )
 from backend.registry.errors import AccessDenied, Conflict, InvalidRequest, Unauthenticated
 from backend.registry.identity import (
+    PRINCIPAL_KIND_ACCOUNT,
+    SCOPE_ADMIN_READ,
     SCOPE_AGENT_REPORT,
     Principal,
     PrincipalDirectory,
@@ -90,6 +94,38 @@ def _principals() -> PrincipalDirectory:
             Principal(BOB, "bob", BOB_UID),
         ]
     )
+
+
+class _AccountDirectory(PrincipalDirectory):
+    """静态 Linux 目录 + 一张 ``linux_user -> 平台账户`` 的表。
+
+    生产里这张表是账户库（``AccountAwareDirectory``）；这里只保留 Registry 用到的
+    那一个问题：「这个人有没有账户」，账户本身的测试在 ``tests/bff``。
+    """
+
+    def __init__(self, entries, mapping) -> None:
+        super().__init__(entries)
+        self.mapping = dict(mapping)
+
+    def account_for_linux_user(self, linux_user: str):
+        return self.mapping.get(linux_user)
+
+
+ALICE_ACCOUNT = "account:0123456789abcdef0123456789abcdef"
+MODEL_PATH = "/home/alice/m.gguf"
+
+
+def _model_entry(**overrides) -> dict:
+    entry = {
+        "path": MODEL_PATH,
+        "format": "gguf",
+        "size_bytes": 1234,
+        "suggested_name": "alice-qwen",
+        "architecture": None,
+        "model_type": None,
+    }
+    entry.update(overrides)
+    return entry
 
 
 def _validator(*, listeners=(), allowed=(), owners=None, unreadable=()):
@@ -386,15 +422,31 @@ class ReportServiceTests(unittest.TestCase):
             allowed=(8000,),
             owners={"/home/alice/m.gguf": ALICE_UID},
         )
-        self.service = RegistryService(
+        self.service = self.service_for(self.principals)
+        self.now = NOW
+
+    def service_for(self, principals) -> RegistryService:
+        return RegistryService(
             store=self.store,
             tokens=TokenDirectory(()),
-            principals=self.principals,
+            principals=principals,
             config=RegistryConfig(mode="synthetic"),
             report_validator=self.validator,
             clock=lambda: self.now,
         )
-        self.now = NOW
+
+    def service_with_account(self, *, linux_user="alice") -> RegistryService:
+        """一个把 ``linux_user`` 解析到平台账户的目录。"""
+
+        account = Principal(
+            ALICE_ACCOUNT, "alice", None, kind=PRINCIPAL_KIND_ACCOUNT
+        )
+        return self.service_for(
+            _AccountDirectory(
+                [Principal(ALICE, "alice", ALICE_UID), Principal(BOB, "bob", BOB_UID)],
+                {linux_user: account},
+            )
+        )
 
     def requester(self, principal=ALICE, uid=ALICE_UID, *, scopes=frozenset({SCOPE_AGENT_REPORT})):
         return RequesterContext(
@@ -422,19 +474,94 @@ class ReportServiceTests(unittest.TestCase):
         self.assertEqual(rows[0]["uid"], ALICE_UID)
         self.assertEqual(rows[0]["report"]["engines"][0]["port"], 8000)
 
-    def test_a_report_never_registers_anything(self) -> None:
+    def test_a_report_never_registers_an_engine(self) -> None:
+        """端口只是「本机有人在听」，登记它需要一次带所有权证明的写请求。"""
+
         self.service.report_agent(
-            self.requester(),
-            _payload(
-                engines=[{"port": 8000}],
-                models=[{
-                    "path": "/home/alice/m.gguf", "format": "gguf", "size_bytes": 1,
-                }],
-            ),
+            self.requester(), _payload(engines=[{"port": 8000}], models=[_model_entry()])
         )
 
         self.assertEqual(self.store.list_engines(), [])
+
+    def test_a_linux_user_without_an_account_registers_no_model(self) -> None:
+        """没有可归属的所有者就不替谁做主：宁可库里少一行，也不能记错人。"""
+
+        self.service.report_agent(self.requester(), _payload(models=[_model_entry()]))
+
         self.assertEqual(self.store.list_models(), [])
+
+    def test_a_reported_model_lands_under_the_reporters_account(self) -> None:
+        service = self.service_with_account()
+        service.report_agent(self.requester(), _payload(models=[_model_entry()]))
+
+        rows = self.store.list_models()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].owner_principal, ALICE_ACCOUNT)
+        self.assertEqual(rows[0].owner_uid, -1)
+        self.assertEqual(rows[0].weight_path, MODEL_PATH)
+        self.assertEqual(rows[0].source, "auto")
+
+    def test_re_reporting_the_same_file_does_not_duplicate_it(self) -> None:
+        service = self.service_with_account()
+        service.report_agent(self.requester(), _payload(models=[_model_entry()]))
+        service.report_agent(self.requester(), _payload(models=[_model_entry()]))
+
+        self.assertEqual(len(self.store.list_models()), 1)
+        adopted = [
+            entry
+            for entry in self.store.list_audit(limit=20)
+            if entry.action == "agent_models_adopted"
+        ]
+        # 只有**新建**那一轮留痕：每 5 分钟一轮的上报不该把审计表刷成日志。
+        self.assertEqual(len(adopted), 1)
+        self.assertEqual(adopted[0].detail["owner"], ALICE_ACCOUNT)
+
+    def test_a_member_sees_the_report_of_the_linux_user_their_account_claims(self) -> None:
+        """人以账户登录、代理以 linux 身份上报：看不见自己的上报才是错的。"""
+
+        service = self.service_with_account()
+        service.report_agent(self.requester(), _payload(engines=[{"port": 8000}]))
+
+        view = service.discover(self.account_requester())["data"]
+
+        self.assertEqual(view["agent_reports_scope"], "self")
+        self.assertEqual([row["linux_user"] for row in view["agent_reports"]], ["alice"])
+
+    def test_a_report_from_a_linux_user_nobody_claims_stays_invisible(self) -> None:
+        service = self.service_with_account()
+        service.report_agent(
+            self.requester(principal=BOB, uid=BOB_UID), _payload(agent_id="bob-01")
+        )
+
+        view = service.discover(self.account_requester())["data"]
+
+        self.assertEqual(view["agent_reports"], [])
+
+    def account_requester(self) -> RequesterContext:
+        return RequesterContext(
+            principal=ALICE_ACCOUNT,
+            uid=None,
+            linux_user="alice",
+            scopes=frozenset({"registry:read"}),
+            roles=frozenset(),
+        )
+
+    def test_the_report_view_marks_the_adopted_model_as_registered(self) -> None:
+        """自动登记之后，「代理上报」表里的那一行不能再显示「未登记」。"""
+
+        service = self.service_with_account()
+        service.report_agent(
+            self.requester(), _payload(engines=[{"port": 8000}], models=[_model_entry()])
+        )
+
+        view = service.discover(
+            self.requester(scopes=frozenset({"registry:read", SCOPE_ADMIN_READ}))
+        )
+        report = view["data"]["agent_reports"][0]
+
+        self.assertTrue(report["models"][0]["registered"])
+        # 端口那一半没有被这次改动带偏：它仍然没有登记。
+        self.assertFalse(report["engines"][0]["registered"])
 
     def test_the_socket_scope_is_required(self) -> None:
         """网页会话与 CLI 令牌拿不到这条 scope：它只由内核证明的 uid 产生。"""

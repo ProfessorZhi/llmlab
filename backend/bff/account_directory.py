@@ -77,6 +77,29 @@ class AccountAwareDirectory(PrincipalDirectory):
         """与 :meth:`by_uid` 同一个理由：父类的表是空的。"""
         return self._static.uids()
 
+    def account_for_linux_user(self, linux_user: str) -> Principal | None:
+        """``linux_user -> account:<id>``：本机代理上报的模型归这个账户所有。
+
+        约束与 ``ApprovalStore`` 同一个取向——归属只能有一个答案：
+
+        * 只认**启用中**的账户（停用账户不该继续自动入账）；
+        * 两个账户声明了同一个 Linux 用户时**不猜**，返回 ``None``（宁可不登记，
+          也不能把模型记到错的人名下）；
+        * ``linux_user`` 在账户表里是标签而不是凭据，所以这里不做任何身份推断，
+          只回答「表里有没有人认领这个名字」。
+        """
+
+        if not isinstance(linux_user, str) or not linux_user:
+            return None
+        matches = [
+            account
+            for account in self._accounts.list_accounts()
+            if account.linux_user == linux_user and account.user.is_active
+        ]
+        if len(matches) != 1:
+            return None
+        return account_principal(matches[0])
+
     def approved_principals(self) -> frozenset[str]:
         accounts = {
             account.user.id for account in self._accounts.list_accounts() if account.user.is_active

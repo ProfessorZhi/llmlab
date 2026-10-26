@@ -65,6 +65,7 @@ from .identity import (
     FORBIDDEN_IDENTITY_FIELDS,
     SCOPE_ADMIN_MANAGE,
     SCOPE_AGENT_REPORT,
+    Principal,
     PrincipalDirectory,
     RequesterContext,
     TokenDirectory,
@@ -72,6 +73,7 @@ from .identity import (
     is_account_principal,
     principal_host_id,
 )
+from .reported_models import Adoption, adopt_reported_models
 from .ingest import OFFLINE_AFTER_MISSES
 from .models import (
     DEPLOYMENT_READY,
@@ -1048,7 +1050,7 @@ class RegistryService:
     # -- 每用户代理上报 -----------------------------------------------------
 
     def report_agent(self, requester: RequesterContext, payload: dict) -> AgentReport:
-        """收下一份「我这台机器上跑着什么、装了什么」的快照。**不登记任何东西。**
+        """收下一份「我这台机器上跑着什么、装了什么」的快照。
 
         身份叙事只有一条：``requester.uid`` 由 unix socket 的 ``SO_PEERCRED`` 给出，
         恰好落在受信目录的某一行上，而那一行就是 ``requester.principal``。因此：
@@ -1057,8 +1059,13 @@ class RegistryService:
           写死 —— 客户端一个字都不算（也正因如此，报告中带这些字段的条目会被整条
           丢弃，见 ``agent_reports._asserts_identity``）；
         * ``host_id`` 从主体名 ``linux:<host>:<uid>`` 里取，**不**用客户端自称的主机名；
-        * 这条通道只写 ``agent_reports``，永远不碰 ``engines`` / ``models`` /
-          ``model_locations``：看见不等于登记。
+        * 只有 ``agent_reports`` 是这条通道的落点。``engines`` / ``model_locations``
+          永远不写——「看见一个端口」不等于「我要登记它」。
+
+        **模型是唯一的例外**：报告里的权重文件会被自动登记成**本人平台账户**名下的
+        ``models`` 行（``source=auto``），否则「本机发现了 4 个模型」与「模型库里有
+        0 个模型」永远是两句话。代价与边界见 :mod:`reported_models`：这些行只是
+        路径引用（平台不打开文件），只填空不覆盖，linux 用户没有账户时不登记。
         """
 
         if not isinstance(requester, RequesterContext):
@@ -1121,7 +1128,77 @@ class RegistryService:
                 object_id=report.agent_id,
                 detail={"violations": violations},
             )
+        self._adopt_reported_models(requester, principal, report, received_at)
         return report
+
+    def _account_for_linux_user(self, linux_user: str) -> Principal | None:
+        """这个 Linux 用户的平台账户主体；目录不支持解析时回答 ``None``。"""
+
+        resolver = getattr(self.principals, "account_for_linux_user", None)
+        if resolver is None:  # pragma: no cover - 只有静态目录的部署
+            return None
+        return resolver(linux_user)
+
+    def _adopt_reported_models(
+        self,
+        requester: RequesterContext,
+        principal: Principal,
+        report: AgentReport,
+        now: datetime,
+    ) -> Adoption:
+        """把上报的模型落成**本人账户**的 ``models`` 行。
+
+        失败不影响这次上报：快照已经写进去了，模型只是它的一个副产品，存储故障
+        不能让代理以为「这次没报成」。没有账户的 Linux 用户不登记——没有可归属的
+        所有者，就不替谁做主。
+        """
+
+        if not report.models:
+            return Adoption()
+        owner = self._account_for_linux_user(principal.linux_user)
+        if owner is None:
+            return Adoption()
+        try:
+            adoption = adopt_reported_models(
+                self.store, owner=owner.principal, models=report.models, now=now
+            )
+        except RegistryError:  # pragma: no cover - 存储故障
+            return Adoption()
+        if adoption.created:
+            # 只在**新建**行时留痕：每 5 分钟一轮里有新东西才值得记一笔。
+            self._audit(
+                requester,
+                action="agent_models_adopted",
+                object_type="agent_report",
+                object_id=report.agent_id,
+                detail={
+                    "owner": owner.principal,
+                    "created": list(adoption.created),
+                    "seen": len(adoption.adopted),
+                },
+            )
+        return adoption
+
+    def _own_report_principals(self, requester: RequesterContext) -> list[str]:
+        """「自己的上报」是哪几个主体：本人 + 本人账户认领的 linux 主体。
+
+        代理以 ``linux:<host>:<uid>`` 的身份上报，而人是用账户登录的。只比
+        ``requester.principal`` 的话，用户在自己的控制台里永远看不到自己的机器
+        上报了什么——而同一批模型此刻正躺在**他的**模型库里（§22.5.1）。
+        ``scope`` 仍然是 ``self``：这只是把「我」补齐，不是放宽可见范围。
+        """
+
+        principals = {requester.principal}
+        for candidate in self.principals.approved_principals():
+            if candidate == requester.principal:
+                continue
+            entry = self.principals.lookup(candidate)
+            if entry is None or entry.is_account:
+                continue
+            account = self._account_for_linux_user(entry.linux_user)
+            if account is not None and account.principal == requester.principal:
+                principals.add(candidate)
+        return sorted(principals)
 
     def _prune_agent_reports(self, received_at: object) -> None:
         """写路径上的过期清理。失败**不**影响这次上报。"""
@@ -1140,7 +1217,9 @@ class RegistryService:
             rows = self.store.list_agent_reports()
             scope = "all"
         else:
-            rows = self.store.list_agent_reports(principals=[requester.principal])
+            rows = self.store.list_agent_reports(
+                principals=self._own_report_principals(requester)
+            )
             scope = "self"
         now = self._now()
         marks: dict[str, tuple[set, set]] = {}
@@ -1191,11 +1270,22 @@ class RegistryService:
         return views, scope
 
     def _registered_marks(self, principal: str) -> tuple[set[int], set[str]]:
-        """这个主体已经登记过的回环端口与权重路径。供视图标 ``registered``。"""
+        """这个主体已经登记过的回环端口与权重路径。供视图标 ``registered``。
 
+        账户也算「这个主体」：代理以 ``linux:<host>:<uid>`` 的身份上报，而自动
+        登记的模型写在 ``account:<id>`` 名下。只认 linux 主体的话，刚被自动登记
+        的那 4 个模型在报告里仍然显示「未登记」——同一件事有两个答案。
+        """
+
+        owners = {principal}
+        entry = self.principals.lookup(principal)
+        if entry is not None and entry.linux_user:
+            account = self._account_for_linux_user(entry.linux_user)
+            if account is not None:
+                owners.add(account.principal)
         ports = set()
         for engine in self.store.list_engines():
-            if engine.owner_principal != principal:
+            if engine.owner_principal not in owners:
                 continue
             target = engine.target or {}
             if target.get("host") in _LOOPBACK_HOSTS:
@@ -1203,7 +1293,7 @@ class RegistryService:
         paths = {
             model.weight_path
             for model in self.store.list_models()
-            if model.owner_principal == principal and model.weight_path
+            if model.owner_principal in owners and model.weight_path
         }
         return ports, paths
 

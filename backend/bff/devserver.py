@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import socket
 import socketserver
 import sys
 import wsgiref.simple_server
@@ -98,7 +99,19 @@ def resolve_host_users(*, synthetic: bool) -> tuple[tuple[str, int], ...]:
     """``--synthetic-host-users`` 时用夹具，否则用本机真实用户。"""
     return HOST_USERS if synthetic else real_host_users()
 
-DEFAULT_HOST_ID = "dell-test-01"
+def machine_host_id() -> str:
+    """本机真实主机名（第一段）——与 ``cli.llmlab.agent`` 上报的 ``agent_id`` 同一个值。
+
+    从前这里是一个占位名（``dell-test-01``），于是同一台机器在「代理上报」表里
+    出现两列主机名：``host_id`` 来自主体名里的占位值，``agent_id`` 来自代理取的
+    真实主机名。既然代理就在本机跑，「这台机器叫什么」只该有一个答案。
+    要固定在某个名字上（多机部署、改名之后），显式传 ``--host-id``。
+    """
+
+    return socket.gethostname().split(".")[0] or "localhost"
+
+
+DEFAULT_HOST_ID = machine_host_id()
 DEFAULT_PORT = 8790
 DEFAULT_DATABASE = ":memory:"
 

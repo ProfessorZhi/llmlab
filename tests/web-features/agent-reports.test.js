@@ -7,7 +7,9 @@
  *    2. 「可登记」是**服务端的判定**。代理报上来的端口不在允许列表里时，
  *       页面必须照实写「端口不在允许列表」，不能替用户写成可点；
  *    3. 过期与不完整是两件不同的事，各挂在自己的标志上，不互相顶替；
- *    4. 形状不对（不是数组、条目不是对象）时给空表，不抛。
+ *    4. 形状不对（不是数组、条目不是对象）时给空表，不抛；
+ *    5. 不在允许列表里的端口**折叠成一行**（数量 + 端口照列），不逐条占位 ——
+ *       它们仍然可见，只是不再把真正可登记的推理服务挤出视野。
  *
  *  这里不画 DOM，也不碰网络：``agentReportsPanel`` 的接线另有
  *  ``console-loaders.test.js`` 那一类测试看着。
@@ -72,6 +74,44 @@ test('已登记的引擎压过「不可登记」：登记过就是登记过', ()
   })));
 
   assert.equal(row.state, '已登记');
+});
+
+test('非允许端口折叠成一行：数量与端口都还在，只是不逐条占位', () => {
+  const rows = flattenAgentReports(envelope(report({
+    engines: [
+      { port: 8000, framework: 'llama.cpp', registrable: true },
+      { port: 8081, framework: null, registrable: false },
+      { port: 9000, framework: null, registrable: false },
+      { port: 22, framework: null, registrable: false },
+    ],
+  })));
+
+  assert.deepEqual(rows.map((row) => row.kind), ['engine', 'folded']);
+  assert.equal(rows[0].object, '端口 8000');
+  assert.equal(rows[1].object, '另有 3 个监听端口（不在允许列表）');
+  assert.equal(rows[1].detail, '8081、9000、22');
+  assert.equal(rows[1].state, '端口不在允许列表');
+  // 折叠行仍然带着这份报告的归属：它不属于任何别的报告。
+  assert.equal(rows[1].user, 'li');
+  assert.equal(rows[1].agent, 'lab-01');
+});
+
+test('折叠行最多列 6 个端口，再多就只给数量', () => {
+  const engines = Array.from({ length: 9 }, (_, index) => ({
+    port: 9000 + index, framework: null, registrable: false,
+  }));
+  const [row] = flattenAgentReports(envelope(report({ engines })));
+
+  assert.equal(row.object, '另有 9 个监听端口（不在允许列表）');
+  assert.equal(row.detail, '9000、9001、9002、9003、9004、9005…');
+});
+
+test('全是允许列表里的端口时没有折叠行', () => {
+  const rows = flattenAgentReports(envelope(report({
+    engines: [{ port: 8000, registrable: true }, { port: 8001, registrable: true, registered: true }],
+  })));
+
+  assert.deepEqual(rows.map((row) => row.kind), ['engine', 'engine']);
 });
 
 test('没有模型名时不编一个出来', () => {

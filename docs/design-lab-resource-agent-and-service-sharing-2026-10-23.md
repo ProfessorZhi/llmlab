@@ -538,3 +538,58 @@ chmod -R a+rX,go-w /opt/llmlab
 `eagle3-gpt-oss-120b-Q8_0`、`gpt-oss-120b-MXFP4`、`test-qwen0.5b-q4km`）。走的是
 控制台同一条读取路径与同一个 scope 判断，但没有在浏览器里点过——最后一眼仍建议由
 人自己看。
+
+### 10.5.6 2026-10-26：上报的模型自动入账（本次）
+
+**用户看到的问题**：控制台的「本机发现」里明明有 4 个别人的权重，模型库里却是空的；
+而「代理上报」表里同一台机器的主机名有两列（`dell-test-01` 与真实主机名），
+另有 8 个非推理端口（`8081` Caddy、`9000` 评测服务……）与推理服务混排在一起。
+
+**决定**（用户原话：「管理系统自动帮他登记啊」）：报告里的权重文件自动落成
+`models` 行，所有者是**上报者的平台账户**。服务不动——端口那一半保持「看见不等于
+登记」，因为「有人在听」和「平台对外提供一个服务」是两件事。
+
+三条改动：
+
+1. **模型自动入账**（`backend/registry/reported_models.py` + `report_agent` 接线）。
+   所有者是账户（`account:<id>`，`owner_uid=-1`），不是 `linux:<host>:<uid>`：
+   模型库是账户的视图，用 linux 主体当所有者会让「我自己的模型」在自己的库里看不见。
+   账户由新增的 `PrincipalDirectory.account_for_linux_user()` 解析；基类回答「没有」，
+   `AccountAwareDirectory` 读账户库（停用账户不算、两个账户认领同一个 linux 用户时
+   不猜）。没有账户的人（系统账户、还没开账户的人）不登记。
+   `_registered_marks()` 同时并进账户名下的行，报告里的条目才会翻成「已登记」。
+
+2. **主机名只有一个答案**（`backend/bff/devserver.py`）。`DEFAULT_HOST_ID` 从占位名
+   `dell-test-01` 改成 `machine_host_id()`：本机真实主机名第一段，与
+   `cli.llmlab.agent` 上报的 `agent_id` 是同一个表达式。要固定在某个名字上就显式传
+   `--host-id`。**注意**：改完之后主体的 host 段会变（`linux:<host>:<uid>`），旧的
+   `agent_reports` 行随 30 天清理自然消失；已登记资源的所有者不变。
+
+3. **控制台折叠非允许端口**（`web/console/js/pages.js`）。`registrable === false`
+   且未登记的端口合成一行「另有 N 个监听端口（不在允许列表）」，数量与端口照列
+   （最多 6 个）。折叠不等于隐藏：状态仍然是「端口不在允许列表」。
+
+4. **「自己」补齐到 linux 主体**（`_own_report_principals`）。人以账户登录、代理以
+   `linux:<host>:<uid>` 上报，只比账户名的话成员在自己的控制台里永远看到「还没有人
+   上报」，而同一批模型已经在他的模型库里。可见范围仍是 `self`，只是把「我」补齐。
+
+**刻意不做**：不让自动行覆盖手工登记（同名或同路径就沿用原行）；不在自动行里猜
+`format` 之外的东西；不为没有账户的 linux 用户建账户。
+
+**风险**：自动入账是「一次报告 = 一次写入」的放大——模型多的账户会让 `models` 表
+跟着盘上文件增长。这不是无界的：报告里 `models` 有上限（`MAX_MODELS`），代理每轮
+对同一批文件去重，账本不会每 5 分钟涨一行。回滚只需恢复 `report_agent` 里那一次
+`_adopt_reported_models()` 调用；已入账的行是普通 `models` 行，按普通行删除。
+
+**验证**：`tests/registry/test_reported_models.py`（11）、
+`tests/registry/test_agent_reports.py` 新增 7 条、`tests/bff/test_account_directory_by_uid.py`
+新增 5 条、`tests/bff/test_host_users_are_real.py` 新增 3 条、
+`tests/web-features/agent-reports.test.js` 新增 3 条。
+
+**真机结果（2026-10-26 16:46 +08:00）**：发布到 `/opt/llmlab` → 停 BFF → 删掉 6 条
+旧主机名的 `agent_reports` 行（旧主体的行随时效也会自然消失）→ 起 BFF → 手工代跑
+一轮。结果：`agent_reports` 6 行，`host_id` 与 `agent_id` **都是真实主机名**；
+`models` 自动入账 5 行（`kaidong` 的账户 4 行、`fjd` 的账户 1 行，`source=auto`，
+带权重路径与大小），审计里 `agent_models_adopted` 只记了 2 条（两个账户各一条，
+不是每轮一条）。以 `kai` 登录 `GET /api/v2/ops`：模型库 5 项，其中 4 项
+`owner_is_self=true` 且带着自己的权重路径。
