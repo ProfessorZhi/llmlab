@@ -35,6 +35,7 @@ from ..registry import dto as registry_dto
 from ..registry import health as registry_health
 from ..registry import models as registry_models
 from ..registry import weights as registry_weights
+from ..registry.presence import service_state
 from . import scopes as bff_scopes
 from .sharing import endpoint_share_block, narrowest_share
 
@@ -312,10 +313,14 @@ def engine_record(engine, *, subject: str, principals) -> dict:
     的 uid 反查）；它是事实记录，不是授权依据。没观测到就是 ``None``。
     """
     ownership = dict(engine.ownership or {})
-    framework = next(
+    framework = (engine.launch or {}).get('framework') or next(
         (tag.split(":", 1)[1] for tag in (engine.tags or ()) if tag.startswith("framework:")),
         None,
     )
+    # 健康结论来自登记时的探测记录，不是 ``status``。``status == 'verified'`` 只说明
+    # 「登记验证曾经通过」，把它当成此刻的健康，会让一条停了 18 小时的手工登记行
+    # 一直显示「运行中 · 健康」。这里把那份记录原样给前端，前端才不必猜。
+    health, _, health_reason, _ = _health_columns(dict(engine.health or {}))
     return {
         "engine_id": engine.id,
         "name": engine.name,
@@ -326,6 +331,7 @@ def engine_record(engine, *, subject: str, principals) -> dict:
         "owner_name": principal_name(principals, engine.owner_principal),
         "owner_is_self": engine.owner_principal == subject,
         "status": engine.status,
+        "state": service_state(engine),
         "ownership_state": ownership.get("state"),
         "ownership_verified": bool(ownership.get("verified")),
         "run_as_user": ownership.get("linux_user"),
@@ -334,6 +340,14 @@ def engine_record(engine, *, subject: str, principals) -> dict:
         # 平台没有「进程 ↔ 可执行文件」的证据。留字段而不是留一个假值。
         "runtime_build_id": engine.runtime_build_id,
         "last_seen_at": registry_models.isoformat(engine.last_seen_at),
+        "health": health,
+        "health_reason": health_reason,
+        # 这份健康结论是什么时候取的。没有探测记录时是 None —— 「不知道」，
+        # 不是一个「刚测过、一切正常」。
+        "health_observed_at": (
+            (engine.health or {}).get("observed_at")
+            if isinstance((engine.health or {}).get("observed_at"), str) else None
+        ),
     }
 
 
@@ -362,13 +376,19 @@ def build_record(build, *, subject: str, principals) -> dict:
     }
 
 
-def model_record(model, *, subject: str, principals) -> dict:
+def model_record(model, *, subject: str, principals, store=None) -> dict:
     """一个已登记的模型 ⇒ 前端的一行。权重路径只给 owner 看（它可能暴露家目录结构）。"""
     mine = model.owner_principal == subject
     return {
         "model_id": model.id,
         "name": model.name,
         "format": model.format,
+        "kind": model.kind,
+        "task": model.task,
+        "size_bytes": model.size_bytes,
+        "source": model.source,
+        "locations": [l.to_dict() for l in store.locations_for(model.id)] if mine and store else [],
+        "last_seen_at": registry_models.isoformat(model.last_seen_at),
         "parameter_count": model.parameter_count,
         "description": model.description,
         "owner": model.owner_principal,
@@ -555,7 +575,7 @@ def build_ops(
         for item in policy.visible_engines()
     ]
     models = [
-        model_record(item, subject=subject, principals=service.principals)
+        model_record(item, subject=subject, principals=service.principals, store=store)
         for item in policy.visible_models()
     ]
     builds = [

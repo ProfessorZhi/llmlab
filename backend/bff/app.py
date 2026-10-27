@@ -61,6 +61,7 @@ from ..observability import identity as observability_identity
 from ..registry import api as registry_api
 from ..registry import errors as registry_errors
 from ..registry.models import VISIBILITY_ALL_APPROVED, VISIBILITY_USERS
+from ..registry.registry import AGENT_TASK_KINDS
 from . import admin_mode as bff_admin_mode
 from . import atlas_adapter as bff_atlas
 from . import capabilities as bff_capabilities
@@ -217,6 +218,8 @@ class OpsApplication:
         gateway_app=None,
         param_store=None,
         param_fetch=None,
+        integration_runtime=None,
+        benchmarks=None,
     ) -> None:
         self.auth_app = auth_app
         self.cfg = auth_app.cfg
@@ -255,6 +258,8 @@ class OpsApplication:
         self.authority_policy = authority_policy or bff_origin.AuthorityPolicy()
         #: 插件跳转地址的存储。``None`` = 本部署没接：两条路由以 503 收场。
         self.integrations = integrations
+        self.integration_runtime = integration_runtime
+        self.benchmarks = benchmarks
         #: Registry 的 token API（CLI / Agent 用）。挂上之后，带 ``Authorization``
         #: 的 ``/api/v2/registry/*`` 请求原样交给它；浏览器（cookie）请求仍走本层的
         #: 会话路由。``None`` = 本进程不提供 CLI 入口。
@@ -623,6 +628,16 @@ class OpsApplication:
 
     # --- GET /api/v2/engine/live --------------------------------------------
 
+    def _service_metrics(self, request, engine_id: str):
+        self._reject_asserted_identity(request)
+        principal = self._principal(request)
+        engine = self.service.policy(principal.requester).require_engine_read(engine_id)
+        from .service_metrics import read
+        key = self.gateway.core.upstream_key(engine) if self.gateway else None
+        dto = read(engine, key=key)
+        dto["engine_id"] = engine.id
+        return _json_response(200, {"data": dto})
+
     def _engine_live(self, request):
         """引擎自己的运行时读数，由**本层**拿着那把 key 去取。
 
@@ -637,7 +652,9 @@ class OpsApplication:
         「这条接口不存在」只会让人去查错地方。此时所有数值字段都是 ``None``。
         """
         self._reject_asserted_identity(request)
-        self._principal(request)
+        principal = self._principal(request)
+        if self.service.config.personal_mode:
+            return _error_response(400, "bff.service_required", "select a service to read its metrics")
         reader = self.engine_live or bff_engine_live.read_engine_live
         try:
             dto = reader()
@@ -659,6 +676,8 @@ class OpsApplication:
         """
         self._reject_asserted_identity(request)
         principal = self._principal(request)
+        if self.service.config.personal_mode:
+            return None, _error_response(403, "bff.owner_managed_credentials", "upstream credentials are managed by the service owner")
         if not bff_scopes.is_platform_admin(elevated=principal.elevated):
             return None, _error_response(
                 403, "bff.access_denied", "a platform administrator is required"
@@ -1078,7 +1097,41 @@ class OpsApplication:
         except _IntegrationsNotAttached:
             return _error_response(503, "bff.integrations_not_attached", "plugin settings are not attached")
         is_admin = bff_scopes.PORTAL_ADMIN_READ in principal.portal_scopes
-        return _json_response(200, {"data": {"integrations": store.listing(is_admin=is_admin)}})
+        rows = store.listing(is_admin=is_admin)
+        if self.integration_runtime:
+            runtime = self.integration_runtime(principal)
+            for row in rows:
+                row["runtime"] = runtime.get(row["key"])
+        return _json_response(200, {"data": {"integrations": rows}})
+
+    def _benchmarks(self, request):
+        self._reject_asserted_identity(request)
+        principal = self._principal(request)
+        if self.benchmarks is None:
+            return _error_response(503, "evaluation.not_configured", "real benchmark adapter is not configured")
+        return _json_response(200, {"data": self.benchmarks.listing(principal)})
+
+    def _benchmark_reconcile(self, request):
+        return self._benchmark_submit(request, operation='reconcile')
+
+    def _benchmark_stop(self, request):
+        return self._benchmark_submit(request, operation='stop')
+
+    def _benchmark_submit(self, request, operation='submit'):
+        self._reject_asserted_identity(request)
+        self._write_preflight(request)
+        principal = self._principal(request)
+        if self.benchmarks is None:
+            return _error_response(503, "evaluation.not_configured", "real benchmark adapter is not configured")
+        body = _json_body(request)
+        if body is None:
+            return _error_response(400, "evaluation.invalid_request", "a JSON object body is required")
+        try:
+            action = {'submit': self.benchmarks.submit, 'reconcile': self.benchmarks.reconcile, 'stop': self.benchmarks.stop}[operation]
+            result = action(principal, body)
+        except bff_gateway_service.ManagementError as exc:
+            return _error_response(exc.status, exc.code, exc.message)
+        return _json_response(202 if operation == 'submit' else 200, {"data": {"run": result}})
 
     def _integration_update(self, request, key: str):
         self._reject_asserted_identity(request)
@@ -1167,23 +1220,30 @@ class OpsApplication:
         except registry_errors.NotFound:
             # 通过网关共享给全实验室的服务，成员也能看它的参数（只读）。
             shared = self.gateway is not None and any(
-                r.engine_id == engine_id and r.enabled and r.visibility == "all"
+                r.engine_id == engine_id and r.enabled and r.visibility == "all" and not self.service.config.personal_mode
                 for r in self.gateway.store.routes()
             )
             engine = self.service.store.engine_by_id(engine_id) if shared else None
             if engine is None:
                 raise
-        if write and engine.owner_principal != principal.principal and not principal.is_platform_admin:
+        if write and engine.owner_principal != principal.principal and (self.service.config.personal_mode or not principal.is_platform_admin):
             raise registry_errors.AccessDenied("only the service owner or an administrator can change its parameters")
         return engine
 
     def _params_payload(self, principal, engine) -> dict:
-        framework = next((t.split(":", 1)[1] for t in (engine.tags or ()) if t.startswith("framework:")), None)
+        framework = (engine.launch or {}).get("framework") or next((t.split(":", 1)[1] for t in (engine.tags or ()) if t.startswith("framework:")), None)
         schema = runtime_params.schema_for(framework)
         target = engine.target or {}
+        def authenticated_fetch(_host, _port, path):
+            from .service_metrics import fetch
+            try:
+                code, body = fetch(engine, path, key=self.gateway.core.upstream_key(engine) if self.gateway else None)
+                return (code, body.encode()) if code == 200 else None
+            except (OSError, ValueError):
+                return None
         observed = (
             runtime_params.observe(framework, target.get("host"), int(target.get("port")),
-                                   fetch=self.param_fetch or runtime_params.loopback_fetch)
+                                   fetch=self.param_fetch or authenticated_fetch)
             if schema else {"reachable": None, "values": {}}
         )
         saved = self.param_store.get(engine.id) if self.param_store else None
@@ -1199,7 +1259,7 @@ class OpsApplication:
             "desired_updated_at": (saved or {}).get("updated_at"),
             "state": runtime_params.compare(desired, observed["values"], schema) if schema else "none",
             "command": runtime_params.render_command(framework, desired, port=target.get("port")) if (schema and desired) else None,
-            "can_edit": engine.owner_principal == principal.principal or principal.is_platform_admin,
+            "can_edit": engine.owner_principal == principal.principal or (principal.is_platform_admin and not self.service.config.personal_mode),
             "apply": "restart_by_owner",
         }
 
@@ -1228,6 +1288,54 @@ class OpsApplication:
             return _error_response(400, "bff.invalid_request", str(exc))
         self.param_store.put(engine.id, payload["framework"], values, principal.principal)
         return _json_response(200, {"ok": True, "data": self._params_payload(principal, engine)})
+
+    # --- 代理任务：下发启动/停止/重启，按 id 查结果 ---------------------------
+
+    #: 这条请求体**只**认这两个键。其余（``argv`` / ``uid`` / ``owner`` /
+    #: ``principal`` ……）一律 400，而不是静默忽略：本层是浏览器入口，执行入口
+    #: 只有登记行上的 unit 与服务端的 argv 形状，客户端不能在这里自选。
+    _SERVE_BODY_FIELDS = frozenset({"kind", "unit"})
+
+    def _engine_serve(self, request, engine_id: str):
+        """请本人的代理启动/停止/重启这个服务。
+
+        成功是 **202 Accepted**：任务只是排进了 owner 自己 uid 的队列
+        （``state == "queued"``），代理还没领取、更没说执行成功。把它报成
+        200/``done`` 会让前端把「已下发」误读成「已起来」。
+        """
+        self._reject_asserted_identity(request)
+        self._write_preflight(request)
+        principal = self._principal(request)
+        body = _json_body(request)
+        if not isinstance(body, dict):
+            raise registry_errors.InvalidRequest("a JSON object body is required")
+        unknown = sorted(set(body) - self._SERVE_BODY_FIELDS)
+        if unknown:
+            # 身份与执行入口都只能来自服务端：收到自报字段是拒绝，不是忽略。
+            raise registry_errors.InvalidRequest(
+                f"unsupported field(s): {', '.join(unknown)}"
+            )
+        kind = body.get("kind")
+        if kind not in AGENT_TASK_KINDS:
+            raise registry_errors.InvalidRequest(
+                f"unsupported agent task kind: {kind!r}"
+            )
+        task = self.service.enqueue_agent_task(
+            principal.requester, engine_id, kind, unit=body.get("unit")
+        )
+        return _json_response(202, {"data": task.to_dict()})
+
+    def _agent_task(self, request, task_id: str):
+        """按 id 查一条已下发的任务。
+
+        只读、不写：``queued`` / ``running`` 都只说「还没结果」，``done`` /
+        ``failed`` 才是代理回报之后的终态。他人的任务与不存在的任务共用 404
+        （Registry 的 ``NotFound``），不把「存在但无权看」变成一个可枚举的信号。
+        """
+        self._reject_asserted_identity(request)
+        principal = self._principal(request)
+        task = self.service.agent_task(principal.requester, task_id)
+        return _json_response(200, {"data": task.to_dict()})
 
     # --- POST /api/v2/registry/engines[/preflight] --------------------------
 

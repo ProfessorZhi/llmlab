@@ -171,6 +171,8 @@ def build_application(
     gateway_key_owners: str | None = None,
     #: 每用户代理的 unix socket 路径；``None`` = 不建这条通道。
     agent_socket: str | None = DEFAULT_AGENT_SOCKET,
+    personal_mode: bool | None = None,
+    evalscope_base: str = "http://127.0.0.1:9000",
 ) -> OpsApplication:
     """把三块拼起来。**只建对象，不开端口。**
 
@@ -217,6 +219,7 @@ def build_application(
     # 还会拿到 operator_verified 的所有权证明。缺省空策略 = 一条都不放行。
     config = RegistryConfig(
         mode=registry_mode,
+        personal_mode=(registry_mode == "live") if personal_mode is None else personal_mode,
         operator_policy=operator_policy or EMPTY_POLICY,
         # 追加而不是替换：缺省那几个端口是约定好的推理端口，别因为多加了几个就丢掉。
         allowed_ports=DEFAULT_ALLOWED_PORTS | frozenset(int(port) for port in allowed_ports),
@@ -254,6 +257,10 @@ def build_application(
         store=gateway_store, registry=service, secret_refs=parse_secret_refs(engine_secret_refs)
     )
     gateway_service = GatewayService(gateway_core)
+    from .personal_benchmarks import EvalScopeClient, PersonalBenchmarks
+    from .integration_runtime import IntegrationRuntime
+    evalscope_client = EvalScopeClient(evalscope_base)
+    benchmarks = PersonalBenchmarks(Path(state_dir) / "benchmarks.sqlite3", gateway_service, evalscope_client)
     param_store = ParamStore(Path(state_dir) / "runtime.sqlite3")
     param_store.initialize()
 
@@ -323,6 +330,8 @@ def build_application(
         gateway=gateway_service,
         gateway_app=GatewayApplication(gateway_core),
         param_store=param_store,
+        benchmarks=benchmarks,
+        integration_runtime=IntegrationRuntime(service, evalscope_client) if live_host_summary else None,
     )
     # ``main()`` 用它来 start/stop；``None`` = 本部署没开这条通道。
     app.agent_channel = agent_channel
@@ -671,6 +680,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--database", default=DEFAULT_DATABASE)
     parser.add_argument("--host-id", default=DEFAULT_HOST_ID)
+    parser.add_argument("--evalscope-base", default="http://127.0.0.1:9000", help="local EvalScope service origin")
     parser.add_argument(
         "--platform-admin",
         action="append",
@@ -839,6 +849,7 @@ def main(argv: list[str] | None = None) -> int:
         state_dir=args.state_dir,
         database=args.database,
         host_id=args.host_id,
+        evalscope_base=args.evalscope_base,
         admin_names=tuple(args.platform_admin),
         mock_gateway=True,
         registry_mode=args.registry_mode,

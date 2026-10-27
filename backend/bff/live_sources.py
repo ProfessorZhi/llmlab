@@ -15,6 +15,7 @@ import http.client
 import json
 import os
 import subprocess
+from copy import deepcopy
 import threading
 import time
 import re
@@ -233,10 +234,21 @@ class DellLiveSources:
         #: 系统资源是差分量，样本必须跟着一个长期存活的实例走 —— 每次请求
         #: 新建一个 reader 会让所有速率永远停在「第一次采样」。
         self._system = SystemResourceReader()
+        # Concurrent viewers share one physical sample. Holding this lock across
+        # collection prevents N requests from queuing N minimum sampling windows.
+        self._system_lock = threading.Lock()
+        self._system_snapshot = None
+        self._system_expires = 0.0
 
     def system_summary(self) -> dict:
         """CPU / 内存 / 交换区 / 磁盘 / 网络 / 按用户 的一份快照。"""
-        return self._system.summary()
+        with self._system_lock:
+            if self._system_snapshot is None or time.monotonic() >= self._system_expires:
+                snapshot = self._system.summary()
+                self._system_snapshot = snapshot
+                self._system_expires = time.monotonic() + MIN_SAMPLE_WINDOW_S
+            # Keep the original observed_at; reuse must not look like a new sample.
+            return deepcopy(self._system_snapshot)
 
     def host_summary(self) -> dict:
         observed_at = _iso()

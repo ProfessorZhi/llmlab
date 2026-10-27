@@ -75,7 +75,7 @@ class RouteTests(unittest.TestCase):
 
     def test_the_catalogue_starts_without_addresses(self):
         rows = self.listing(self.member)
-        self.assertEqual(set(rows), {"strata", "vllm", "sglang", "gateway", "prometheus", "grafana", "evalscope"})
+        self.assertEqual(set(rows), {"strata", "vllm", "sglang", "prometheus", "grafana", "evalscope"})
         self.assertTrue(all(row["ui_url"] is None and row["has_ui"] is False for row in rows.values()))
         self.assertEqual(rows["grafana"]["visibility"], "admin")
         self.assertEqual(rows["strata"]["visibility"], "all")

@@ -33,7 +33,6 @@ VISIBILITIES = (VISIBILITY_ALL, VISIBILITY_ADMIN)
 KIND_ENGINE = "engine"
 KIND_OBSERVABILITY = "observability"
 KIND_EVALUATION = "evaluation"
-KIND_GATEWAY = "gateway"
 
 MAX_URL_LENGTH = 512
 
@@ -51,7 +50,6 @@ CATALOG: tuple[Plugin, ...] = (
     Plugin("strata", "Strata", KIND_ENGINE),
     Plugin("vllm", "vLLM", KIND_ENGINE),
     Plugin("sglang", "SGLang", KIND_ENGINE),
-    Plugin("gateway", "Gateway", KIND_GATEWAY, VISIBILITY_ADMIN),
     Plugin("prometheus", "Prometheus", KIND_OBSERVABILITY, VISIBILITY_ADMIN),
     Plugin("grafana", "Grafana", KIND_OBSERVABILITY, VISIBILITY_ADMIN),
     Plugin("evalscope", "EvalScope", KIND_EVALUATION),

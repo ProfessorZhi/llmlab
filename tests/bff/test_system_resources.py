@@ -13,9 +13,47 @@
 from __future__ import annotations
 
 import unittest
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from unittest import mock
 
 from backend.bff import live_sources as L
+
+
+class SharedLiveSnapshotTests(unittest.TestCase):
+    def test_concurrent_pages_receive_one_sample_and_cannot_mutate_it(self):
+        entered, release = threading.Event(), threading.Event()
+        count = 0
+
+        def sample():
+            nonlocal count
+            count += 1
+            entered.set()
+            release.wait(2)
+            return {'observed_at': str(count), 'cpu': {'utilization_ratio': count / 10}}
+
+        with mock.patch.object(L.SystemResourceReader, 'summary', side_effect=sample):
+            source = L.DellLiveSources()
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                futures = [pool.submit(source.system_summary) for _ in range(8)]
+                self.assertTrue(entered.wait(1))
+                release.set()
+                snapshots = [f.result(timeout=2) for f in futures]
+            self.assertEqual({row['observed_at'] for row in snapshots}, {'1'})
+            snapshots[0]['cpu']['utilization_ratio'] = 999
+            self.assertEqual(source.system_summary()['cpu']['utilization_ratio'], 0.1)
+
+    def test_expired_snapshot_refreshes_and_failed_refresh_is_not_reported_as_fresh(self):
+        with mock.patch.object(L.SystemResourceReader, 'summary', side_effect=[
+            {'observed_at': 'old'}, OSError('unavailable'), {'observed_at': 'new'},
+        ]):
+            source = L.DellLiveSources()
+            self.assertEqual(source.system_summary()['observed_at'], 'old')
+            with mock.patch.object(L.time, 'monotonic', return_value=time.monotonic() + 2):
+                with self.assertRaises(OSError):
+                    source.system_summary()
+                self.assertEqual(source.system_summary()['observed_at'], 'new')
 
 
 def _patch_proc(mapping):
