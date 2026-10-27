@@ -61,6 +61,8 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+# 架构分析工具的输出目录（11 MB 的 JSON 快照，可随时重算，不是源码）
+.archguard/
 coverage/
 .coverage
 htmlcov/
