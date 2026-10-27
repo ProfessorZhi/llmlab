@@ -83,7 +83,9 @@ sudo bash deploy/inventory/update-runtime.sh
 
 `running` 窗口在「没有可执行入口」这条路上只有毫秒级，HTTP 轮询通常只抓到 `queued` 和 `failed`；上面的 `running` 是靠测试侧给回报连接加了 2 秒延迟读到的，不改变任务语义。
 
-本机现状：BFF 已经在 `/run/llmlab/agent.sock` 上监听，但**还没有常驻的 `llmlab agent --watch`**，也没有走过真正的 `systemctl --user` 起停，所以点击之后会停在「已下发给你的代理，等待领取」。这是实情，不是失败。
+本机现状（2026-10-27 起）：`llmlab-bff.service` 在 `/run/llmlab/agent.sock` 上监听，常驻代理 `llmlab-agent.service` 每 60 秒上报一轮并领取任务（两者都是 fjd 的 user unit，从工作树直接运行，改完代码要 `systemctl --user restart` 才生效）。
+
+仍然没走过的只有最后一段：**真正的 `systemctl --user` 起停**。本机唯一一条 engine 行是手工登记的 strata，`owner_uid` 是哨兵值 `-1` —— 平台没观测到它运行在哪个 Linux 用户下，所以下发会被按设计拒绝（fail closed），页面显示「没有可用的本人代理」。要让这段真正跑一次，需要一条由登记时的所有权证明写下 `owner_uid` 的服务行。
 
 **日期**：2026-10-17 · **状态**：提案（Draft），待评审 · **适用**：单台 Dell Precision 5820（RTX A6000 48 GB）、多 Linux 用户
 
