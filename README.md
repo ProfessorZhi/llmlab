@@ -1,5 +1,7 @@
 # Dell LLM Lab Portal · Atelier V6
 
+> **当前产品范围（2026-10-27）：个人资源管理。** 自动发现本人模型、安装环境与运行服务，由所有者创建自己的 API 接入、测试与评测；跨用户共享暂缓。管理员以监控元数据为主。六个插件为 Strata、vLLM、SGLang、Prometheus、Grafana、EvalScope，API 接入是平台功能。产品定义、术语与分期以 [产品定义（2026-10-27 裁决版）](docs/product-definition-2026-10-27.md) 为准；实现和部署差距见 [简化架构的当前阶段说明](docs/architecture-v1-simplified.md#当前阶段2026-10-27)，评测执行接口见 [EvalScope 接线说明](docs/evalscope-center.md#当前控制台的实际执行链路2026-10-27)。以下较早的共享池设计保留作历史记录。
+
 > **V1 production execution addendum (2026-10-17):** [target architecture, backend integrations, security, multi-agent work breakdown, Linux Fleet placement, hourly orchestration and acceptance gates](docs/v1/README.md). These are target documents, **not** assertions of Dell live wiring or production deployment. [Dispatch #80](https://github.com/ProfessorZhi/llm-lab-portal/issues/80).
 
 这是面向共享 Dell GPU 工作站的**单节点、多 Linux 用户 LLM 实验室管理后台**。目标是让 Web 与 `llmlab` CLI 使用同一受信身份、Registry / Endpoint 授权和 Gateway 调用事实，完成模型登记、验证、共享、调用、计量、可观测性、评测与审计。

@@ -1,5 +1,36 @@
 # EvalScope 评测中心契约（`evaluation-center/1`）
 
+## 当前控制台的实际执行链路（2026-10-27）
+
+新控制台通过 `backend/bff/personal_benchmarks.py` 接入真实 EvalScope HTTP 服务。下文的 `backend/evaluation` 离线模块继续保留原有只读、无网络约束；其合成结果不会作为新控制台的真实评测记录。
+
+- `GET /api/evaluation/benchmarks`：本人记录与执行器能力，读取不会触发推理。
+- `POST /api/evaluation/benchmarks/submit`：CSRF 保护，显式选择本人运行中的 API 服务。目标地址与凭据仅取自登记服务，不接受任意 URL、命令、文件或输出目录。
+- `POST /api/evaluation/benchmarks/stop`：只针对本人记录里的任务 ID 请求停止；EvalScope 明确确认后才标记已停止。
+- `POST /api/evaluation/benchmarks/reconcile`：只有本人可确认一个待核对任务已在 EvalScope 结束，释放并发名额；该动作不发送取消命令、不伪造结果。
+
+当前固定预设为 OpenQA 性能测试与 GSM8K 能力评测。每次最多 100 个样本、并发 4、输出 1024 tokens；每人同时 1 个任务，平台同时 2 个。幂等键避免重复提交。执行器超时或平台重启后，任务标为 `unknown`。当前 Dashboard 版本支持按任务 ID 停止；旧版本或无法确认停止时需要本人核对，不自动重跑。
+
+契约依据：[EvalScope 官方服务文档](https://evalscope.readthedocs.io/en/latest/user_guides/service.html)。BFF 检查 `/health` 后，优先探测本机 1.12 Dashboard 的 `/api/v1/{perf,eval}/invoke`，再兼容旧服务的 `/api/v1/{perf,eval}`。当前版本通过 `EvalScope-Task-Id` 传递平台生成的任务 ID，并匹配返回的 `completed` / `stopped` 状态。只有健康页或 Dashboard 时显示“执行接口未就绪”。成功后仅存有界数值摘要，原始响应、输出目录和上游密钥不写入 BFF 的 `benchmarks.sqlite3`；EvalScope 自己的输出目录由其运行账户管理，不通过平台任意文件下载接口暴露。
+
+**本机只读核对结果：** `127.0.0.1:9000` 的健康接口与两个 `/invoke` 执行接口均正常。旧的裸路径只返回 Dashboard，因此仅按旧文档探测会误判。已直接核对安装版本的 `service/blueprints/perf.py`、`eval.py`、响应模型和 task-id 校验；本机探测返回 `protocols={perf:invoke, eval:invoke}`。Grafana 健康正常，Prometheus 返回 2/2 采集目标在线。本次没有向真实推理引擎提交测试负载，执行依赖、数据集下载与实际结果仍应由本人小样本评测验收。
+
+当前本机复用 9000 上的服务即可；BFF 默认地址已指向它。其他部署若需要新建服务，可在独立环境使用空闲回环端口，例如：
+
+```bash
+evalscope service --host 127.0.0.1 --port 9001
+curl -i -X OPTIONS http://127.0.0.1:9001/api/v1/perf/invoke
+curl -i -X OPTIONS http://127.0.0.1:9001/api/v1/eval/invoke
+```
+
+然后为 BFF 设置 `--evalscope-base http://127.0.0.1:9001`。先确认两条路径支持 POST，再由所有者在平台发起小样本评测。旧 Dashboard 的健康响应不构成执行验收；不要直接覆盖正在使用的 EvalScope 环境。`deploy/evalscope/install-evalscope.sh` 可用于独立环境安装，版本应与执行协议一起验证。
+
+---
+
+## 保留的离线模块契约
+
+以下内容只描述 `backend/evaluation/**` 的历史离线模块，不代表上方新增控制台执行链路的部署状态。
+
 **状态：** 平台层实现 + 回环预览（preview-only，未接生产 BFF）。
 **范围：** `backend/evaluation/**`、`tests/evaluation/**`、`dev/evaluation_preview.py`、本文。
 **不在本契约内：** EvalScope 本体（真实基准、真实 runner、命令行、HTTP 接口）、生产
