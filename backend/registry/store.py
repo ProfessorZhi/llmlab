@@ -21,8 +21,10 @@ import functools
 import json
 import sqlite3
 import threading
+import weakref
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, Sequence
 
@@ -586,10 +588,36 @@ class Store:
             connection.execute("PRAGMA journal_mode = WAL")
         connection.execute("PRAGMA busy_timeout = 5000")
         with self._lock:
+            # 每线程一条连接的意义只在「这个线程可能还会再来」。请求线程不会再来了，
+            # 它的连接必须在它结束时关掉，否则每来一个请求就永久占掉一个描述符。
+            self._release_finished_threads()
             # 记下来，好让 close() 能关上**所有**线程开的连接。
             # 只关当前线程那一条会让别的线程的连接在 GC 时冒 ResourceWarning。
-            self._connections.append(connection)
+            self._connections.append((weakref.ref(threading.current_thread()), connection))
         return connection
+
+    def _release_finished_threads(self) -> None:
+        """关掉已经结束的线程留下的连接。调用方必须持有 ``self._lock``。
+
+        BFF 的 ``ThreadingMixIn`` 服务器是**一个请求一个线程**：线程结束之后不会
+        再有第二次调用，它那条连接却还留在 ``self._connections`` 里。控制台按秒
+        刷新时，每个请求都会新开一条连接 —— 十来分钟就能把 ``ulimit -n``（本机
+        1024）耗尽，此后 ``sqlite3.connect`` 一律 ``unable to open database file``，
+        连登录都做不了。
+
+        判据是线程对象本身（弱引用），不是线程 ident：ident 会被新线程复用，
+        拿它判断会误留别人已经不用的连接。
+        """
+        kept: list[tuple[weakref.ref, sqlite3.Connection]] = []
+        for ref, connection in self._connections:
+            if connection is self._shared or ref() is not None:
+                kept.append((ref, connection))
+                continue
+            try:
+                connection.close()
+            except sqlite3.Error:  # pragma: no cover - 关闭失败不该掩盖真正的错误
+                pass
+        self._connections = kept
 
     @property
     def connection(self) -> sqlite3.Connection:
@@ -606,7 +634,7 @@ class Store:
 
     def close(self) -> None:
         with self._lock:
-            remaining = list(self._connections)
+            remaining = [connection for _, connection in self._connections]
             self._connections.clear()
             self._shared = None
             self._local.connection = None
@@ -1452,6 +1480,18 @@ class Store:
     def model_by_id(self, model_id: str) -> Model | None:
         row = self.connection.execute("SELECT * FROM models WHERE id = ?", (model_id,)).fetchone()
         return self._model(row) if row else None
+
+    def refresh_discovered_model(self, model_id: str, *, path: str, path_hash: str,
+                                 kind: str | None, task: str | None, facts: dict,
+                                 size_bytes: int | None, now: datetime) -> None:
+        """Refresh observations without replacing the owner's name/description."""
+        with self.transaction() as connection:
+            connection.execute(
+                "UPDATE models SET weight_path=?, weight_sha256=?, format=COALESCE(?,format), "
+                "kind=?, task=?, facts_json=?, size_bytes=?, last_seen_at=?, updated_at=? WHERE id=?",
+                (path, path_hash, kind, kind, task, _dumps(facts), size_bytes,
+                 isoformat(now), isoformat(now), model_id),
+            )
 
     def model_by_owner_name(self, owner: str, name: str) -> Model | None:
         row = self.connection.execute(
