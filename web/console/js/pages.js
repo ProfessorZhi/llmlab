@@ -161,13 +161,56 @@ function renderOverview(model, states) {
 }
 
 /* ============================== 推理服务 ============================== */
+/**
+ * 默认只列**此刻在监听**的服务。
+ *
+ * 产品定义 §4 给「推理服务」定的唯一含义就是「正在监听的一个进程」，所以停掉的
+ * 服务不该混在这张表里冒充服务；它可能停了一整天，而表里那一行看起来和活着的
+ * 一模一样。但它也**没有消失**——登记还在，要能点进去重新探测、重新启动，所以
+ * 给一个显式的开关，而不是悄悄从列表里删掉：「不在列表里」和「不存在」是两件事。
+ */
 export async function services(ctx) {
   const root = h('div', { class: 'page' });
   ctx = pageScope(ctx, root);
-  const list = registryList(ctx, { project: servicesFromOps, render: servicesTable, demoRows: ctx.demo ? demoServices() : [],
-    empty: () => h('div', { class: 'group' }, quietEmpty('ready', SERVICES_EMPTY)) });
-  put(root, pageHead('推理服务', '本人服务的连接状态与运行参数。',
-    h('a', { class: 'btn primary', href: '#/services/register' }, '登记推理服务')), list.root, discoveryDetails(ctx, 'engines'));
+  let showIdle = false;
+  let all = [];
+  const visibleRows = () => (showIdle ? all : all.filter((x) => x.running));
+  const idleCount = () => all.filter((x) => !x.running).length;
+  const summary = h('span', { class: 'muted tnum', style: { 'align-self': 'center' } });
+  const toggle = h('button', { type: 'button', class: 'btn', 'aria-pressed': 'false' });
+  function sync() {
+    const running = all.length - idleCount();
+    summary.textContent = all.length ? `${running} 个在运行${idleCount() ? ` · 另有 ${idleCount()} 个未在运行` : ''}` : '';
+    toggle.textContent = showIdle ? '只看运行中的' : `显示未运行的（${idleCount()}）`;
+    toggle.setAttribute('aria-pressed', String(showIdle));
+    // 一个点了也没东西可显示的开关，只会教人别信这个页面。
+    toggle.hidden = idleCount() === 0 && !showIdle;
+  }
+  const empty = () => (all.length
+    ? h('div', { class: 'group' }, quietEmpty('ready', {
+      title: `${all.length} 个已登记的服务当前都没有在运行`,
+      body: '平台探不通它们的端口，或者观测已经过期。登记还在——打开上面的开关可以看到、重新探测。',
+    }))
+    : h('div', { class: 'group' }, quietEmpty('ready', SERVICES_EMPTY)));
+  const list = registryList(ctx, {
+    project: (ops) => {
+      const rows = servicesFromOps(ops);
+      all = rows ?? [];
+      sync();
+      return rows === null ? null : visibleRows();
+    },
+    render: servicesTable,
+    demoRows: () => { all = demoServices(); sync(); return visibleRows(); },
+    empty,
+  });
+  toggle.addEventListener('click', () => {
+    showIdle = !showIdle;
+    sync();
+    list.setRows(visibleRows());
+  });
+  put(root, pageHead('推理服务', '本人正在监听的服务，以及它们此刻的健康结论。', summary, toggle,
+    h('a', { class: 'btn primary', href: '#/services/register' }, '登记推理服务')),
+  list.root, discoveryDetails(ctx, 'engines'));
   return root;
 }
 

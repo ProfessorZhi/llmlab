@@ -135,6 +135,21 @@ export function servicesFromOps(ops, { now = Date.now() } = {}) {
     const confirmedAt = lastConfirmed(e.last_seen_at, e.health_observed_at);
     const fresh = confirmedAt !== null && now - confirmedAt <= CONFIRMED_WITHIN_MS;
     const confirmedIso = confirmedAt === null ? null : new Date(confirmedAt).toISOString();
+    // 健康结论的观测时刻，正文与「在不在跑」两处都用它，只算一次。
+    const healthWhen = stampOf(e.health_observed_at);
+    const healthAt = typeof e.health_observed_at === 'string' ? Date.parse(e.health_observed_at) : NaN;
+    const healthAge = Number.isFinite(healthAt) ? now - healthAt : null;
+    // 「在运行」= 此刻有证据说这个端口上有进程在监听。产品定义 §4 给「推理服务」
+    // 定的唯一含义就是这个，所以页面默认只列它。
+    //
+    // 三条**明确的反证**一票否决：``offline``（发现循环看到它连续两轮不在）、
+    // ``stale``（代理不再上报，不知道不等于在跑）、以及**新鲜的** ``unreachable``
+    // （最近一次探测探不通）。最后一条必须看新鲜度：一条五天前的「探不通」不该
+    // 顶掉今天的证据。三条都不成立、且有此刻的证据（见过它，或刚探过没判它不通），
+    // 才算在跑；什么证据都没有就是不知道，于是不显示。
+    const deadByProbe = e.health === 'unreachable'
+      && healthAge !== null && healthAge <= CONFIRMED_WITHIN_MS;
+    const running = fresh && e.state !== 'offline' && e.state !== 'stale' && !deadByProbe;
     return {
       id: e.engine_id,
       kind: 'engine',
@@ -163,24 +178,23 @@ export function servicesFromOps(ops, { now = Date.now() } = {}) {
         // 探测结论本身也要带时间，而且**要看得见**：一份五天前的「性能下降」只用
         // title 写着观测时刻，屏幕上读起来仍然像此刻。超过确认窗口就降级，并把
         // 年龄写进正文——这是唯一不靠悬停就能读到的位置。
-        const when = stampOf(e.health_observed_at);
-        const observedAt = typeof e.health_observed_at === 'string' ? Date.parse(e.health_observed_at) : NaN;
-        const age = Number.isFinite(observedAt) ? now - observedAt : null;
         const verdict = HEALTH_LABEL[e.health] ?? HEALTH_LABEL.unknown;
-        if (age !== null && age > CONFIRMED_WITHIN_MS) {
+        if (healthAge !== null && healthAge > CONFIRMED_WITHIN_MS) {
           return {
             tone: 'off',
-            text: `${verdict.text} · ${agoText(age)}`,
-            hint: [when ? `观测于 ${when}` : null, '已过期，此刻没有新的探测结论'].filter(Boolean).join(' · '),
+            text: `${verdict.text} · ${agoText(healthAge)}`,
+            hint: [healthWhen ? `观测于 ${healthWhen}` : null, '已过期，此刻没有新的探测结论'].filter(Boolean).join(' · '),
           };
         }
-        const hint = [e.health_reason, when ? `观测于 ${when}` : null].filter(Boolean).join(' · ');
+        const hint = [e.health_reason, healthWhen ? `观测于 ${healthWhen}` : null].filter(Boolean).join(' · ');
         return { ...verdict, hint: hint || null };
       })(),
       confirmedAt: confirmedIso,
-      // 「确认于」只有在真的见到过它时才成立。一次探不通的探测同样会把
-      // last_seen_at 写成现在，那种情况下这句话得改口叫「最近一次探测」。
+      // 「确认于」只有在真的见到过它时才成立。探不通的探测不更新 last_seen_at，
+      // 但会更新健康观测时刻，所以那句话得改口叫「最近一次探测」。
       confirmedFailed: e.state === 'offline' || e.health === 'unreachable',
+      // 这个服务此刻是否在监听。列表默认只列它（见 pages.js 的推理服务页）。
+      running,
       share: '—',
       vramMiB: null,
       updatedAt: e.last_seen_at ?? null,

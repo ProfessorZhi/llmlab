@@ -29,7 +29,7 @@ export function demoServices() {
   return [{
     id: ENGINE.engine_id, kind: 'engine', label: ENGINE.name, engine: ENGINE.framework, owner: ENGINE.owner_name,
     runAs: GPU_PROC.user, self: true, port: ENGINE.port, runtime: RUNTIME_LABEL.running, health: HEALTH_LABEL.healthy,
-    share: '全部成员', vramMiB: GPU_PROC.used_mib, sharedToMe: false,
+    share: '全部成员', vramMiB: GPU_PROC.used_mib, sharedToMe: false, running: true,
   }];
 }
 

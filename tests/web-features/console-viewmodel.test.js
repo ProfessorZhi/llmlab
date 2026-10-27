@@ -178,6 +178,40 @@ test('services: 没有健康探测记录时不编「健康」，只说「未探�
   assert.equal(row.runtime.text, '运行中');
 });
 
+test('services: 「在运行」= 此刻有证据说这个端口上有人在监听', () => {
+  // 页面默认只列 running 的行（见 pages.js 的推理服务页），所以这条判定就是
+  // 「表里有没有这一行」。规则很短：offline / stale 是明确的反证，一票否决；
+  // 其余要有**此刻**的证据 —— 发现循环这一轮见过它，或最近一次探测没判它不通。
+  const NOW = Date.parse('2026-10-26T17:00:00Z');
+  const row = (extra) => servicesFromOps({ registry: { owned: [], shared: [], engines: [{
+    engine_id: 'e1', name: 'qwen', protocol: 'openai_compatible', owner: 'account:aa', owner_is_self: true,
+    ...extra,
+  }] } }, { now: NOW })[0];
+
+  // 看见过、也还新鲜
+  assert.equal(row({ status: 'verified', state: 'attached', last_seen_at: '2026-10-26T16:58:00Z', health: 'healthy' }).running, true);
+  // 自动发现的端口，还没探过协议：它在监听，就该在列表里
+  assert.equal(row({ status: 'registered', state: 'attached', last_seen_at: '2026-10-26T16:58:00Z' }).running, true);
+  // 手工登记、没有发现循环，但刚刚探测成功
+  assert.equal(row({ status: 'verified', health: 'healthy', health_observed_at: '2026-10-26T16:58:00Z' }).running, true);
+
+  // 明确的反证一票否决，即便上游刚写过一行「看见过」
+  assert.equal(row({ status: 'verified', state: 'offline', last_seen_at: '2026-10-26T16:59:00Z', health: 'healthy' }).running, false);
+  assert.equal(row({ status: 'verified', state: 'stale', last_seen_at: '2026-10-26T16:59:00Z', health: 'healthy' }).running, false);
+  // 刚探过、探不通：它不在跑
+  assert.equal(row({ status: 'unavailable', health: 'unreachable', health_observed_at: '2026-10-26T16:59:00Z' }).running, false);
+  // 真实那一行：state 还停在旧的 attached（发现循环不在跑，没人把它改成 offline），
+  // 而复查刚判它探不通。新鲜的「探不通」必须能压住陈旧的「见过」。
+  assert.equal(row({
+    status: 'unavailable', state: 'attached', last_seen_at: '2026-10-22T05:47:27Z',
+    health: 'unreachable', health_observed_at: '2026-10-26T16:59:00Z',
+  }).running, false);
+  // 五天前看见过，今天没有任何新证据：不知道，就是不显示
+  assert.equal(row({ status: 'verified', state: 'attached', last_seen_at: '2026-10-21T09:00:00Z', health: 'healthy', health_observed_at: '2026-10-21T09:00:00Z' }).running, false);
+  // 从来没被确认过
+  assert.equal(row({ status: 'registered' }).running, false);
+});
+
 test('services: a runtime Linux user observed at registration is shown as recorded', () => {
   const list = servicesFromOps({ registry: { owned: [], shared: [], engines: [
     { engine_id: 'e1', name: 'qwen', protocol: 'openai_compatible', framework: 'vllm', port: 8000, owner: 'account:aa', owner_name: '张伟', owner_is_self: true, status: 'registered', run_as_user: 'zhang', run_as_uid: 1001 },

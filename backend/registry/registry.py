@@ -77,6 +77,7 @@ from .identity import (
 )
 from .reported_builds import BuildAdoption, adopt_reported_builds
 from .reported_models import Adoption, adopt_reported_models
+from .reverify import REVERIFY_STALE_AFTER_SECONDS
 from .ingest import OFFLINE_AFTER_MISSES
 from .models import (
     AGENT_TASK_DONE,
@@ -141,6 +142,7 @@ from .urls import (
     DEFAULT_ALLOWED_PORTS,
     NormalizedTarget,
     OperatorTarget,
+    is_loopback_host,
     validate_engine_target_url,
 )
 from .weights import validate_weight_path_reference, weight_path_fingerprint
@@ -154,6 +156,13 @@ MAX_INVOKE_PAYLOAD_BYTES = 64 * 1024
 #: 不是 root —— ``usage_mine`` 只按 principal 过滤，不会把这条记到任何用户名下。
 SYSTEM_ROUTER_PRINCIPAL = "system:router-sync"
 SYSTEM_ROUTER_UID = 0
+
+#: 定期复查回环服务的审计主体。与 :data:`SYSTEM_ROUTER_PRINCIPAL` 同类：不是 Linux
+#: 账号，不持有任何 scope，也不进任何人的 ``usage``。它只给「平台自己按周期探了一次」
+#: 这条事实署名——用户点「现在探测一次」走的是本人的 principal（``action="verify"``），
+#: 两者必须能分开读，否则账本上分不清是谁按的这一下。
+SYSTEM_REVERIFY_PRINCIPAL = "system:engine-reverify"
+SYSTEM_REVERIFY_UID = 0
 
 #: 登记来源标签的契约 token。
 SOURCE_REGISTRY_API = "registry_api"
@@ -706,6 +715,31 @@ class RegistryService:
             extra_meta=meta,
         )
 
+    def _audit_as(
+        self,
+        principal: str,
+        uid: int,
+        *,
+        action: str,
+        object_type: str,
+        object_id: str,
+        detail: dict | None = None,
+    ) -> None:
+        """按明文的 ``(principal, uid)`` 记一条审计，给**没有 RequesterContext** 的主体的用。
+
+        平台自己做的事（路由同步、定期复查）没有请求者，但它们也必须在账本上留下
+        「是谁做的」—— 留空或者冒充某个管理员，都是另一种形式的谎报。
+        """
+        self.store.append_audit(
+            at=self._now(),
+            actor_principal=principal,
+            actor_uid=uid,
+            action=action,
+            object_type=object_type,
+            object_id=object_id,
+            detail=detail or {},
+        )
+
     def _audit(
         self,
         requester: RequesterContext,
@@ -715,14 +749,13 @@ class RegistryService:
         object_id: str,
         detail: dict | None = None,
     ) -> None:
-        self.store.append_audit(
-            at=self._now(),
-            actor_principal=requester.principal,
-            actor_uid=requester.uid,
+        self._audit_as(
+            requester.principal,
+            requester.uid,
             action=action,
             object_type=object_type,
             object_id=object_id,
-            detail=detail or {},
+            detail=detail,
         )
 
     def _target(
@@ -1709,12 +1742,40 @@ class RegistryService:
             )
             return view
 
-        observation = self._observe(NormalizedTarget(**engine.target))
+        refreshed = self._probe_and_record(
+            engine,
+            actor_principal=requester.principal,
+            actor_uid=requester.uid,
+            action="verify",
+        )
+        return self._engine_view(refreshed, policy, requester)
+
+    def _probe_and_record(
+        self,
+        engine: Engine,
+        *,
+        actor_principal: str,
+        actor_uid: int,
+        action: str,
+    ) -> Engine:
+        """探一次这个服务，把**今天**的结论写回登记行，返回刷新后的行。
+
+        **不做授权**：谁能探由调用方先证明。这是「探测」这件事的唯一实现——
+        ``verify_engine``（用户点了「现在探测一次」）与
+        ``reverify_local_engines``（平台按周期扫）都走这里，区别只在署名的
+        ``actor`` 与 ``action``。两条路径各写一份探测逻辑，是「一条说通了、
+        另一条没说通」的温床。
+        """
+        target = NormalizedTarget(**engine.target)
+        observation = self._observe(target)
         assert observation is not None
         now = self._now()
-        target = NormalizedTarget(**engine.target)
         # 所有权**重新**证明一次：进程可能已经换了个 uid 在跑，旧结论不该被沿用。
-        entry = self._operator_entry_for(target) if engine.mode == ENGINE_MODE_SYSTEM_EXISTING else None
+        entry = (
+            self._operator_entry_for(target)
+            if engine.mode == ENGINE_MODE_SYSTEM_EXISTING
+            else None
+        )
         ownership = self._ownership_for_owner(engine.owner_principal, target, entry=entry)
         protocol_obs = self._observe_protocol(target, engine.protocol)
         merged = build_verification(
@@ -1723,18 +1784,24 @@ class RegistryService:
             require_protocol=self.config.require_protocol_verification,
         )
         status = ENGINE_VERIFIED if merged["verified"] else ENGINE_UNAVAILABLE
+        # ``last_seen_at`` 是「**看见**过它」的时刻，不是「探过一次」的时刻。
+        # 探不通时保持原值：否则一个每 5 分钟跑一轮的复查会把它一路刷新成
+        # 「刚看见过」，而 ``presence.service_state`` 判断代理是否还在上报，用的
+        # 正是这一列 —— 那样 stale 永远不会触发，停下代理的服务会永远显示「运行中」。
+        seen = observation.state in (health_mod.STATE_HEALTHY, health_mod.STATE_DEGRADED)
         self.store.update_engine_status(
             engine.id,
             status=status,
             health=observation.to_dict(),
-            last_seen_at=now,
+            last_seen_at=now if seen else engine.last_seen_at,
             updated_at=now,
             ownership=ownership.to_dict(),
             verification=merged,
         )
-        self._audit(
-            requester,
-            action="verify",
+        self._audit_as(
+            actor_principal,
+            actor_uid,
+            action=action,
             object_type="engine",
             object_id=engine.id,
             detail={
@@ -1747,7 +1814,65 @@ class RegistryService:
             },
         )
         refreshed = self.store.engine_by_id(engine.id)
-        return self._engine_view(refreshed, policy, requester)  # type: ignore[arg-type]
+        assert refreshed is not None
+        return refreshed
+
+    def reverify_local_engines(
+        self,
+        *,
+        stale_after_seconds: float = REVERIFY_STALE_AFTER_SECONDS,
+        limit: int = 32,
+    ) -> dict:
+        """平台自己把**本机**已登记的服务重探一遍，写回状态与健康。
+
+        为什么要定期做：一张只在登记那一刻探过的表，会把三天前停掉的服务一直显示
+        成「运行中」。表要么新鲜，要么就别叫状态。
+
+        为什么只探回环目标：探测是从 BFF 所在**这一台**机器发出去的。对一条指向
+        别处主机的登记行探不通，只说明「这台机器连不上它」，不说明那个服务停了。
+        把这种结论写进 ``status``，就是拿一个网络事实冒充一个进程事实。
+
+        「该不该探」看 ``last_seen_at``（最后一次**看见**它）：还新鲜的就跳过，
+        已经旧了或从来没见过就探。这样一轮里每个服务最多探一次，而不是每轮都探
+        全表 —— 复查是为了让结论不过期，不是为了把端口刷热。
+
+        返回这一轮的摘要（进 ``IngestScheduler.last_round``），不抛异常给调用方看：
+        单个服务探测失败是这一行的事，不该让整轮停摆。
+        """
+        if self.prober is None:
+            return {"probed": 0, "skipped": "no_observation_source", "engines": []}
+        cutoff = self._now() - timedelta(seconds=max(0.0, float(stale_after_seconds)))
+        due: list[Engine] = []
+        not_local = 0
+        for engine in self.store.list_engines():
+            if not is_loopback_host(str((engine.target or {}).get("host") or "")):
+                not_local += 1
+                continue
+            if engine.last_seen_at is not None and engine.last_seen_at > cutoff:
+                continue
+            due.append(engine)
+        results: list[dict] = []
+        for engine in due[: max(0, int(limit))]:
+            try:
+                refreshed = self._probe_and_record(
+                    engine,
+                    actor_principal=SYSTEM_REVERIFY_PRINCIPAL,
+                    actor_uid=SYSTEM_REVERIFY_UID,
+                    action="reverify",
+                )
+            except RegistryError as exc:
+                # 一条探挂了（存储故障、探测源给了不合形的结果）只影响这一行。
+                results.append({"engine_id": engine.id, "error": f"{type(exc).__name__}: {exc}"})
+                continue
+            results.append(
+                {"engine_id": engine.id, "status": refreshed.status, "state": refreshed.state}
+            )
+        return {
+            "probed": len(results),
+            "due": len(due),
+            "not_local": not_local,
+            "engines": results,
+        }
 
     # -- Model ------------------------------------------------------------
 

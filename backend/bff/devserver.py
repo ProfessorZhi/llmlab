@@ -46,7 +46,9 @@ from ..registry.agent_channel import AgentChannel
 from ..runtime.params import ParamStore
 from ..registry.identity import Principal, PrincipalDirectory, TrustedTokenIntrospector
 from ..registry.health import LoopbackHttpProber, LoopbackProtocolProber, StaticProber
+from ..registry.ingest_scheduler import IngestScheduler
 from ..registry.local_discovery import DEFAULT_MODEL_ROOTS, LocalDiscovery
+from ..registry.reverify import EngineReverifier, REVERIFY_INTERVAL_SECONDS
 from ..registry.urls import DEFAULT_ALLOWED_PORTS
 from ..registry.ownership import EMPTY_POLICY, ProcNetOwnershipProver, load_operator_policy
 from ..registry.registry import RegistryConfig, RegistryService
@@ -702,6 +704,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--reverify-interval",
+        type=float,
+        default=REVERIFY_INTERVAL_SECONDS,
+        metavar="SECONDS",
+        help=(
+            "每这么多秒把本机已登记的服务重探一遍，把状态与健康写回登记"
+            f"（默认 {REVERIFY_INTERVAL_SECONDS:g} 秒，0 = 关）。只探回环目标；"
+            "没有 --observe-local-engines 就没有观测源，这一项不会探任何东西"
+        ),
+    )
+    parser.add_argument(
         "--live-host-summary",
         action="store_true",
         help=(
@@ -885,6 +898,24 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"  agent socket off: {status.problem}", file=sys.stderr)
 
+    # 定期复查：**默认开**。一张只在登记那一刻探过的表，会把昨天停掉的服务一直
+    # 显示成「运行中」。只探回环目标 —— 别的主机的登记行探不通，只说明这台机器
+    # 连不上，不说明那边的进程停了。
+    reverify = None
+    if args.reverify_interval and args.reverify_interval > 0:
+        if app.service.prober is None:
+            print(
+                "  engine reverify off: no observation source (needs --observe-local-engines)",
+                file=sys.stderr,
+            )
+        else:
+            reverify = IngestScheduler(
+                runner=EngineReverifier(app.service),
+                interval_seconds=args.reverify_interval,
+            )
+            reverify.start(name="llmlab-engine-reverify")
+            print(f"  engine reverify every {args.reverify_interval:g}s", file=sys.stderr)
+
     server = wsgiref.simple_server.make_server(
         host, port, app, server_class=_ThreadingWSGIServer
     )
@@ -902,6 +933,8 @@ def main(argv: list[str] | None = None) -> int:
         print("\nstopped", file=sys.stderr)
     finally:
         server.server_close()
+        if reverify is not None:
+            reverify.shutdown()
         if channel is not None:
             channel.stop()
     return 0

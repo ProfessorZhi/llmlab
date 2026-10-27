@@ -5,7 +5,13 @@ import { createRefresher } from './live-refresh.js';
 
 export const LIST_PAGE_SIZE = 50;
 
-/** Keep controls/forms mounted; cap row DOM and replace only changed visible rows. */
+/**
+ * Keep controls/forms mounted; cap row DOM and replace only changed visible rows.
+ *
+ * ``demoRows`` 可以是数组，也可以是一个函数 —— 页面如果在渲染前还要按自己的
+ * 开关过滤（「只看运行中的」），它需要的是一份**当次**的数据，而不是建页那一刻
+ * 算好的快照。
+ */
 export function registryList(ctx, { project, render, empty, demoRows = [] }) {
   const root = h('div', { class: 'registry-list' });
   let rows = null, page = 0, signature = null, busy = false, refreshAgain = false, pendingDraw = false;
@@ -42,7 +48,7 @@ export function registryList(ctx, { project, render, empty, demoRows = [] }) {
     if (ctx.signal?.aborted) return;
     busy = false; refreshButton.disabled = false;
     if (r.state === 'ready') {
-      rows = ctx.demo ? demoRows : project(r.value);
+      rows = ctx.demo ? (typeof demoRows === 'function' ? demoRows() : demoRows) : project(r.value);
       if (rows) { status.textContent = draw() ? synced() : '新数据已就绪，离开当前行后更新'; }
       else { signature = null; pager.hidden = true; put(clear(content), emptyState('not_configured')); status.textContent = '注册中心未接入'; }
     } else {
