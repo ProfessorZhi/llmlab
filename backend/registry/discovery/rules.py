@@ -214,6 +214,7 @@ class _Scanner:
         while stack and not self._limit_hit:
             dir_path, depth, rel_parts = stack.pop()
             if depth > self.limits.max_depth:
+                self._add_skip(dir_path, "max_depth")
                 continue
             self._scan_dir(dir_path, depth, rel_parts, stack)
         return self._finish()
@@ -272,6 +273,7 @@ class _Scanner:
         for entry in entries:
             if self._entries_seen >= self.limits.max_entries:
                 self._limit_hit = True
+                self._add_skip(dir_path, "max_entries")
                 return
             self._entries_seen += 1
 

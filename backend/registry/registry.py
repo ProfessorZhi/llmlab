@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -65,6 +66,7 @@ from .identity import (
     FORBIDDEN_IDENTITY_FIELDS,
     SCOPE_ADMIN_MANAGE,
     SCOPE_AGENT_REPORT,
+    SCOPE_REGISTRY_READ,
     Principal,
     PrincipalDirectory,
     RequesterContext,
@@ -77,6 +79,10 @@ from .reported_builds import BuildAdoption, adopt_reported_builds
 from .reported_models import Adoption, adopt_reported_models
 from .ingest import OFFLINE_AFTER_MISSES
 from .models import (
+    AGENT_TASK_DONE,
+    AGENT_TASK_FAILED,
+    AGENT_TASK_QUEUED,
+    AGENT_TASK_RUNNING,
     DEPLOYMENT_READY,
     DEPLOYMENT_REGISTERED,
     DEPLOYMENT_UNAVAILABLE,
@@ -103,6 +109,7 @@ from .models import (
     VISIBILITY_ALL_APPROVED,
     VISIBILITY_PRIVATE,
     VISIBILITY_USERS,
+    AgentTask,
     Clock,
     Deployment,
     Endpoint,
@@ -193,6 +200,7 @@ class RegistryConfig:
     #: 上游凭据的**位置**（只点名文件与变量，绝不携带值）。缺省空 —— 于是缺省
     #: 下没有任何 engine 会被发布，这正是 fail-closed 该有的样子：不配置就不发。
     engine_secret_refs: dict = field(default_factory=dict)
+    personal_mode: bool = False
 
     def __post_init__(self) -> None:
         if self.mode not in dto.MODES:
@@ -296,6 +304,64 @@ def _reject_identity_fields(payload: dict) -> None:
             "identity must not be asserted by the client; "
             f"remove field(s): {', '.join(offending)}"
         )
+
+
+#: 平台能下发给代理的任务种类。执行动作只能是这三件，不允许自由命令。
+AGENT_TASK_KINDS = ("start", "stop", "restart")
+
+#: systemd 单元名的形状。只允许字母、数字与 ``_.@-``：路径分隔符、空白与
+#: 任何可能被当成 shell/option 的字符都在这里被挡住。
+_AGENT_UNIT_RE = re.compile(r"^[A-Za-z0-9_.@-]+$")
+
+#: 一次领取最多带回多少条。代理每轮只做少量事，上限防止一次拿走一整批积压。
+MAX_AGENT_TASK_CLAIM = 16
+
+#: 任务结果的 JSON 大小上限。结果会随回执入库；命令输出由代理截断。
+MAX_AGENT_TASK_RESULT_BYTES = 64 * 1024
+
+
+def valid_agent_unit(value: object) -> bool:
+    """单元名是否通过白名单。``None`` / 非字符串一律不合法。"""
+
+    return (
+        isinstance(value, str)
+        and bool(_AGENT_UNIT_RE.fullmatch(value))
+        # 以 ``-`` 开头会被 systemctl 当成 option 解析；白名单本身允许它，这里再挡一层。
+        and not value.startswith("-")
+    )
+
+
+def _validate_agent_argv(value: object) -> list[str]:
+    """argv 必须是**非空**的字符串列表；不拼接、不解释 shell 词法。"""
+
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple)):
+        raise InvalidRequest("argv must be a list of strings")
+    if not value:
+        raise InvalidRequest("argv must not be empty")
+    argv: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item:
+            raise InvalidRequest("every argv element must be a non-empty string")
+        if "\x00" in item:
+            raise InvalidRequest("argv must not contain NUL bytes")
+        argv.append(item)
+    return argv
+
+
+def _validate_agent_task_result(result: object) -> dict | None:
+    """代理回传的结果：``None`` 或一个可序列化的 JSON 对象。"""
+
+    if result is None:
+        return None
+    if not isinstance(result, dict):
+        raise InvalidRequest("a task result must be a JSON object or null")
+    try:
+        encoded = json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError) as exc:
+        raise InvalidRequest("a task result must be JSON-serializable") from exc
+    if len(encoded.encode("utf-8")) > MAX_AGENT_TASK_RESULT_BYTES:
+        raise InvalidRequest("task result is too large")
+    return dict(result)
 
 
 class RegistryService:
@@ -444,9 +510,9 @@ class RegistryService:
                 reason=ownership_mod.REASON_TARGET_TAKEN,
             )
         found = self.principals.lookup(principal)
-        if entry is not None or (found is not None and found.run_as):
+        if (entry is not None and not self.config.personal_mode) or (found is not None and found.run_as):
             return self._prove_ownership(
-                target, entry=entry, owner_linux_user=found.run_as if found is not None else None
+                target, entry=None if self.config.personal_mode else entry, owner_linux_user=found.run_as if found is not None else None
             )
         observe = getattr(self.ownership_prover, "observe", None)
         if observe is None:
@@ -454,6 +520,10 @@ class RegistryService:
         proof = observe(target)
         if not isinstance(proof, OwnershipProof):
             raise InvalidRequest("ownership_prover.observe must return an OwnershipProof")
+        if self.config.personal_mode:
+            account = self._account_for_linux_user(proof.linux_user) if proof.linux_user else None
+            if account is None or account.principal != principal:
+                return ownership_mod.unverified_proof(ownership_mod.REASON_OWNER_MISMATCH)
         return proof
 
     def _target_owner_other_than(self, principal: str, target: NormalizedTarget) -> str | None:
@@ -614,7 +684,7 @@ class RegistryService:
     def policy(self, requester: RequesterContext) -> AccessPolicy:
         if not isinstance(requester, RequesterContext):
             raise InvalidRequest("requester must be a RequesterContext")
-        return AccessPolicy(requester, self.store, self.principals)
+        return AccessPolicy(requester, self.store, self.principals, personal_mode=self.config.personal_mode)
 
     def _scope_block(self, requester: RequesterContext) -> dict:
         return dto.scope_block(
@@ -866,6 +936,8 @@ class RegistryService:
             raise Conflict(
                 f"{target.host}:{target.port} is already registered by another account"
             )
+        if self.config.personal_mode and not ownership.verified:
+            raise OwnershipUnverified("only the verified Linux service owner can register this service")
         observation, protocol_obs, merged = self._verification(target, protocol)
 
         status = ENGINE_REGISTERED
@@ -1051,28 +1123,13 @@ class RegistryService:
     # -- 每用户代理上报 -----------------------------------------------------
 
     def report_agent(self, requester: RequesterContext, payload: dict) -> AgentReport:
-        """收下一份「我这台机器上跑着什么、装了什么」的快照。
+        """Adopt an authenticated owner's inventory into their platform account.
 
-        身份叙事只有一条：``requester.uid`` 由 unix socket 的 ``SO_PEERCRED`` 给出，
-        恰好落在受信目录的某一行上，而那一行就是 ``requester.principal``。因此：
-
-        * ``run_as_uid`` / ``run_as_user`` / ``target_url`` / ``host_id`` 全部由服务端
-          写死 —— 客户端一个字都不算（也正因如此，报告中带这些字段的条目会被整条
-          丢弃，见 ``agent_reports._asserts_identity``）；
-        * ``host_id`` 从主体名 ``linux:<host>:<uid>`` 里取，**不**用客户端自称的主机名；
-        * 只有 ``agent_reports`` 是这条通道的落点。``engines`` / ``model_locations``
-          永远不写——「看见一个端口」不等于「我要登记它」。
-
-        **两处例外，都是「磁盘上本来就有」的事实**，都记在**本人平台账户**名下：
-
-        * 报告里的权重文件 → ``models`` 行（``source=auto``），见
-          :mod:`reported_models`：只是路径引用（平台不打开文件），只填空不覆盖；
-        * 报告里装着的引擎 → ``runtime_builds`` 行，见 :mod:`reported_builds`：
-          以 ``(framework, 路径)`` 为身份，观测值随每轮刷新，不标 missing。
-
-        ``engines``（正在跑的服务）仍然一条都不写：端口有人监听，不代表这个人要
-        把那个服务登记进资源池。linux 用户没有对应账户时两条例外都不生效——没有
-        可归属的所有者，就不替谁做主。
+        SO_PEERCRED supplies the uid. Paths and listener ownership are validated
+        before adoption. Models retain identity across observed moves; installed
+        engines and private running services refresh in place. No API route is
+        published and no inference is started by receiving an inventory report.
+        Unmapped Linux users retain reports only, with no resource adoption.
         """
 
         if not isinstance(requester, RequesterContext):
@@ -1137,7 +1194,246 @@ class RegistryService:
             )
         self._adopt_reported_models(requester, principal, report, received_at)
         self._adopt_reported_builds(requester, principal, report, received_at)
+        owner = self._account_for_linux_user(principal.linux_user)
+        if owner is not None:
+            from .reported_services import adopt_reported_services
+            created = adopt_reported_services(self.store, owner=owner.principal, report=report, now=received_at)
+            if created:
+                self._audit(requester, action="agent_services_adopted", object_type="agent_report",
+                            object_id=report.agent_id, detail={"owner": owner.principal, "created": created})
         return report
+
+    # -- 每用户代理任务（agent_tasks）--------------------------------------
+    #
+    # 任务只能由**代理本人**领取与收尾：``RequesterContext.uid`` 来自 unix socket
+    # 的 ``SO_PEERCRED``，不是请求体。服务层因此不提供「以任意 uid 领取」的入口。
+
+    def _agent_uid_for(self, owner: Principal, engine: Engine) -> int | None:
+        """这条任务该交给哪个 uid 的代理去执行；说不准就返回 ``None``。
+
+        Linux 主体与平台账户是两种形状：``linux:<host>:<uid>`` 自带 uid，而
+        ``account:<id>`` 没有 —— 可个人模式下的服务恰恰都归账户所有。如果只认
+        主体上的 uid，账户会话就永远排不了任务，「在控制台点一下起服务」等于没做。
+
+        账户主体改为读 ``engine.owner_uid``：那不是客户端说的，是 ``register_engine``
+        在**所有权证明**观测到监听进程的用户之后才写下的运行事实（见
+        ``registry.py`` 里 ``owner_uid=ownership.uid`` 那一行）。即便如此也不盲信
+        这一行 —— 它必须仍能经受信目录对上号。
+
+        对不上就 ``None``（fail closed）：宁可说「这个服务没有可用的本人代理」，
+        也不能猜一个 uid 把任务塞进别人的队列。
+        """
+
+        if owner.uid is not None:
+            return int(owner.uid)
+        observed = engine.owner_uid
+        if not isinstance(observed, int) or observed < 0:
+            return None
+        if self.principals.by_uid(observed) is None:
+            return None
+        return observed
+
+    def enqueue_agent_task(
+        self,
+        requester: RequesterContext,
+        engine_id: str,
+        kind: str,
+        *,
+        unit: str | None = None,
+        argv: list[str] | tuple[str, ...] | None = None,
+    ) -> AgentTask:
+        """把一条启动/停止/重启任务排进 **engine owner 自己** 的队列。
+
+        ``uid`` 决定这条任务能被**哪个代理**领取，取值见 :meth:`_agent_uid_for`：
+        Linux 主体用受信目录里的 uid；平台账户没有 uid，用它名下那条 engine 行
+        记着的、登记时**观测到的**运行 uid。请求体里的任何 uid 都不参与。
+        ``requested_by`` 如实记录实际调用者。payload 只允许 ``unit`` / ``argv`` /
+        ``engine_id`` / ``kind`` —— 不放 prompt、凭据或 env 路径。
+
+        既没有 ``unit`` 也没有 ``argv`` 时仍然允许入队：代理会诚实回报
+        ``failed: 这一行没有可执行入口``，而不是让平台假装下发成功。
+        """
+
+        if not isinstance(requester, RequesterContext):
+            raise InvalidRequest("requester must be a RequesterContext")
+        self.policy(requester).require_write_scope()
+        if not isinstance(engine_id, str) or not engine_id.strip():
+            raise InvalidRequest("engine_id must be a non-empty string")
+        if not isinstance(kind, str) or kind not in AGENT_TASK_KINDS:
+            raise InvalidRequest(f"unsupported agent task kind: {kind!r}")
+        if unit is not None and argv is not None:
+            # 两种形状同时出现时，代理该用哪一个没有唯一答案 —— 拒绝而不是猜。
+            raise InvalidRequest("give either unit or argv, not both")
+
+        engine = self.store.engine_by_id(engine_id)
+        if engine is None:
+            raise NotFound(f"engine {engine_id!r} not found")
+        if engine.owner_principal != requester.principal:
+            # 主人校验是唯一的放行条件：管理员也不能替别人给别人的代理排任务。
+            raise AccessDenied(
+                f"enqueueing a task for engine {engine_id!r} requires ownership"
+            )
+
+        owner = self.principals.require(requester.principal)
+        agent_uid = self._agent_uid_for(owner, engine)
+        if agent_uid is None:
+            raise AccessDenied(
+                "this service records no observed linux uid, so no per-user agent can carry the task"
+            )
+
+        if unit is None and argv is None and engine.unit is not None:
+            # 登记行上记着单元名时才补缺省；它仍然是白名单里的形状。
+            unit = engine.unit
+
+        payload: dict = {"kind": kind, "engine_id": engine.id}
+        if unit is not None:
+            if not valid_agent_unit(unit):
+                raise InvalidRequest(f"invalid systemd unit name: {unit!r}")
+            payload["unit"] = unit
+        if argv is not None:
+            payload["argv"] = _validate_agent_argv(argv)
+
+        now = self._now()
+        task = AgentTask(
+            id=new_id("task"),
+            uid=agent_uid,
+            kind=kind,
+            payload=payload,
+            requested_by=requester.principal,
+            created_at=now,
+            # 「已下发」不是「已启动」：只有代理领取之后才变成 running。
+            state=AGENT_TASK_QUEUED,
+            result=None,
+            updated_at=now,
+        )
+        self.store.enqueue_task(task)
+        self._audit(
+            requester,
+            action="agent_task_enqueued",
+            object_type="agent_task",
+            object_id=task.id,
+            detail={"kind": kind, "engine_id": engine.id},
+        )
+        return task
+
+    def claim_agent_tasks(
+        self, requester: RequesterContext, *, limit: int = 8
+    ) -> list[AgentTask]:
+        """以代理本人的身份，原子地领取最多 ``limit`` 条 ``queued`` 任务。
+
+        每次领取都是 ``Store.claim_task`` 里的一次独立原子迁移；两个轮询者
+        同时调用时不可能拿到同一条。没有任务就返回空列表，不报错。
+        """
+
+        if not isinstance(requester, RequesterContext):
+            raise InvalidRequest("requester must be a RequesterContext")
+        if SCOPE_AGENT_REPORT not in requester.scopes:
+            raise AccessDenied(f"missing required scope {SCOPE_AGENT_REPORT}")
+        if (
+            not isinstance(requester.uid, int)
+            or isinstance(requester.uid, bool)
+            or requester.uid < 0
+        ):
+            raise AccessDenied("claiming agent tasks requires a kernel-attested uid")
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+            raise InvalidRequest("limit must be a positive integer")
+        limit = min(limit, MAX_AGENT_TASK_CLAIM)
+
+        now = self._now()
+        claimed: list[AgentTask] = []
+        for _ in range(limit):
+            task = self.store.claim_task(requester.uid, now=now)
+            if task is None:
+                break
+            claimed.append(task)
+        return claimed
+
+    def finish_agent_task(
+        self,
+        requester: RequesterContext,
+        task_id: str,
+        *,
+        state: str,
+        result: dict | None = None,
+    ) -> AgentTask:
+        """代理回报一条**自己领过的**任务的结果。
+
+        ``running`` 只在代理领取时出现；``done`` / ``failed`` 只能由这里写入。
+        ``queued`` 的任务不允许被直接收尾 —— 那等于没执行就宣称完成。
+        """
+
+        if not isinstance(requester, RequesterContext):
+            raise InvalidRequest("requester must be a RequesterContext")
+        if SCOPE_AGENT_REPORT not in requester.scopes:
+            raise AccessDenied(f"missing required scope {SCOPE_AGENT_REPORT}")
+        if (
+            not isinstance(requester.uid, int)
+            or isinstance(requester.uid, bool)
+            or requester.uid < 0
+        ):
+            raise AccessDenied("finishing an agent task requires a kernel-attested uid")
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise InvalidRequest("task_id must be a non-empty string")
+        if state not in (AGENT_TASK_DONE, AGENT_TASK_FAILED):
+            raise InvalidRequest(f"a task result must be done or failed, not {state!r}")
+        validated = _validate_agent_task_result(result)
+
+        # 只在自己的桶里找：别人的 task_id 与不存在给同一个答案。
+        task = self._agent_task_for_uid(requester.uid, task_id)
+        if task.state == AGENT_TASK_QUEUED:
+            raise Conflict("task has not been claimed by this agent")
+        if not self.store.finish_task(
+            task.id, state=state, result=validated, now=self._now()
+        ):  # pragma: no cover - 行刚被读过，理论上还在
+            raise NotFound(f"task {task_id!r} not found")
+        return self._agent_task_for_uid(requester.uid, task.id)
+
+    def agent_task(self, requester: RequesterContext, task_id: str) -> AgentTask:
+        """读一条任务。只有任务的请求者本人（或全局只读）看得到。"""
+
+        if not isinstance(requester, RequesterContext):
+            raise InvalidRequest("requester must be a RequesterContext")
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise InvalidRequest("task_id must be a non-empty string")
+        if not (
+            SCOPE_REGISTRY_READ in requester.scopes
+            or SCOPE_AGENT_REPORT in requester.scopes
+            or requester.is_admin_read
+        ):
+            raise AccessDenied(f"missing required scope {SCOPE_REGISTRY_READ}")
+
+        for uid in self._task_uids_for(requester):
+            for task in self.store.tasks_for(uid):
+                if task.id == task_id and task.requested_by == requester.principal:
+                    return task
+        if requester.is_admin_read:
+            for uid in sorted(self.principals.uids()):
+                for task in self.store.tasks_for(uid):
+                    if task.id == task_id:
+                        return task
+        # 不存在与无权知道它存在，共用同一个答案。
+        raise NotFound(f"task {task_id!r} not found")
+
+    def _task_uids_for(self, requester: RequesterContext) -> list[int]:
+        """读侧：这个调用者的任务可能存在哪些 uid 桶里。
+
+        写侧（:meth:`_agent_uid_for`）把任务排进「跑这个服务的那个 Linux 用户」的
+        桶。Linux 主体自带 uid，直接查自己的桶；平台账户没有 uid，而账户主体上
+        只有账户名、没有绑定的 Linux 用户，所以只能把目录里的桶都看一遍。
+        每个桶里仍然要求 ``requested_by`` 与调用者全等 —— 一个桶可能被多人共用，
+        「在同一只桶里」不等于「是我的」。
+        """
+
+        uid = requester.uid
+        if isinstance(uid, int) and not isinstance(uid, bool) and uid >= 0:
+            return [uid]
+        return sorted(self.principals.uids())
+
+    def _agent_task_for_uid(self, uid: int, task_id: str) -> AgentTask:
+        for task in self.store.tasks_for(uid):
+            if task.id == task_id:
+                return task
+        raise NotFound(f"task {task_id!r} not found")
 
     def _account_for_linux_user(self, linux_user: str) -> Principal | None:
         """这个 Linux 用户的平台账户主体；目录不支持解析时回答 ``None``。"""
@@ -1161,14 +1457,15 @@ class RegistryService:
         所有者，就不替谁做主。
         """
 
-        if not report.models:
+        if not report.models and not (report.full and report.scan_roots):
             return Adoption()
         owner = self._account_for_linux_user(principal.linux_user)
         if owner is None:
             return Adoption()
         try:
             adoption = adopt_reported_models(
-                self.store, owner=owner.principal, models=report.models, now=now
+                self.store, owner=owner.principal, models=report.models, now=now,
+                uid=report.uid, full=report.full and not report.rejected.get("models"), scan_roots=report.scan_roots
             )
         except RegistryError:  # pragma: no cover - 存储故障
             return Adoption()

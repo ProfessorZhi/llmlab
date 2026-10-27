@@ -4,7 +4,8 @@
 
 * 所有者是账户（``account:<id>``，``owner_uid=-1``），不是 linux 主体；
 * 行里带 ``weight_path`` / ``format`` / ``size_bytes``，但**只是引用**；
-* 同名或同路径已存在时沿用那一行：自动登记只补空，不覆盖；
+* 同一路径（或有指纹 / inode 这类内容证据）已存在时沿用那一行：自动登记只补空，
+  不覆盖；**同名但路径不同不合并** —— 名字不能证明内容相同；
 * 别的主体的行不会因为路径相同而被借走。
 """
 
@@ -92,17 +93,17 @@ class AdoptionTests(StoreFixture):
         self.assertEqual(second.adopted, first.adopted)
         self.assertEqual(second.created, ())
 
-    def test_a_name_already_in_the_library_is_reused_not_duplicated(self) -> None:
-        """库里有同名的一行（哪怕它没有路径）时，再建一行只是同一件事说两遍。"""
+    def test_same_name_without_content_evidence_does_not_merge_distinct_paths(self) -> None:
+        """同名不能证明内容相同；缺少指纹或 inode 时保留不同模型。"""
 
         once = self.adopt([GGUF])
         self.store.list_models()  # 触发一次读取，确认库里有且只有一行
-        # 换一条路径、同一个建议名：新路径不会被单独登记。
+        # 同名但不同路径，没有内容证据时不能自动合并。
         again = self.adopt([{**GGUF, "path": "/home/alice/models/copy.gguf"}])
 
-        self.assertEqual(len(self.store.list_models()), 1)
-        self.assertEqual(again.created, ())
-        self.assertEqual(again.adopted["/home/alice/models/copy.gguf"], once.created[0])
+        self.assertEqual(len(self.store.list_models()), 2)
+        self.assertEqual(len(again.created), 1)
+        self.assertNotEqual(again.adopted["/home/alice/models/copy.gguf"], once.created[0])
 
     def test_another_owners_row_with_the_same_path_does_not_hide_the_file(self) -> None:
         self.adopt([GGUF], owner=OWNER)

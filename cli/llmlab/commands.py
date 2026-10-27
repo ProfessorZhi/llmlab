@@ -819,6 +819,35 @@ def cmd_agent(args: argparse.Namespace, as_json: bool) -> int:
         else:
             print(agent_mod.human_summary(payload, receipt))
 
+    def run_claimed_tasks() -> None:
+        """领一轮任务并逐条执行、回报。身份与上报完全相同：socket 的对端 uid。"""
+
+        for task in agent_mod.claim_tasks(socket_path=socket_path):
+            task_id = str(task.get("id") or "")
+            # run_task 自己把「没有可执行入口」/「unit 非法」/执行器失败都变成
+            # failed 结果，所以这里不需要按异常分支处理任务本身。
+            outcome = agent_mod.run_task(task)
+            try:
+                agent_mod.send_task_result(
+                    task_id,
+                    outcome["state"],
+                    outcome.get("result"),
+                    socket_path=socket_path,
+                )
+            except CliError as exc:
+                # 结果送不回去只影响这一条；watch 循环要继续，下一轮再上报。
+                print(f"llmlab agent: task {task_id}: {exc.message}", file=sys.stderr)
+                if exc.hint:
+                    print(f"llmlab agent: hint: {exc.hint}", file=sys.stderr)
+            if as_json:
+                print(json.dumps(
+                    {"task": task_id, "state": outcome["state"]},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ))
+            else:
+                print(f"task {task_id}: {outcome['state']}")
+
     if not args.watch:
         once()
         return EXIT_OK
@@ -840,6 +869,14 @@ def cmd_agent(args: argparse.Namespace, as_json: bool) -> int:
                         file=sys.stderr,
                     )
                     raise
+            if not args.dry_run:
+                try:
+                    run_claimed_tasks()
+                except CliError as exc:
+                    # 「领取失败」只影响这一轮：不累计 failures，也不退出循环。
+                    print(f"llmlab agent: task claim failed: {exc.message}", file=sys.stderr)
+                    if exc.hint:
+                        print(f"llmlab agent: hint: {exc.hint}", file=sys.stderr)
             time.sleep(interval)
     except KeyboardInterrupt:  # pragma: no cover - 交互式退出
         return EXIT_OK

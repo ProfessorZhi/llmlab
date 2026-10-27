@@ -65,12 +65,14 @@ class AccessPolicy:
         requester: RequesterContext,
         store: Store,
         principals: PrincipalDirectory,
+        *, personal_mode: bool = False,
     ) -> None:
         if not isinstance(requester, RequesterContext):
             raise InvalidRequest("requester must be a RequesterContext")
         self.requester = requester
         self.store = store
         self.principals = principals
+        self.personal_mode = personal_mode
         self._sets: VisibilitySets | None = None
 
     # -- 可见性计算 -------------------------------------------------------
@@ -107,9 +109,9 @@ class AccessPolicy:
             for endpoint in all_endpoints:
                 if endpoint.owner_principal == me:
                     collected.add(endpoint.id)
-                elif endpoint.visibility == VISIBILITY_USERS and endpoint.id in granted:
+                elif not self.personal_mode and endpoint.visibility == VISIBILITY_USERS and endpoint.id in granted:
                     collected.add(endpoint.id)
-                elif endpoint.visibility == VISIBILITY_ALL_APPROVED and me in approved:
+                elif not self.personal_mode and endpoint.visibility == VISIBILITY_ALL_APPROVED and me in approved:
                     # 成员来源是**受信目录**的审批状态，不是请求里的任何字段。
                     collected.add(endpoint.id)
             endpoint_ids = frozenset(collected)
@@ -284,7 +286,7 @@ class AccessPolicy:
         me = self.requester.principal
         if owner_principal == me:
             return
-        if SCOPE_ADMIN_MANAGE in self.requester.scopes:
+        if not self.personal_mode and SCOPE_ADMIN_MANAGE in self.requester.scopes:
             return
         raise AccessDenied(f"{action} requires ownership of {object_type} {object_id!r}")
 
@@ -292,13 +294,15 @@ class AccessPolicy:
         """对**已可见**的 endpoint 做写操作。可见但非 owner -> 403。"""
         if endpoint.owner_principal == self.requester.principal:
             return
-        if SCOPE_ADMIN_MANAGE in self.requester.scopes:
+        if not self.personal_mode and SCOPE_ADMIN_MANAGE in self.requester.scopes:
             return
         raise AccessDenied(
             f"{action} requires ownership of endpoint {endpoint.id!r}"
         )
 
     def require_share_scope(self) -> None:
+        if self.personal_mode:
+            raise AccessDenied("service sharing is disabled in personal mode")
         if SCOPE_ENDPOINT_SHARE in self.requester.scopes:
             return
         if SCOPE_ADMIN_MANAGE in self.requester.scopes:
@@ -336,6 +340,9 @@ class AccessPolicy:
     def require_endpoint_ready(self, endpoint: Endpoint, *, action: str) -> None:
         """未验证的 Endpoint 不可共享、不可调用 —— 注册 != 可用。"""
         from .errors import NotVerified
+
+        if self.personal_mode and action == "invoke" and endpoint.owner_principal != self.requester.principal:
+            raise AccessDenied("only the service owner may invoke this endpoint")
 
         if endpoint.status != ENDPOINT_READY:
             raise NotVerified(

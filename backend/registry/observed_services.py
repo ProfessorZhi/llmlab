@@ -202,14 +202,22 @@ def attach_observed(
     model_ids: tuple[str, ...],
     visibility: str,
     now: datetime,
+    adopt_model_refs: bool = True,
+    owner_label: str | None = None,
 ) -> Engine:
     """把（或更新）一个被观测到的服务写进账本，返回账本里的那一行。
 
     ``visibility`` 在**接入的这一刻**快照进 ``launch_json``：§4.2 说默认值只影响
     之后接入的服务，所以不能在将来建路由时再去读一次当时的最新默认值。
+
+    ``principal`` 是**归属主体**（可能是 ``account:<id>``），参与唯一索引与授权；
+    ``owner_label`` 只用来给撞名的路由加后缀（见 :func:`_route_plan`）。两者分开，
+    是因为 ``route_name_for`` 会把 owner 原样拼进路由名，而 ``account:<32 位 hex>``
+    拼出来的名字没法给人看。
     """
 
     engine_id = auto_engine_id(uid, port)
+    route_owner = owner_label or principal
     launch = {
         "model_ids": list(model_ids),
         "framework": framework,
@@ -220,7 +228,7 @@ def attach_observed(
     # 只记在 launch_json 里等于只有引擎被发现，模型仍然要人工登记一遍。
     launch["model_rows"] = adopt_models(
         store, principal=principal, uid=uid, serving_ids=model_ids, now=now
-    )
+    ) if adopt_model_refs else {}
 
     existing = store.engine_by_id(engine_id)
     if existing is not None:
@@ -234,7 +242,7 @@ def attach_observed(
         if isinstance(previous.get("route"), dict):
             launch["route"] = previous["route"]
         else:
-            launch["route"] = _route_plan(store, engine_id, model_ids, framework, principal, port, launch["visibility"])
+            launch["route"] = _route_plan(store, engine_id, model_ids, framework, route_owner, port, launch["visibility"])
         store.update_engine_runtime(
             engine_id,
             state=ENGINE_RUNTIME_ATTACHED,
@@ -246,7 +254,7 @@ def attach_observed(
         return refreshed
 
     wanted = _wanted_name(model_ids, framework, port)
-    launch["route"] = _route_plan(store, engine_id, model_ids, framework, principal, port, launch["visibility"])
+    launch["route"] = _route_plan(store, engine_id, model_ids, framework, route_owner, port, launch["visibility"])
     name = _unique_name(store, principal, wanted, port=port)
     target = _target(port)
     fingerprint = sha256(f"{engine_id}|{target['url']}|{name}".encode()).hexdigest()
@@ -257,8 +265,8 @@ def attach_observed(
         owner_uid=int(uid),
         name=name,
         target=target,
-        protocol="openai",
-        status="active",
+        protocol="openai_compatible",
+        status="registered",
         health={"state": "unknown", "detail": "observed by the daemon"},
         source=SOURCE_AUTO,
         created_at=now,
@@ -267,6 +275,7 @@ def attach_observed(
         mode=ENGINE_MODE_USER,
         state=ENGINE_RUNTIME_ATTACHED,
         launch=launch,
+        tags=(f"framework:{framework}",) if framework else (),
     )
     store.insert_engine(engine, idempotency_key=None, fingerprint=fingerprint)
     return engine

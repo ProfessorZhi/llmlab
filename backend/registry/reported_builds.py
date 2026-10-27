@@ -33,6 +33,7 @@ from typing import Iterable
 from .models import RUNTIME_BUILD_PRESENT, RuntimeBuild
 from .reported_models import ACCOUNT_OWNER_UID
 from .store import Store
+from .discovery.types import FRAMEWORK_FORMATS
 
 #: 代理认出引擎的三种方式。与 ``agent_reports._FOUND_AS`` 是同一组值；这里再列
 #: 一遍是因为本模块自己也要挡住形状不对的条目（它不该信任上游一定洗过）。
@@ -126,6 +127,7 @@ def adopt_reported_builds(
                 version=version if version is not None else existing.version,
                 found_as=found_as if found_as is not None else existing.found_as,
                 env=env if env is not None else existing.env,
+                formats=existing.formats or FRAMEWORK_FORMATS.get(framework, ()),
                 fingerprint=fingerprint,
                 state=RUNTIME_BUILD_PRESENT,
                 last_seen_at=now,
@@ -144,7 +146,7 @@ def adopt_reported_builds(
             version=version,
             fingerprint=fingerprint,
             flags={},
-            formats=(),
+            formats=FRAMEWORK_FORMATS.get(framework, ()),
             found_as=found_as,
             env=env,
             state=RUNTIME_BUILD_PRESENT,

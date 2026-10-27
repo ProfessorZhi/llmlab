@@ -447,5 +447,78 @@ class AutoModelTests(RunnerTestCase):
         self.assertEqual([row.id for row in self.models_of()], before)
 
 
+class ClaimingDirectory(PrincipalDirectory):
+    """静态目录 + 一条「这个 Linux 用户被哪个平台账户认领」。
+
+    只覆盖扫描路径用到的那一个方法。``AccountAwareDirectory`` 的真实实现（唯一
+    匹配、停用不认领、两人争抢同一个名字时返回 ``None``）另有覆盖：
+    ``tests/bff/test_account_directory_by_uid.py``。
+    """
+
+    def __init__(self, principals, claims: dict[str, str | None]) -> None:
+        super().__init__(principals)
+        self._claims = claims
+
+    def account_for_linux_user(self, linux_user: str):
+        account = self._claims.get(linux_user)
+        if account is None:
+            return None
+        return Principal(principal=account, linux_user=linux_user, uid=None, kind="account")
+
+
+class AttachOwnershipTests(RunnerTestCase):
+    """扫描接入的服务必须归到「认领了这个 Linux 用户」的账户名下。
+
+    两条自动接入路径（端口扫描、代理上报）如果给出不同形状的归属主体，同一台
+    机器上的服务就会因为「怎么被发现的」不同而分属两个名字，而控制台判断
+    「是不是我的」是主体字符串全等。
+    """
+
+    def runner_claiming(self, claims: dict[str, str | None]) -> IngestRunner:
+        return IngestRunner(
+            store=self.store,
+            directory=ClaimingDirectory(
+                [Principal("alice", "alice", ALICE_UID), Principal("bob", "bob", BOB_UID)],
+                claims,
+            ),
+            table=self.table,
+            fetch=self.fetch,
+        )
+
+    def test_the_owner_is_the_account_that_claims_the_linux_user(self):
+        runner = self.runner_claiming({"alice": "account:319ff153f9792ed5"})
+        self.serve()
+
+        runner.tick()
+
+        engine = self.engine()
+        self.assertEqual(engine.owner_principal, "account:319ff153f9792ed5")
+        # uid 仍然是事实记录：谁在跑这个进程，与谁拥有这一行，是两件事。
+        self.assertEqual(engine.owner_uid, ALICE_UID)
+
+    def test_an_unclaimed_linux_user_stays_with_the_linux_principal(self):
+        runner = self.runner_claiming({})
+        self.serve()
+
+        runner.tick()
+
+        self.assertEqual(self.engine().owner_principal, "alice")
+
+    def test_a_collided_route_name_uses_the_linux_user_not_the_account_id(self):
+        """路由名会被拼进对外契约里，``qwen3-4b@account:319f…`` 没法给人看。"""
+
+        runner = self.runner_claiming({"alice": "account:319ff153f9792ed5"})
+        set_default_visibility(self.store, ALL)
+        self.serve(port=8013)
+        self.serve(port=8014)
+
+        runner.tick()
+
+        names = sorted(
+            engine.launch["route"]["name"] for engine in observed_engines(self.store)
+        )
+        self.assertEqual(names, ["qwen3-4b", "qwen3-4b@alice"])
+
+
 if __name__ == "__main__":
     unittest.main()

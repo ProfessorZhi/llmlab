@@ -79,7 +79,7 @@ _ITEM_IDENTITY_FIELDS = frozenset(FORBIDDEN_IDENTITY_FIELDS) | frozenset(
 _HOME_PATH = re.compile(r"^/(?:home|data/home)/([^/]+)(?:/|$)")
 
 _FOUND_AS = frozenset({"executable", "python_package", "source_tree"})
-_MODEL_FORMATS = frozenset({"hf", "gguf"})
+_MODEL_FORMATS = frozenset({"hf", "gguf", "diffusers"})
 _ENGINE_IDS = frozenset(engine for engine, *_ in KNOWN_ENGINES)
 
 #: 条目的拒绝理由（稳定的契约 token，前端与审计按它分支）。
@@ -150,6 +150,7 @@ class AgentReport:
     models: tuple[dict, ...]
     problems: tuple[str, ...]
     rejected: dict[str, dict[str, int]]
+    scan_roots: tuple[str, ...] = ()
 
     def counts(self) -> dict[str, int]:
         return {
@@ -166,6 +167,7 @@ class AgentReport:
             "report_version": self.report_version,
             "scanned_at": self.scanned_at,
             "full": self.full,
+            "scan_roots": list(self.scan_roots),
             "engines": list(self.engines),
             "installed_engines": list(self.installed_engines),
             "models": list(self.models),
@@ -279,6 +281,8 @@ class AgentReportValidator:
             models=tuple(models),
             problems=tuple(_finalize_problems(ctx.problems)),
             rejected=ctx.rejected,
+            scan_roots=tuple(os.path.normpath(p) for p in _strings(payload.get("scan_roots"))[:16]
+                             if os.path.isabs(p) and "\x00" not in p and len(p) <= MAX_PATH_LENGTH),
         )
 
     # -- 条目 -------------------------------------------------------------
@@ -423,6 +427,7 @@ class AgentReportValidator:
                     "suggested_name": _bounded_text(
                         item.get("suggested_name"), MAX_NAME_LENGTH
                     ),
+                    **_model_metadata(item),
                 }
             )
         if len(items) > MAX_MODELS:
@@ -510,6 +515,36 @@ class AgentReportValidator:
         if parsed.tzinfo is None:
             raise InvalidRequest("scanned_at must carry a timezone")
         return parsed.isoformat()
+
+
+def _model_metadata(item: dict) -> dict:
+    """Untrusted observations, never used to establish ownership."""
+    result = {}
+    fingerprint = item.get("fingerprint")
+    if isinstance(fingerprint, str) and re.fullmatch(r"[0-9]{1,20}:[a-f0-9]{64}", fingerprint):
+        result["fingerprint"] = fingerprint
+    for key in ("device", "inode"):
+        value = item.get(key)
+        if type(value) is int and 0 <= value < 2**63:
+            result[key] = value
+    value = item.get("mtime")
+    if type(value) in (int, float) and 0 <= value < 10**12:
+        result["mtime"] = value
+    raw = item.get("facts")
+    if isinstance(raw, dict):
+        facts = {}
+        for key in ("architecture", "name", "file_type", "task", "format"):
+            value = _bounded_text(raw.get(key), 128)
+            if value is not None:
+                facts[key] = value
+        for key in ("context_length", "block_count", "embedding_length", "head_count", "head_count_kv", "expert_count"):
+            value = raw.get(key)
+            if type(value) is int and 0 <= value < 2**40:
+                facts[key] = value
+        if type(raw.get("vision")) is bool:
+            facts["vision"] = raw["vision"]
+        result["facts"] = facts
+    return result
 
 
 def _as_list(raw: object, name: str) -> list:

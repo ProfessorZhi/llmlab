@@ -282,7 +282,7 @@ class AgentChannel:
                         },
                     })
                     continue
-                if kind != "report":
+                if kind not in ("report", "tasks", "task_result"):
                     _send(connection, _error(
                         "agent.protocol_error", f"unknown message type: {kind!r}"
                     ))
@@ -292,7 +292,12 @@ class AgentChannel:
                         "agent.hello_required", "send hello first"
                     ))
                     return
-                self._handle_report(connection, requester, message)
+                if kind == "report":
+                    self._handle_report(connection, requester, message)
+                elif kind == "tasks":
+                    self._handle_tasks(connection, requester, message)
+                else:
+                    self._handle_task_result(connection, requester, message)
         finally:
             with self._lock:
                 self._active = max(0, self._active - 1)
@@ -310,15 +315,73 @@ class AgentChannel:
         try:
             report = self.service.report_agent(requester, payload)
         except RegistryError as exc:
-            message_text = exc.args[0] if exc.args else exc.contract_code
-            # 存储层的话术里有路径与表名，不发回客户端（与 HTTP 那条路一致）。
-            if not getattr(exc, "expose_message", True):
-                message_text = "the report could not be stored"
-            _send(connection, _error(exc.contract_code, str(message_text)))
+            _send_registry_error(connection, exc, fallback="the report could not be stored")
             return
         with self._lock:
             self.status.reports += 1
         _send(connection, {"ok": True, "data": report.response()})
+
+    def _handle_tasks(
+        self, connection: socket.socket, requester: RequesterContext, message: dict
+    ) -> None:
+        """代理来领任务。身份仍是 ``SO_PEERCRED``：服务层只按 requester.uid 领取。"""
+
+        extra = set(message) - {"type", "limit"}
+        if extra:
+            _send(connection, _error(
+                "agent.protocol_error",
+                f"unexpected field(s) in tasks: {', '.join(sorted(extra))}",
+            ))
+            return
+        # 缺省值交给服务层；非法 limit 由服务层转成契约错误。
+        kwargs = {} if "limit" not in message else {"limit": message["limit"]}
+        try:
+            tasks = self.service.claim_agent_tasks(requester, **kwargs)
+        except RegistryError as exc:
+            _send_registry_error(connection, exc, fallback="the task could not be claimed")
+            return
+        _send(connection, {
+            "ok": True,
+            "data": {
+                "tasks": [task.to_dict() for task in tasks],
+                "count": len(tasks),
+            },
+        })
+
+    def _handle_task_result(
+        self, connection: socket.socket, requester: RequesterContext, message: dict
+    ) -> None:
+        """代理回报自己领过的任务结果。``queued`` 不允许被直接写成 ``done``。"""
+
+        extra = set(message) - {"type", "task_id", "state", "result"}
+        if extra:
+            _send(connection, _error(
+                "agent.protocol_error",
+                f"unexpected field(s) in task_result: {', '.join(sorted(extra))}",
+            ))
+            return
+        try:
+            task = self.service.finish_agent_task(
+                requester,
+                message.get("task_id"),
+                state=message.get("state"),
+                result=message.get("result"),
+            )
+        except RegistryError as exc:
+            _send_registry_error(connection, exc, fallback="the task result could not be stored")
+            return
+        _send(connection, {"ok": True, "data": {"task": task.to_dict()}})
+
+
+def _send_registry_error(
+    connection: socket.socket, exc: RegistryError, *, fallback: str
+) -> None:
+    """把 Registry 契约错误发回客户端；存储层话术不泄漏路径与表名。"""
+
+    message_text = exc.args[0] if exc.args else exc.contract_code
+    if not getattr(exc, "expose_message", True):
+        message_text = fallback
+    _send(connection, _error(exc.contract_code, str(message_text)))
 
 
 def _send(connection: socket.socket, message: dict) -> None:

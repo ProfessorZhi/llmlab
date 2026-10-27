@@ -19,6 +19,7 @@ import json
 import os
 import re
 import socket
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -42,6 +43,21 @@ DEFAULT_TIMEOUT = 15.0
 _TRUNCATION_PREFIXES = ("model_walk_truncated:", "env_walk_truncated:", "model_candidates_capped:")
 
 _AGENT_ID = re.compile(r"[^A-Za-z0-9._-]+")
+
+#: 与 ``backend.registry.registry`` 同一条白名单：单元名里不允许路径分隔符或空白。
+_UNIT_RE = re.compile(r"^[A-Za-z0-9_.@-]+$")
+
+#: 平台能下发的动作。代理只把这三个词映射到 ``systemctl --user``。
+TASK_KINDS = ("start", "stop", "restart")
+
+#: 一轮最多领多少条任务，与服务端默认值一致。
+DEFAULT_TASK_LIMIT = 8
+
+#: 阻塞命令的最长执行时间。超过就回报 failed，而不是让 watch 循环卡住。
+DEFAULT_TASK_TIMEOUT = 120.0
+
+#: 回传的 stdout/stderr 截断长度。任务是「控制」不是「取日志」，不该搬走整份输出。
+MAX_TASK_OUTPUT = 4096
 
 
 def default_agent_id() -> str:
@@ -95,8 +111,15 @@ def collect_report(
     )
 
     engines, engine_problem = scanner.engines(registered_targets={})
-    models, model_problems = scanner.models(registered_paths={})
+    models, model_problems = scanner.models(registered_paths={}) if discovery is not None else ([], [])
     installed, installed_problems = scanner.installed_engines()
+
+    scanned_roots = roots if roots is not None else default_roots()
+    model_payloads = None
+    extra_builds = []
+    if discovery is None:
+        from .inventory import scan_models
+        model_payloads, extra_builds, model_problems = scan_models(scanned_roots)
 
     problems: list[str] = []
     if engine_problem:
@@ -110,6 +133,7 @@ def collect_report(
         "agent_id": agent_id or default_agent_id(),
         "scanned_at": (scanned_at or utc_now()).isoformat(),
         "full": full,
+        "scan_roots": [str(Path(p).absolute()) for p in scanned_roots],
         # 只发「是什么」，不发「归谁」：后者由内核与服务端写死。
         "engines": [
             {
@@ -130,8 +154,8 @@ def collect_report(
                 "env": item.env,
             }
             for item in installed
-        ],
-        "models": [
+        ] + extra_builds,
+        "models": model_payloads if model_payloads is not None else [
             {
                 "path": item.path,
                 "format": item.format,
@@ -168,47 +192,56 @@ def _read_reply(reader) -> dict:
     return reply
 
 
-def send_report(
-    payload: dict, *, socket_path: str = DEFAULT_SOCKET, timeout: float = DEFAULT_TIMEOUT
-) -> dict:
-    """把一份 payload 发出去，返回服务端回执里的 ``data``。
-
-    协议：一行 hello，一行 report。每行一个 JSON 对象，回复同理。
-    """
+def _connect(socket_path: str, timeout: float) -> socket.socket:
+    """连上本机代理通道。错误话术与 ``send_report`` 一直以来的那几句相同。"""
 
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     connection.settimeout(timeout)
     try:
-        try:
-            connection.connect(socket_path)
-        except FileNotFoundError:
-            raise CliError(
-                EXIT_TRANSPORT,
-                f"no agent socket at {socket_path}",
-                hint=(
-                    "平台侧还没开这条通道：需要运维执行装机脚本建立 /run/llmlab "
-                    "并重启服务；然后用 --socket 指向实际路径"
-                ),
-            ) from None
-        except (ConnectionRefusedError, PermissionError, OSError) as exc:
-            raise CliError(
-                EXIT_TRANSPORT,
-                f"cannot connect to the agent socket at {socket_path}: {exc.strerror or exc}",
-            ) from None
+        connection.connect(socket_path)
+    except FileNotFoundError:
+        connection.close()
+        raise CliError(
+            EXIT_TRANSPORT,
+            f"no agent socket at {socket_path}",
+            hint=(
+                "平台侧还没开这条通道：需要运维执行装机脚本建立 /run/llmlab "
+                "并重启服务；然后用 --socket 指向实际路径"
+            ),
+        ) from None
+    except (ConnectionRefusedError, PermissionError, OSError) as exc:
+        connection.close()
+        raise CliError(
+            EXIT_TRANSPORT,
+            f"cannot connect to the agent socket at {socket_path}: {exc.strerror or exc}",
+        ) from None
+    return connection
 
-        reader = connection.makefile("rb")
-        try:
-            connection.sendall(_encode({"type": "hello", "protocol_version": 1}))
-            hello = _read_reply(reader)
-            if not hello.get("ok"):
-                raise _server_error(hello)
-            connection.sendall(_encode({"type": "report", **payload}))
+
+def _exchange(
+    messages: list[dict], *, socket_path: str, timeout: float
+) -> dict:
+    """hello 之后依次发消息并读回执，返回**最后一条**回执里的 ``data``。
+
+    每一行都是一个 JSON 对象；错误按 :func:`_server_error` 的同一套语义转成
+    ``CliError``。这条通道没有凭据 —— 身份来自内核。
+    """
+
+    connection = _connect(socket_path, timeout)
+    reader = connection.makefile("rb")
+    try:
+        connection.sendall(_encode({"type": "hello", "protocol_version": 1}))
+        hello = _read_reply(reader)
+        if not hello.get("ok"):
+            raise _server_error(hello)
+        reply: dict = {}
+        for message in messages:
+            connection.sendall(_encode(message))
             reply = _read_reply(reader)
-        except socket.timeout:
-            raise CliError(EXIT_TRANSPORT, "the agent channel did not answer in time") from None
-        finally:
-            reader.close()
+    except socket.timeout:
+        raise CliError(EXIT_TRANSPORT, "the agent channel did not answer in time") from None
     finally:
+        reader.close()
         connection.close()
 
     if not reply.get("ok"):
@@ -217,6 +250,252 @@ def send_report(
     if not isinstance(data, dict):
         raise CliError(EXIT_TRANSPORT, "the agent channel replied ok but without a receipt")
     return data
+
+
+def send_report(
+    payload: dict, *, socket_path: str = DEFAULT_SOCKET, timeout: float = DEFAULT_TIMEOUT
+) -> dict:
+    """把一份 payload 发出去，返回服务端回执里的 ``data``。
+
+    协议：一行 hello，一行 report。每行一个 JSON 对象，回复同理。
+    """
+
+    return _exchange([{"type": "report", **payload}], socket_path=socket_path, timeout=timeout)
+
+
+def claim_tasks(
+    *,
+    socket_path: str = DEFAULT_SOCKET,
+    limit: int = DEFAULT_TASK_LIMIT,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> list[dict]:
+    """领一轮任务。返回的条目就是服务端的 ``AgentTask.to_dict()``。
+
+    服务端按内核给出的 uid 领取，所以这里**没有**任何 uid/owner 字段可填。
+    """
+
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        raise CliError(EXIT_USAGE, "task limit must be a positive integer")
+    data = _exchange(
+        [{"type": "tasks", "limit": int(limit)}],
+        socket_path=socket_path,
+        timeout=timeout,
+    )
+    tasks = data.get("tasks")
+    if not isinstance(tasks, list):
+        raise CliError(EXIT_TRANSPORT, "the agent channel replied without a task list")
+    return [task for task in tasks if isinstance(task, dict)]
+
+
+def send_task_result(
+    task_id: str,
+    state: str,
+    result: dict | None,
+    *,
+    socket_path: str = DEFAULT_SOCKET,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> dict:
+    """回报一条自己领过的任务。身份仍是 socket 的对端 uid。"""
+
+    if not isinstance(task_id, str) or not task_id:
+        raise CliError(EXIT_USAGE, "task_id must be a non-empty string")
+    if state not in ("done", "failed"):
+        raise CliError(EXIT_USAGE, "task state must be done or failed")
+    message: dict = {"type": "task_result", "task_id": task_id, "state": state}
+    if result is not None:
+        message["result"] = result
+    return _exchange([message], socket_path=socket_path, timeout=timeout)
+
+
+# -- 任务执行 ---------------------------------------------------------------
+
+
+def valid_unit_name(value: object) -> bool:
+    """systemd 单元名白名单：只允许 ``[A-Za-z0-9_.@-]``。
+
+    路径分隔符与空格在这里被拒绝，所以一个 unit 永远不可能变成第二个参数、
+    一条路径，或一段 shell。
+    """
+
+    return (
+        isinstance(value, str)
+        and bool(_UNIT_RE.fullmatch(value))
+        # ``systemctl --user start -x`` 会把 ``-x`` 当 option；白名单允许 ``-`` 开头，
+        # 所以在这里再挡一层。
+        and not value.startswith("-")
+    )
+
+
+def _task_payload(task: object) -> dict:
+    """任务可能是 ``AgentTask``，也可能是它 ``to_dict()`` 之后的 JSON。"""
+
+    payload = getattr(task, "payload", None)
+    if payload is None and isinstance(task, dict):
+        payload = task.get("payload")
+    return dict(payload) if isinstance(payload, dict) else {}
+
+
+def _task_kind(task: object, payload: dict) -> object:
+    kind = getattr(task, "kind", None)
+    if kind is None and isinstance(task, dict):
+        kind = task.get("kind")
+    return kind if kind is not None else payload.get("kind")
+
+
+def _validated_argv(value: object) -> list[str]:
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple)):
+        raise ValueError("argv 必须是字符串列表")
+    if not value:
+        raise ValueError("argv 不能为空")
+    argv: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item:
+            raise ValueError("argv 的每一项都必须是非空字符串")
+        if "\x00" in item:
+            raise ValueError("argv 不能包含 NUL 字节")
+        argv.append(item)
+    return argv
+
+
+def _validate_default_command(argv: list[str]) -> None:
+    """生产执行器只认两种形状；其它一律拒绝，**不**执行。
+
+    * ``systemctl --user start|stop|restart <unit>``
+    * ``systemd-run --user --unit <name> ...``
+
+    这里检查的是形状，不是内容：``shell=False`` 保证参数不会被再解释一次。
+    """
+
+    if not argv or not all(isinstance(item, str) and item for item in argv):
+        raise ValueError("命令必须是 argv 字符串列表")
+    if argv[0] == "systemctl":
+        if (
+            len(argv) != 4
+            or argv[1] != "--user"
+            or argv[2] not in TASK_KINDS
+            or not valid_unit_name(argv[3])
+        ):
+            raise ValueError(
+                "systemctl 只允许 `systemctl --user start|stop|restart <unit>`"
+            )
+        return
+    if argv[0] == "systemd-run":
+        if (
+            len(argv) < 5
+            or argv[1] != "--user"
+            or argv[2] != "--unit"
+            or not valid_unit_name(argv[3])
+        ):
+            raise ValueError("systemd-run 只允许 `systemd-run --user --unit <unit> ...`")
+        return
+    raise ValueError("只允许 systemctl --user 或 systemd-run --user 两种形状")
+
+
+def _truncate(text: object) -> str:
+    if not isinstance(text, str):
+        return ""
+    if len(text) <= MAX_TASK_OUTPUT:
+        return text
+    return text[:MAX_TASK_OUTPUT] + "\n…[truncated]"
+
+
+def default_runner(argv: list[str]) -> dict:
+    """真实的本地执行器：``subprocess.run(argv, shell=False)``。
+
+    只接受 :func:`_validate_default_command` 认可的两组形状。测试里应注入
+    假 runner，而不是让这段代码真的去调用 ``systemctl``。
+    """
+
+    command = list(argv)
+    _validate_default_command(command)
+    completed = subprocess.run(
+        command,
+        shell=False,
+        capture_output=True,
+        text=True,
+        timeout=DEFAULT_TASK_TIMEOUT,
+    )
+    return {
+        "argv": command,
+        "returncode": completed.returncode,
+        "stdout": _truncate(completed.stdout),
+        "stderr": _truncate(completed.stderr),
+    }
+
+
+def _outcome(command: list[str], raw: object) -> dict:
+    """把 runner 的返回值归一成 ``{"state", "result"}``。"""
+
+    if isinstance(raw, dict):
+        result = dict(raw)
+        returncode = result.get("returncode", 0)
+    elif isinstance(raw, int) and not isinstance(raw, bool):
+        returncode = raw
+        result = {}
+    else:
+        returncode = getattr(raw, "returncode", None)
+        result = {
+            "stdout": _truncate(getattr(raw, "stdout", None)),
+            "stderr": _truncate(getattr(raw, "stderr", None)),
+        }
+    if not isinstance(returncode, int) or isinstance(returncode, bool):
+        raise TypeError("runner 必须返回 returncode（或带 returncode 的对象）")
+    result.setdefault("argv", list(command))
+    result["returncode"] = returncode
+    return {"state": "done" if returncode == 0 else "failed", "result": result}
+
+
+def _failed(message: str) -> dict:
+    return {"state": "failed", "result": {"error": message}}
+
+
+def run_task(task: object, *, runner=None) -> dict:
+    """执行一条任务，返回可直接回报的 ``{"state", "result"}``。
+
+    诚实优先：payload 里既没有 ``unit`` 也没有 ``argv`` 时不猜、不假装成功，
+    直接回报 ``failed: 这一行没有可执行入口``。单元名不合法同样拒绝执行。
+
+    ``runner`` 可注入：签名是 ``runner(argv: list[str]) -> mapping | int``。
+    生产缺省是 :func:`default_runner`，只接受 systemctl/systemd-run 两种形状。
+    """
+
+    payload = _task_payload(task)
+    kind = _task_kind(task, payload)
+    unit = payload.get("unit")
+    argv = payload.get("argv")
+
+    if argv is None and unit is None:
+        return _failed("这一行没有可执行入口")
+    if unit is not None and not valid_unit_name(unit):
+        return _failed(f"unit 名不合法: {unit!r}")
+
+    if argv is not None:
+        try:
+            command = _validated_argv(argv)
+        except ValueError as exc:
+            return _failed(str(exc))
+    else:
+        if kind not in TASK_KINDS:
+            return _failed(f"未知任务类型: {kind!r}")
+        command = ["systemctl", "--user", kind, unit]
+
+    execute = runner if runner is not None else default_runner
+    try:
+        raw = execute(command)
+    except subprocess.TimeoutExpired:
+        return _failed(f"命令超时（超过 {DEFAULT_TASK_TIMEOUT:g} 秒）")
+    except ValueError as exc:
+        # 生产执行器的形状校验失败：拒绝执行，并把原因如实回报。
+        return _failed(str(exc))
+    except OSError as exc:
+        return _failed(f"无法执行: {exc}")
+    except Exception as exc:  # noqa: BLE001 - 执行器的意外失败也要回报而不是静默
+        return _failed(f"执行失败: {type(exc).__name__}")
+
+    try:
+        return _outcome(command, raw)
+    except TypeError as exc:
+        return _failed(str(exc))
 
 
 def _server_error(reply: dict) -> CliError:
@@ -291,11 +570,18 @@ def warn(message: str) -> None:
 
 __all__ = [
     "DEFAULT_SOCKET",
+    "DEFAULT_TASK_LIMIT",
+    "DEFAULT_TASK_TIMEOUT",
     "MAX_MESSAGE_BYTES",
+    "claim_tasks",
     "collect_report",
     "default_agent_id",
     "default_roots",
+    "default_runner",
     "human_summary",
     "report_once",
+    "run_task",
     "send_report",
+    "send_task_result",
+    "valid_unit_name",
 ]

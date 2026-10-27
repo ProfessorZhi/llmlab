@@ -126,13 +126,25 @@ class IngestRunner:
         for action in round_result.actions:
             service = action.service
             if action.kind == ATTACH:
-                principal = self.directory.by_uid(service.uid)
-                if principal is None:  # 目录在两轮之间变了；下一轮会 IGNORE 掉它
+                listener = self.directory.by_uid(service.uid)
+                if listener is None:  # 目录在两轮之间变了；下一轮会 IGNORE 掉它
                     continue
+                # 归属主体必须与代理上报路径（``registry.report_agent`` →
+                # ``_account_for_linux_user``）给出同一个答案：有人认领这个 Linux
+                # 用户的平台账户，就记在账户名下，否则才退回 Linux 主体。
+                #
+                # 这两条路径如果给出不同形状的主体，同一台机器上的服务就会因为
+                # 「怎么被发现的」不同而分属两个名字。控制台判断「是不是我的」用的是
+                # 主体字符串全等（``backend/bff/ops.py`` 的 ``owner_is_self``、
+                # ``backend/registry/authz.py`` 的可见性），而扫描路径拿到的是
+                # ``linux:<host>:<uid>``，会话主体是 ``account:<id>`` —— 永远不相等。
+                # 结果是本人看不见自己的服务，更发布不出去。
+                owner = self.directory.account_for_linux_user(listener.linux_user) or listener
                 attach_observed(
                     self.store,
                     uid=service.uid,
-                    principal=principal.principal,
+                    principal=owner.principal,
+                    owner_label=listener.linux_user,
                     port=service.port,
                     framework=service.framework,
                     model_ids=service.model_ids,

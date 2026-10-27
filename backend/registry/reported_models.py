@@ -17,7 +17,7 @@
 
 去重规则（同一 owner 下）：
 
-1. 同名 / 同路径的行已经存在 → 沿用那一行，**不覆盖**；
+1. 同路径、可信内容指纹或 inode 匹配 → 沿用身份并刷新位置；
 2. 否则新建一行 ``source=auto``。
 
 第 1 条里的「同名」涵盖引擎自报的一行（它没有路径）：那种行是「这台机器在服务
@@ -41,6 +41,7 @@ from .models import (
     MODEL_REGISTERED,
     SOURCE_AUTO,
     Model,
+    ModelLocation,
     validate_name,
 )
 from .store import Store
@@ -115,6 +116,9 @@ def adopt_reported_models(
     owner: str,
     models: Iterable[dict],
     now: datetime,
+    uid: int = -1,
+    full: bool = False,
+    scan_roots: tuple[str, ...] = (),
 ) -> Adoption:
     """把一份上报里的模型条目落成 ``models`` 行。
 
@@ -129,69 +133,96 @@ def adopt_reported_models(
         return Adoption()
 
     rows = [item for item in store.list_models() if item.owner_principal == owner]
+    by_id = {row.id: row for row in rows}
     by_path = {item.weight_path: item.id for item in rows if item.weight_path}
     by_name = {item.name: item for item in rows}
-
-    for entry in models:
-        if not isinstance(entry, dict):
-            continue
+    by_fingerprint = {row.facts.get("discovery_fingerprint"): row.id for row in rows
+                      if row.facts.get("discovery_fingerprint")}
+    by_inode = {}
+    for row in rows:
+        for loc in store.locations_for(row.id):
+            by_path[loc.path] = row.id
+            if loc.uid == uid and loc.device is not None and loc.inode is not None:
+                by_inode[(loc.device, loc.inode)] = row.id
+    entries = [e for e in models if isinstance(e, dict)]
+    seen_paths = {e.get("path") for e in entries if isinstance(e.get("path"), str)}
+    for entry in entries:
         path = entry.get("path")
-        if (
-            not isinstance(path, str)
-            or not path.startswith("/")
-            or "\x00" in path
-            or path in adopted
-        ):
+        if not isinstance(path, str) or not path.startswith("/") or "\x00" in path or path in adopted:
             continue
-
-        found = by_path.get(path)
-        if found is not None:
-            adopted[path] = found
-            continue
-
         name = reported_name(path, entry.get("suggested_name"))
         if name is None:
             continue
+        fingerprint = entry.get("fingerprint")
+        if not isinstance(fingerprint, str) or not re.fullmatch(r"[0-9]{1,20}:[a-f0-9]{64}", fingerprint):
+            fingerprint = None
+        found = by_path.get(path)
+        if found is None and fingerprint:
+            found = by_fingerprint.get(fingerprint)
+        if found is None and entry.get("device") is not None and entry.get("inode") is not None:
+            candidate = by_inode.get((entry["device"], entry["inode"]))
+            # Reused inode with different content is a replacement, not a move.
+            if candidate and (not fingerprint or not by_id[candidate].facts.get("discovery_fingerprint")
+                              or by_id[candidate].facts["discovery_fingerprint"] == fingerprint):
+                found = candidate
         same_name = by_name.get(name)
-        if same_name is not None:
-            # 只补空，不覆盖：这个名字已经有一行了，用户看到的就是那一行。
-            adopted[path] = same_name.id
-            continue
-
+        if found is None and same_name is not None and not same_name.weight_path:
+            found = same_name.id
+        facts = dict(entry.get("facts") or {})
+        if fingerprint:
+            facts["discovery_fingerprint"] = fingerprint
+        task = facts.get("task") or entry.get("model_type")
+        if task not in {"chat", "vision", "decision", "embedding", "rerank", "image", "video"}:
+            task = "unknown"
         fmt = entry.get("format")
-        model = Model(
-            id=_new_model_id(),
-            owner_principal=owner,
-            owner_uid=ACCOUNT_OWNER_UID,
-            name=name,
-            weight_path=path,
-            weight_path_sha256=weight_path_fingerprint(path),
-            format=fmt if isinstance(fmt, str) and fmt else None,
-            parameter_count=None,
-            status=MODEL_REGISTERED,
-            health=unknown(AUTO_REPORTED_MODEL_HEALTH),
-            source=SOURCE_AUTO,
-            created_at=now,
-            updated_at=now,
-            last_seen_at=now,
-            description=AUTO_REPORTED_MODEL_DESCRIPTION,
-            size_bytes=_size(entry.get("size_bytes")),
-        )
-        try:
-            store.insert_model(model, idempotency_key=None, fingerprint=_fingerprint(name, path))
-        except Conflict:
-            # 两份上报同一轮里撞上唯一索引：别人刚建好这一行，读回来即是结果。
-            raced = store.model_by_owner_name(owner, name)
-            if raced is None:
-                raise
-            adopted[path] = raced.id
-            by_name[name] = raced
-            by_path[path] = raced.id
-            continue
-        adopted[path] = model.id
-        created.append(model.id)
-        by_name[name] = model
-        by_path[path] = model.id
+        if found is None:
+            if name in by_name:
+                # Same display name is not evidence that two files are identical.
+                suffix = sha256(path.encode()).hexdigest()[:8]
+                name = name[:MAX_NAME_LENGTH - 9] + "-" + suffix
+            model = Model(
+                id=_new_model_id(), owner_principal=owner, owner_uid=ACCOUNT_OWNER_UID,
+                name=name, weight_path=path, weight_path_sha256=weight_path_fingerprint(path),
+                format=fmt, parameter_count=None, status=MODEL_REGISTERED,
+                health=unknown(AUTO_REPORTED_MODEL_HEALTH), source=SOURCE_AUTO,
+                created_at=now, updated_at=now, last_seen_at=now,
+                description=AUTO_REPORTED_MODEL_DESCRIPTION, size_bytes=_size(entry.get("size_bytes")),
+                kind=fmt, task=task, facts=facts,
+            )
+            try:
+                store.insert_model(model, idempotency_key=None, fingerprint=_fingerprint(name, path))
+            except Conflict:
+                model = store.model_by_owner_name(owner, name)
+                if model is None:
+                    raise
+            else:
+                created.append(model.id)
+            found = model.id
+            by_name[name] = model
+            by_id[found] = model
+        else:
+            model = by_id[found]
+            facts = {**model.facts, **facts}
+            # Prefer a still-present primary location; copies do not randomly change it.
+            primary = model.weight_path if model.weight_path in seen_paths else path
+            store.refresh_discovered_model(found, path=primary, path_hash=weight_path_fingerprint(primary),
+                                           kind=fmt, task=task, facts=facts,
+                                           size_bytes=_size(entry.get("size_bytes")), now=now)
+            by_id[found] = store.model_by_id(found)
+        store.upsert_location(ModelLocation(model_id=found, path=path, uid=uid,
+                                            device=entry.get("device"), inode=entry.get("inode"),
+                                            mtime=entry.get("mtime"), last_seen_at=now))
+        adopted[path] = found
+        by_path[path] = found
+        if fingerprint:
+            by_fingerprint[fingerprint] = found
+    if full and scan_roots:
+        for model in by_id.values():
+            locations = store.locations_for(model.id)
+            keep = [loc.path for loc in locations if loc.path in seen_paths or loc.uid != uid
+                    or not any(loc.path == root or loc.path.startswith(root.rstrip("/") + "/")
+                               for root in scan_roots)]
+            store.mark_locations_missing(model.id, keep)
     return Adoption(adopted=adopted, created=tuple(created))
 
 
