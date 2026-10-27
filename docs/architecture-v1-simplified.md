@@ -71,7 +71,19 @@ sudo bash deploy/inventory/update-runtime.sh
 * **「已下发」不是「已启动」。** 202 + `queued` 只说明任务进了队列；页面在拿到 `done` 之前不说「已启动」，等不到结果就说「确认你的代理在跑」，不把没有结论说成结论。
 * **归属是字符串全等，所以两侧必须是同一个主体。** 任务的桶由 `engine.owner_uid`（登记时**观测到**的监听 uid）决定，写侧见 `RegistryService._agent_uid_for`；读侧见 `_task_uids_for` —— 平台账户没有 uid，只能把目录里的桶看一遍，但每条仍要求 `requested_by` 与调用者全等。对不上就 fail closed：没有可用的本人代理时返回 403，不猜一个 uid 投出去。
 
-本机现状：BFF 已经在 `/run/llmlab/agent.sock` 上监听，但**还没有常驻的 `llmlab agent --watch`**，所以点击之后会停在「已下发给你的代理，等待领取」。这是实情，不是失败。
+实测（2026-10-27，一次性临时环境：临时 state-dir、临时端口、假监听进程，不碰运行中的 BFF 与 systemd）：
+
+| 步骤 | 实测结果 |
+|---|---|
+| 登记 | 所有权 prover 读到监听进程 `uid=1000 linux_user=fjd`，登记行 `owner_uid=1000`，所有者是平台账户 |
+| 下发 | **202**，`state="queued"`，`result=null`，`payload` 只有 `kind`/`engine_id` |
+| 领取 | 代理以 uid 1000 连 socket，任务转 `running` |
+| 回报 | `failed`，`result={"error":"这一行没有可执行入口"}` —— 故意不给 `unit` |
+| 越权读 | 另一个账户读同一条 → **404** `registry.not_found` |
+
+`running` 窗口在「没有可执行入口」这条路上只有毫秒级，HTTP 轮询通常只抓到 `queued` 和 `failed`；上面的 `running` 是靠测试侧给回报连接加了 2 秒延迟读到的，不改变任务语义。
+
+本机现状：BFF 已经在 `/run/llmlab/agent.sock` 上监听，但**还没有常驻的 `llmlab agent --watch`**，也没有走过真正的 `systemctl --user` 起停，所以点击之后会停在「已下发给你的代理，等待领取」。这是实情，不是失败。
 
 **日期**：2026-10-17 · **状态**：提案（Draft），待评审 · **适用**：单台 Dell Precision 5820（RTX A6000 48 GB）、多 Linux 用户
 
