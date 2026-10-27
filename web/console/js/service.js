@@ -3,7 +3,7 @@
 import { h, toast, put, clear } from './dom.js';
 import { fmtInt, fmtGiB } from './charts.js';
 import {
-  PATHS, loadData, loadEngineLive, send, engineParams, engineParamsUpdate, engineServe, agentTaskPath,
+  PATHS, loadData, loadEngineLive, send, engineParams, engineParamsUpdate, engineServe, engineVerify, agentTaskPath,
 } from './data.js';
 import { pageScope, readOps } from './page-data.js';
 import { servicesFromOps, engineLabel } from './viewmodel.js';
@@ -147,7 +147,7 @@ function controlView(ctx, engineId, onSettled) {
   const holder = h('div', {});
   // generation 是每一次下发的代号：上一次的轮询醒来时发现自己过期就退出，
   // 否则连点两次按钮时，旧任务的回报会盖掉新任务的状态。
-  const st = { busy: false, task: null, msg: null, generation: 0 };
+  const st = { busy: false, task: null, msg: null, note: null, generation: 0, probing: false, probe: null };
 
   function draw() {
     const badge = st.task ? (TASK_STATE[st.task.state] ?? { tone: 'off', text: String(st.task.state) }) : null;
@@ -165,8 +165,51 @@ function controlView(ctx, engineId, onSettled) {
       badge ? h('div', {}, statusBadge(badge),
         detail ? h('span', { class: 'muted', style: { 'margin-left': '8px', 'font-size': '13px' } }, detail) : null) : null,
       st.msg ? h('p', { class: 'form-error', role: 'alert', style: { margin: 0, 'text-align': 'left' } }, st.msg) : null,
+      st.note ? h('p', { class: 'muted', style: { margin: 0, 'font-size': '13px' } }, st.note) : null,
       h('p', { class: 'muted', style: { margin: 0, 'font-size': '13px' } },
-        '平台只把任务下发给你的代理，不代你执行：进程由你本机运行的 llmlab agent --watch 以你自己的 Linux 身份启动。'))));
+        '平台只把任务下发给你的代理，不代你执行：进程由你本机运行的 llmlab agent --watch 以你自己的 Linux 身份启动。'),
+      // 探测与上面三个按钮不是一回事：那几个是「请代理去做」，这个是「平台现在测一次」。
+      // 列表每 15 秒重读一次，但登记的探测结论不会自己变新——要新结论就得真探一次。
+      h('div', { class: 'actions', style: { 'flex-wrap': 'wrap', 'align-items': 'center' } },
+        h('button', { type: 'button', class: 'btn', disabled: st.probing || st.busy, onclick: probe }, st.probing ? '正在探测…' : '现在探测一次'),
+        st.probe ? statusBadge(st.probe) : null,
+        h('span', { class: 'muted', style: { 'font-size': '13px' } },
+          '由平台从本机立刻探一次这个端口，几秒内返回并写回登记；只更新状态与健康，不会启动服务。')))));
+  }
+
+  /** 现在探测一次：同步结果，回来后重读一次概览，让页头与列表跟上。 */
+  async function probe() {
+    if (st.probing) return;
+    const generation = ++st.generation;
+    st.probing = true; st.probe = null; st.msg = null; st.note = null; draw();
+    if (ctx.demo) {
+      st.probing = false;
+      st.probe = { tone: 'off', text: '演示数据：不会真的探测' };
+      draw();
+      return;
+    }
+    const r = await send(engineVerify(engineId), {});
+    if (ctx.signal?.aborted || generation !== st.generation) return;
+    st.probing = false;
+    if (!r.ok) {
+      st.msg = r.message ?? (r.state === 'denied'
+        ? '只有服务所有者可以触发探测。'
+        : `探测没有执行（${r.reason}）`);
+      draw();
+      return;
+    }
+    const data = r.data ?? {};
+    // Registry 的 verification.status 是 VERIFIED / FAILED / NOT_CONFIGURED 三种大写取值，
+    // 顶层的 status 是小写。统一成大写再比，免得大小写把「没测」读成「测通了」。
+    const verdict = String(data.verification?.status ?? data.status ?? '').toUpperCase();
+    const notes = Array.isArray(data.notes) ? data.notes.filter((n) => typeof n === 'string' && n) : [];
+    st.probe = verdict === 'NOT_CONFIGURED'
+      // 没有观测源时 verify_engine 不改状态：「没测」不能说成「测过、没问题」。
+      ? { tone: 'off', text: '平台没有配置探测源，这次没有测' }
+      : { tone: verdict === 'VERIFIED' ? 'ok' : 'bad', text: verdict === 'VERIFIED' ? '刚探测过：有了新的结论' : '刚探测过：没探通' };
+    st.note = notes.join(' ') || null;
+    draw();
+    onSettled?.();
   }
 
   async function dispatch(kind) {

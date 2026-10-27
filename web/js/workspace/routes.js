@@ -67,6 +67,7 @@ export const BFF_ROUTES = Object.freeze([
   { name: 'registry.engines.params.update', method: 'POST', path: '/api/v2/registry/engines/{engine_id}/params/update', auth: 'session', kind: 'write', scope: 'registry:write', owner: 'Integration#49', ui: '推理服务 · 保存目标参数' },
   // M2：起停服务。平台只把任务排进**服务所有者本人的代理**队列，返回的是任务，
   // 不是执行结果 —— 前端在 done/failed 之前不能显示成「已启动」。
+  { name: 'registry.engines.verify', method: 'POST', path: '/api/v2/registry/engines/{engine_id}/verify', auth: 'session', kind: 'write', scope: 'registry:write', owner: 'Integration#49', ui: '推理服务 · 现在探测一次' },
   { name: 'registry.engines.serve', method: 'POST', path: '/api/v2/registry/engines/{engine_id}/serve', auth: 'session', kind: 'write', scope: 'registry:write', owner: 'Integration#49', ui: '推理服务 · 启动/停止/重启' },
   { name: 'registry.agent_task', method: 'GET', path: '/api/v2/registry/agent-tasks/{task_id}', auth: 'session', kind: 'read', scope: 'registry:read', owner: 'Integration#49', ui: '推理服务 · 任务状态' },
   // SEAM-1 (#115). A declared write boundary, not a button: the authority is

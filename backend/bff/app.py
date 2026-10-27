@@ -1296,6 +1296,23 @@ class OpsApplication:
     #: 只有登记行上的 unit 与服务端的 argv 形状，客户端不能在这里自选。
     _SERVE_BODY_FIELDS = frozenset({"kind", "unit"})
 
+    def _engine_verify(self, request, engine_id: str):
+        """让平台**现在**探一次这个服务，把今天的结果写回登记。
+
+        与 ``_engine_serve`` 是两件事，别混：serve 是「任务已下发给你的代理」，
+        这里的结果**同步**返回，测的就是此刻。探测失败也照样写回（状态变成
+        unavailable），因为「刚才探过、没探通」本身就是今天的结论。
+        """
+        self._reject_asserted_identity(request)
+        self._write_preflight(request)
+        principal = self._principal(request)
+        view = self.service.verify_engine(principal.requester, engine_id)
+        data = dict(view.get("data") or {})
+        # 探测源缺失时 verify_engine 不改状态，只在 notes 里说明；原样带出去，
+        # 前端才能说「没测」而不是「测过、没问题」。
+        data["notes"] = list(view.get("notes") or ())
+        return _json_response(200, {"ok": True, "data": data})
+
     def _engine_serve(self, request, engine_id: str):
         """请本人的代理启动/停止/重启这个服务。
 

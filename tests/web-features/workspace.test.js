@@ -357,6 +357,7 @@ const BFF_ROUTE_CONTRACT = [
   { name: 'gateway.playground', method: 'POST', path: '/api/gateway/playground', auth: 'session', kind: 'write', scope: null },
   { name: 'registry.engines.params', method: 'GET', path: '/api/v2/registry/engines/{engine_id}/params', auth: 'session', kind: 'read', scope: 'registry:read' },
   { name: 'registry.engines.params.update', method: 'POST', path: '/api/v2/registry/engines/{engine_id}/params/update', auth: 'session', kind: 'write', scope: 'registry:write' },
+  { name: 'registry.engines.verify', method: 'POST', path: '/api/v2/registry/engines/{engine_id}/verify', auth: 'session', kind: 'write', scope: 'registry:write' },
   { name: 'registry.engines.serve', method: 'POST', path: '/api/v2/registry/engines/{engine_id}/serve', auth: 'session', kind: 'write', scope: 'registry:write' },
   { name: 'registry.agent_task', method: 'GET', path: '/api/v2/registry/agent-tasks/{task_id}', auth: 'session', kind: 'read', scope: 'registry:read' },
   { name: 'ops.invoke', method: 'POST', path: '/api/v2/ops/endpoints/{endpoint_id}/invoke', auth: 'session', kind: 'write', scope: 'registry:endpoint:invoke' },
@@ -410,7 +411,7 @@ test('the admin route matrix mirrors backend/bff/route_map.py exactly', () => {
   //      the pending set. Any other unexplained row fails.
   // 合并后只有一个 checkout：39（上游 PR#20 的网关/参数路由）+ 30 那版里上游没有的
   // 引擎实时读数与模型服务密钥，去掉重复项实际 43 条。镜像与 route_map 必须一致。
-  assert.equal(BFF_ROUTES.length, 50, 'the mirror is pinned to the 50-route contract');
+  assert.equal(BFF_ROUTES.length, 51, 'the mirror is pinned to the 51-route contract');
 
   // The independent pin: every row's method/path/session/read-write/scope must
   // match the recorded contract, including the rows a stacked checkout cannot

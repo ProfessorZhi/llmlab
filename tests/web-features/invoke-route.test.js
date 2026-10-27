@@ -155,8 +155,8 @@ test('the mirror and the local table agree under both stacked and union SHAs', (
   // is a table this test cannot reason about, and guessing would be worse than failing.
   // 合并后只有一个 checkout：上游 PR#20 的网关/参数路由 + 上游没有的引擎实时读数与
   // 模型服务密钥，实际 43 条。别的数字说明这张表已经不是本测试能推理的那张。
-  assert.equal(local.length, 50,
-    `local route table has ${local.length} rows; expected 50 after the merge`);
+  assert.equal(local.length, 51,
+    `local route table has ${local.length} rows; expected 51 after the merge`);
 
   // The dependency is the REAL difference, measured — not a literal that goes
   // stale the moment the BFF branch is merged.

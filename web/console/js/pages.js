@@ -60,7 +60,8 @@ function servicesTable(list, { compact = false } = {}) {
       // 状态旁边必须带「什么时候确认的」。只写一个「未确认」而不给时间，读者
       // 只能猜是刚刚漏了一拍还是五天没人看过。
       h('td', {}, statusBadge(x.runtime),
-        x.confirmedAt ? h('div', { class: 'muted tnum', style: { 'font-size': '12px' } }, `确认于 ${relTime(x.confirmedAt)}`) : null))))));
+        x.confirmedAt ? h('div', { class: 'muted tnum', style: { 'font-size': '12px' } },
+          `${x.confirmedFailed ? '最近一次探测' : '确认于'} ${relTime(x.confirmedAt)}`) : null))))));
 }
 
 function gpuFacts(hf, hostState) {

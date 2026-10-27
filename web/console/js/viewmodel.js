@@ -82,6 +82,17 @@ function stampOf(raw) {
   return `${d.getMonth() + 1}月${d.getDate()}日 ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** 一段时长写成「刚刚 / 12 分钟前 / 5 小时前 / 5 天前」。给「这份结论多久了」用。 */
+function agoText(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  const min = Math.floor(ms / 60000);
+  if (min < 1) return '刚刚';
+  if (min < 60) return `${min} 分钟前`;
+  const hours = Math.floor(min / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  return `${Math.floor(hours / 24)} 天前`;
+}
+
 /** 这一行最后一次被确认的时刻：发现循环见到它，或探活拿到过结论，取较晚的一个。 */
 function lastConfirmed(...stamps) {
   let best = null;
@@ -138,7 +149,7 @@ export function servicesFromOps(ops, { now = Date.now() } = {}) {
       build: e.runtime_build_id ? (builds.get(e.runtime_build_id) ?? e.runtime_build_id) : null,
       // 「运行中」必须有最近的证据。``status === 'verified'`` 只说明登记验证曾经
       // 通过过：一条手工登记的服务停了 18 小时，status 仍然是 verified。
-      runtime: e.state === 'offline' ? { tone: 'muted', text: '已离线' }
+      runtime: e.state === 'offline' ? { tone: 'off', text: '已离线' }
         : e.state === 'stale' ? { tone: 'warn', text: '观测已过期' }
           // 只有「验证通过」这一种结论需要新鲜度来支撑；「未验证」「无法访问」
           // 说的是验证本身的状态，与此刻在不在跑无关，照原样显示。
@@ -149,12 +160,27 @@ export function servicesFromOps(ops, { now = Date.now() } = {}) {
         if (e.state === 'offline') return HEALTH_LABEL.unreachable;
         if (e.state === 'stale') return { ...HEALTH_LABEL.unknown, hint: '观测已过期，这份结论不再代表此刻' };
         if (e.health == null) return { tone: 'off', text: '未探活', hint: '平台还没有对这个服务做过健康探测' };
-        // 探测结论本身也要带时间：一份五天前的「性能下降」不加时间，读起来就像此刻。
+        // 探测结论本身也要带时间，而且**要看得见**：一份五天前的「性能下降」只用
+        // title 写着观测时刻，屏幕上读起来仍然像此刻。超过确认窗口就降级，并把
+        // 年龄写进正文——这是唯一不靠悬停就能读到的位置。
         const when = stampOf(e.health_observed_at);
+        const observedAt = typeof e.health_observed_at === 'string' ? Date.parse(e.health_observed_at) : NaN;
+        const age = Number.isFinite(observedAt) ? now - observedAt : null;
+        const verdict = HEALTH_LABEL[e.health] ?? HEALTH_LABEL.unknown;
+        if (age !== null && age > CONFIRMED_WITHIN_MS) {
+          return {
+            tone: 'off',
+            text: `${verdict.text} · ${agoText(age)}`,
+            hint: [when ? `观测于 ${when}` : null, '已过期，此刻没有新的探测结论'].filter(Boolean).join(' · '),
+          };
+        }
         const hint = [e.health_reason, when ? `观测于 ${when}` : null].filter(Boolean).join(' · ');
-        return { ...(HEALTH_LABEL[e.health] ?? HEALTH_LABEL.unknown), hint: hint || null };
+        return { ...verdict, hint: hint || null };
       })(),
       confirmedAt: confirmedIso,
+      // 「确认于」只有在真的见到过它时才成立。一次探不通的探测同样会把
+      // last_seen_at 写成现在，那种情况下这句话得改口叫「最近一次探测」。
+      confirmedFailed: e.state === 'offline' || e.health === 'unreachable',
       share: '—',
       vramMiB: null,
       updatedAt: e.last_seen_at ?? null,

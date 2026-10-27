@@ -133,7 +133,28 @@ test('services: 停了很久的服务不再显示「运行中」，而是「未�
   assert.equal(row.runtime.text, '未确认');
   assert.equal(Date.parse(row.confirmedAt), Date.parse('2026-10-22T05:47:27Z'),
     '停在哪一刻要说出来，不能只给一个「未确认」');
-  assert.equal(row.health.text, '性能下降', '健康结论照探测记录说，不拿 status 顶替');
+  // 五天前的探测结论不能以此刻的语气显示：正文里必须带年龄，语气也得降下来，
+  // 否则「性能下降」读起来就是「它现在降着」。提示（title）不算——没人悬停。
+  assert.match(row.health.text, /^性能下降 · \d+ 天前$/);
+  assert.equal(row.health.tone, 'off', '过期的结论不该继续用当前的配色');
+  assert.equal(row.confirmedFailed, false, '这是「见过它的最后一刻」，不是探测失败');
+});
+
+test('services: 刚探测过、探不通的服务说「无法访问」，并改口「最近一次探测」', () => {
+  // verify 成功写回时，last_seen_at 与 health_observed_at 都被刷新成「现在」。
+  // 此时再说「确认于 刚刚」就等于说「刚刚它还活着」，而事实相反。
+  const now = Date.parse('2026-10-27T15:00:00Z');
+  const ops = { registry: { owned: [], shared: [], engines: [{
+    engine_id: 'e1', name: 'strata', protocol: 'openai_compatible', owner: 'account:aa', owner_is_self: true,
+    status: 'unavailable', state: 'attached',
+    last_seen_at: '2026-10-27T14:59:30Z', health_observed_at: '2026-10-27T14:59:30Z',
+    health: 'unreachable', health_reason: 'probe_failed',
+  }] } };
+  const [row] = servicesFromOps(ops, { now });
+
+  assert.equal(row.runtime.text, '无法访问');
+  assert.equal(row.health.text, '无法访问', '刚探过、结论新鲜时照实说，不带年龄');
+  assert.equal(row.confirmedFailed, true, '这话得改口叫「最近一次探测」');
 });
 
 test('services: 刚被确认过的 verified 服务仍然是「运行中」', () => {

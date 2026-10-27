@@ -406,3 +406,51 @@ test('30 拍都没有终态：文案指向 llmlab agent --watch，而不是谎�
       '应当老老实实查满 30 拍再放弃，提前放弃会把慢代理误报成没在跑');
   } finally { page?.dispose(); restore(); }
 });
+
+/* ---------------- 7. 现在探测一次：平台自己探，不下发任务 ---------------- */
+test('「现在探测一次」打的是 verify（不是 serve），探不通就说探不通', async () => {
+  rememberCsrf(null);
+  installPollTimers('freeze');
+  const VERIFY_PATH = `/api/v2/registry/engines/${ENGINE_ID}/verify`;
+  const calls = stubFetch(routes({
+    [VERIFY_PATH]: () => json(200, {
+      data: { engine_id: ENGINE_ID, status: 'unavailable', verification: { status: 'unavailable' }, notes: [] },
+    }),
+  }));
+  let page;
+  try {
+    page = await mountControl();
+    const probe = findButton(page, '现在探测一次');
+    assert.ok(probe, '服务控制缺少「现在探测一次」按钮，状态就只能一直停在陈旧的结论上');
+
+    await probe.events.click();
+    await until(() => /刚探测过/.test(page.textContent), '探测完没有给出结果');
+
+    const posts = calls.filter(call => call.method === 'POST');
+    assert.equal(posts.length, 1, `探测应恰好一条 POST，实际 ${posts.length} 条`);
+    assert.equal(posts[0].path, VERIFY_PATH, '探测不能走到 /serve —— 那是「请代理启动」');
+    assert.equal(posts[0].headers['X-CSRF-Token'], 'csrf-test-token', '写请求必须带 CSRF 令牌');
+    assert.match(page.textContent, /刚探测过：没探通/);
+    assert.doesNotMatch(page.textContent, /已下发给你的代理/, '探测是同步结果，不能借用任务下发那套说法');
+  } finally { page?.dispose(); restore(); }
+});
+
+test('没有观测源时，探测说「没有测」，不说「测过、没问题」', async () => {
+  rememberCsrf(null);
+  installPollTimers('freeze');
+  const VERIFY_PATH = `/api/v2/registry/engines/${ENGINE_ID}/verify`;
+  const NOTE = '本部署未配置任何观测源：验证无法进行，状态保持未验证而不是当作通过。';
+  stubFetch(routes({
+    [VERIFY_PATH]: () => json(200, {
+      data: { engine_id: ENGINE_ID, status: 'verified', verification: { status: 'NOT_CONFIGURED' }, notes: [NOTE] },
+    }),
+  }));
+  let page;
+  try {
+    page = await mountControl();
+    await findButton(page, '现在探测一次').events.click();
+    await until(() => /没有配置探测源/.test(page.textContent), '没有观测源时仍在假装探过');
+    assert.match(page.textContent, /没有配置探测源/);
+    assert.ok(page.textContent.includes(NOTE), '服务端给的理由要原样带出来');
+  } finally { page?.dispose(); restore(); }
+});

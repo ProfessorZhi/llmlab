@@ -57,6 +57,8 @@ export const engineParamsUpdate = (id) => `/api/v2/registry/engines/${pathId(id)
 export const engineLivePath = (id) => `/api/v2/registry/engines/${pathId(id)}/live`;
 /** 下发一条启动/停止/重启任务给**本人的代理**。返回的是任务，不是执行结果。 */
 export const engineServe = (id) => `/api/v2/registry/engines/${pathId(id)}/serve`;
+/** 让平台**现在**探一次这个服务（同步返回今天的结果）。只探测，不启动。 */
+export const engineVerify = (id) => `/api/v2/registry/engines/${pathId(id)}/verify`;
 /** 查一条任务的状态：queued / running 都不是结果，done / failed 才是。 */
 export const agentTaskPath = (id) => `/api/v2/registry/agent-tasks/${pathId(id)}`;
 
