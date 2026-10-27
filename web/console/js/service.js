@@ -300,7 +300,7 @@ export async function detail(ctx, engineId) {
     else put(pane, controlPane(),
       params.value.supported
         ? paramsView(ctx, params.value, next => { params = { state: 'ready', value: next }; drawParams(); })
-        : h('div', { class: 'group' }, quietEmpty('ready', { title: `${engineLabel(framework())} 暂无参数表`, body: '这个推理框架还没有声明可调参数。' })));
+        : h('div', { class: 'group' }, quietEmpty('ready', { title: `${engineLabel(framework())} 暂无参数表`, body: '这个推理引擎还没有声明可调参数。' })));
   }
   async function refreshLive() {
     if (liveBusy || ctx.signal.aborted) return;

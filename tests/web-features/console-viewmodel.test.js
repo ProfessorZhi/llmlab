@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { sunburstLayout, dotGridLayout, barsLayout, fmtInt, fmtGiB } from '../../web/console/js/charts.js';
 import { requestsNote } from '../../web/console/js/ui.js';
 import {
-  percentile, servicesFromOps, modelsFromOps, hourlyFromOps, callsFacts, overviewModel, preflightChecks,
+  percentile, servicesFromOps, deploymentsFromOps, modelsFromOps, hourlyFromOps, callsFacts, overviewModel, preflightChecks,
 } from '../../web/console/js/viewmodel.js';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -87,28 +87,35 @@ test('overview from the real BFF payloads: unknown metrics stay null', () => {
   }
 });
 
-test('services: engines first, then owned/all/shared rows, without inventing runtime state', () => {
+test('services: 只有正在监听的服务，部署与共享行不再冒充服务', () => {
   // 夹具是 synthetic 的，而 viewmodel 现在明确规定「合成负载不呈现为已部署的
   // 引擎/路由」。这里要验的是**映射**，所以显式关掉 synthetic；synthetic 那条
   // 规则单独在下面断言，别让两件事互相隐身。
   // 夹具里的 last_seen_at 是个固定时刻，所以「现在」也要钉住：拿真实时钟去比，
   // 这份测试会在夹具日期之后的第 31 分钟开始自己失败。
   const NOW = Date.parse('2026-10-15T12:05:00Z');
-  const admin = servicesFromOps({ ...PAYLOADS.admin_private, synthetic: false }, { now: NOW });
+  const live = { ...PAYLOADS.admin_private, synthetic: false };
+  const admin = servicesFromOps(live, { now: NOW });
   assert.deepEqual(servicesFromOps(PAYLOADS.admin_private, { now: NOW }), [],
     'a synthetic payload presents no engines or deployments');
-  assert.deepEqual(admin.map((x) => x.kind), ['engine', 'deployment']);
-  const [engine, deployment] = admin;
+  // 真事故：一条服务 + 它上面的部署会在列表里变成两行，第二行用模型名当服务名、
+  // 状态永远是「状态未知」。产品定义 §4 里「推理服务」只有一个含义——正在监听
+  // 的进程——所以部署行不属于这张表。
+  assert.deepEqual(admin.map((x) => x.kind), ['engine']);
+  const [engine] = admin;
   assert.equal(engine.label, 'engine-alice');
   assert.equal(engine.owner, 'alice', 'owner is the readable name, not the principal id');
   assert.equal(engine.runAs, null, 'no runtime user was observed, so none is shown');
   assert.equal(engine.port, 8000);
   assert.equal(engine.runtime.text, '运行中');
+  // 部署行没有消失，只是搬到了内部视图：概览页的显存归因按「模型 × 服务」算。
+  const [deployment] = deploymentsFromOps(live);
   assert.equal(deployment.label, 'model-alice');
   assert.equal(deployment.runtime.text, '状态未知');
   assert.equal(deployment.vramMiB, null);
+  // 共享（B1）暂缓期间 endpoint 也不进这张表；开启共享时它属于「API 接入」。
   const shared = servicesFromOps({ ...PAYLOADS.grantee_shared, synthetic: false });
-  assert.equal(shared.filter((x) => x.sharedToMe).length, 1);
+  assert.equal(shared.filter((x) => x.sharedToMe).length, 0);
   assert.equal(servicesFromOps({ registry: { adapter_attached: false } }), null);
 });
 

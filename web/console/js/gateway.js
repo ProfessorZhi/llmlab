@@ -132,7 +132,7 @@ export async function overview(ctx) {
   return root;
 }
 
-/* ============================== 模型路由 ============================== */
+/* ============================== API 接入 ============================== */
 
 function snippets(base, model) {
   const m = model ?? '<模型名>';
@@ -297,7 +297,7 @@ function modelServicePanel(ctx, mst, { mint, copy }) {
     ? h('div', { class: 'group' }, mst.state === 'ready'
       ? quietEmpty('ready', {
         title: '还没有签发过模型服务密钥',
-        body: '签发一把之后，把它填进客户端就能直接调用本机推理引擎。',
+        body: '签发一把之后，把它填进客户端就能直接调用本机的推理服务。',
       })
       : emptyState(mst.state))
     : h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
@@ -704,7 +704,7 @@ export async function playground(ctx) {
         h('label', { class: 'cell', style: { 'flex-direction': 'column', 'align-items': 'stretch', gap: '6px' } }, h('span', { class: 'fieldname' }, '系统提示词'),
           h('textarea', { rows: 4, placeholder: '可选', oninput: (e) => { st.system = e.target.value; } }))),
       '单次最多 1024 个输出 Token；需要更长输出请用 API。')))
-      : h('div', { class: 'group' }, quietEmpty('ready', { title: '还没有可调用的模型', body: '在「模型路由」把推理服务创建 API 接入后，就能在这里对话。' })));
+      : h('div', { class: 'group' }, quietEmpty('ready', { title: '还没有可调用的模型', body: '在「API 接入」把推理服务发布成一个模型名后，就能在这里对话。' })));
   drawLog();
   return root;
 }

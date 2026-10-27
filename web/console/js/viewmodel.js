@@ -103,7 +103,15 @@ function buildLabels(builds) {
   return map;
 }
 
-/** 推理服务列表：已登记的推理引擎在前，其上的模型部署在后（管理员看全部，成员看自己的与共享给自己的）。 */
+/**
+ * 推理服务列表：**只**列正在监听的服务（``registry.engines``）。
+ *
+ * 这里曾经把「模型部署」行也拼进来，于是同一个端口上的一条服务会在列表里
+ * 变成两行 —— 一行是服务本身，另一行用模型名冒充服务名、状态永远是「状态未知」。
+ * 产品定义 §4 给「推理服务」定的唯一含义是「正在监听的一个进程」，部署/endpoint
+ * 都不是进程，也就不该出现在这张表里。显存归因这种内部视图用
+ * ``deploymentsFromOps`` 自己取。
+ */
 export function servicesFromOps(ops, { now = Date.now() } = {}) {
   const reg = ops?.registry;
   if (!reg || reg.adapter_attached === false) return null;
@@ -153,48 +161,35 @@ export function servicesFromOps(ops, { now = Date.now() } = {}) {
       sharedToMe: false,
     };
   });
-  const rows = (reg.all && reg.all.length ? reg.all : [...(reg.owned ?? [])]);
-  const seen = new Set(rows.map((r) => r.deployment_id));
-  for (const r of rows) {
-    list.push({
-      id: r.deployment_id,
-      kind: 'deployment',
-      label: r.model_label ?? r.model_id ?? r.deployment_id,
-      engine: r.engine_type ?? null,
-      owner: r.owner_name ?? r.owner_uid ?? null,
-      runAs: null,
-      port: null,
-      self: r.owner_is_self === true,
-      runtime: RUNTIME_LABEL[r.runtime_status] ?? RUNTIME_LABEL.unknown,
-      health: HEALTH_LABEL[r.health] ?? HEALTH_LABEL.unknown,
-      share: SHARE_LABEL[r.share?.mode] ?? '—',
-      vramMiB: finite(r.resources?.vram_used_mib) ? r.resources.vram_used_mib : null,
-      confirmedAt: null,
-      updatedAt: r.updated_at ?? null,
-      sharedToMe: false,
-    });
-  }
-  for (const e of reg.shared ?? []) {
-    if (seen.has(e.endpoint_id)) continue;
-    list.push({
-      id: e.endpoint_id,
-      kind: 'endpoint',
-      label: e.model ?? e.name,
-      engine: e.protocol ?? null,
-      owner: e.owner_name ?? e.owner_uid ?? null,
-      runAs: null,
-      port: null,
-      self: false,
-      runtime: RUNTIME_LABEL.unknown,
-      health: HEALTH_LABEL.unknown,
-      share: SHARE_LABEL[e.share?.mode] ?? '—',
-      vramMiB: null,
-      confirmedAt: null,
-      updatedAt: null,
-      sharedToMe: true,
-    });
-  }
   return list;
+}
+
+/**
+ * 「模型部署」行：模型 × 推理服务的关联，服务端叫 deployment。
+ *
+ * 它不是用户能直接操作的东西（产品定义 §4 明确它不进标题、列名、空状态），
+ * 所以不拼进推理服务列表。目前唯一的用途是概览页的显存归因：BFF 的
+ * ``resources`` 现在恒为 null，这一块实际上只会落到「已分配（进程未归因）」，
+ * 但归因逻辑本身要留在这里，接入 NVML 之后才有地方填数。
+ */
+export function deploymentsFromOps(ops) {
+  const reg = ops?.registry;
+  if (!reg || reg.adapter_attached === false) return null;
+  if (ops.synthetic === true) return [];
+  const rows = (reg.all && reg.all.length ? reg.all : [...(reg.owned ?? [])]);
+  return rows.map((r) => ({
+    id: r.deployment_id,
+    kind: 'deployment',
+    label: r.model_label ?? r.model_id ?? r.deployment_id,
+    engine: r.engine_type ?? null,
+    owner: r.owner_name ?? r.owner_uid ?? null,
+    self: r.owner_is_self === true,
+    runtime: RUNTIME_LABEL[r.runtime_status] ?? RUNTIME_LABEL.unknown,
+    health: HEALTH_LABEL[r.health] ?? HEALTH_LABEL.unknown,
+    share: SHARE_LABEL[r.share?.mode] ?? '—',
+    vramMiB: finite(r.resources?.vram_used_mib) ? r.resources.vram_used_mib : null,
+    updatedAt: r.updated_at ?? null,
+  }));
 }
 
 /** 已登记的模型（模型库）。权重路径只有 owner 才拿得到。 */
@@ -364,6 +359,8 @@ export function overviewModel({ ops = null, host = null, log = null, demo = null
   const hf = hostFacts(host);
   const cf = callsFacts(log);
   const services = servicesFromOps(ops, { now });
+  // 显存按「模型部署」归因：一个端口上可能挂多个模型，按服务聚合会把它们糊成一行。
+  const deployments = deploymentsFromOps(ops);
   // 名称以 BFF 契约（portal-ops/1 metrics.items）为准；principal.* 是本人已验证密钥的计量。
   const reqs = metricValue(ops, 'principal.requests');
   const errs = metricValue(ops, 'principal.errors');
@@ -391,13 +388,14 @@ export function overviewModel({ ops = null, host = null, log = null, demo = null
   const modelNames = [
     ...(cf?.models ?? []).map((m) => m.id),
     ...(services ?? []).map((x) => x.label),
+    ...(deployments ?? []).map((x) => x.label),
   ];
   const colors = modelColorMap(modelNames);
 
   // 显存：按部署可见的占用画格，其余已用部分归为「其他进程」。
   let vram = null;
   if (finite(vramTotal)) {
-    const parts = (services ?? [])
+    const parts = (deployments ?? [])
       .filter((x) => finite(x.vramMiB) && x.vramMiB > 0)
       .map((x) => ({ id: x.id, label: x.label, owner: x.owner, engine: x.engine, mib: x.vramMiB, color: colors.get(x.label) ?? '#8E8E93' }));
     const attributed = parts.reduce((t, p) => t + p.mib, 0);

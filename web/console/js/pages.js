@@ -32,16 +32,18 @@ const panel = (cls, title, sub, ...body) => h('section', { class: `panel ${cls}`
 /* ============================== 概览 ============================== */
 // 平台的核心是资源监控与推理服务；API 调用统计是次要信息，没配置、没调用都属正常。
 const CALLS_EMPTY = { title: '暂无调用记录', body: '为自己的服务创建 API 接入并调用后，这里会显示调用统计。' };
-const SERVICES_EMPTY = { title: '还没有登记推理服务', body: '启动自己的推理服务后，Agent 会自动登记。' };
+const SERVICES_EMPTY = { title: '还没有登记推理服务', body: '启动自己的推理服务后，代理会自动登记。' };
 
 function servicesTable(list, { compact = false } = {}) {
   // 「运行 build」只在服务端**真的知道**时才成一列。平台目前没有「进程 ↔ 可执行
   // 文件」的证据（扫描器不读 /proc/<pid>），所以这一列通常根本不出现；硬留一列
   // 「未关联」会被读成「这个服务没有 build」，那是另一个断言。
   const showBuild = !compact && list.some((x) => x.build);
+  // 列名跟着产品定义 §4 走：「引擎」指装好的运行时（Strata / vLLM / llama.cpp），
+  // 「服务」指此刻在监听的进程。表里只有服务，所以引擎是一列属性，不再叫「框架」。
   const cols = compact
-    ? ['推理服务', '推理框架', '所有者', '运行用户', '显存', '状态']
-    : ['推理服务', '推理框架', ...(showBuild ? ['运行 build'] : []), '所有者', '运行用户', '显存', '健康', '状态'];
+    ? ['推理服务', '引擎', '所有者', '运行用户', '显存', '状态']
+    : ['推理服务', '引擎', ...(showBuild ? ['运行 build'] : []), '所有者', '运行用户', '显存', '健康', '状态'];
   const vramCol = cols.indexOf('显存');
   return h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
     h('thead', {}, h('tr', {}, cols.map((t, i) => h('th', { scope: 'col', class: i === vramCol ? 'num' : null }, t)))),
@@ -145,7 +147,7 @@ function renderOverview(model, states) {
     h('div', { class: 'row' },
       panel('grow', '显存分配', model.vram ? `GPU 显存 ${fmtGiB(model.vram.totalMiB, 0)} GB · 每个方块代表 0.25 GB` : null, vramBody),
       panel('side', 'GPU 与服务', null, gpuFacts(model.host, states.host ?? 'not_configured'))),
-    panel('', '推理服务与模型', services?.length ? `${services.length} 个已登记 · 显示前 10 项` : null, servicesBody, h('a', { class: 'linkbtn', href: '#/services' }, '查看全部服务')),
+    panel('', '推理服务', services?.length ? `${services.length} 个已登记 · 显示前 10 项` : null, servicesBody, h('a', { class: 'linkbtn', href: '#/services' }, '查看全部服务')),
     h('section', { style: { display: 'flex', 'flex-direction': 'column', gap: '16px' }, 'aria-labelledby': 'calls-title' },
       h('div', { class: 'page-head' },
         h('h2', { id: 'calls-title', style: { margin: 0, 'font-size': '19px', 'font-weight': 600 } }, 'API 调用'),
@@ -200,7 +202,7 @@ export async function engines(ctx) {
     { id: 'b2', framework: 'vllm', version: '0.6.3', foundAs: 'python_package', path: '/opt/vllm/.venv/lib/python3.12/site-packages/vllm-0.6.3.dist-info', env: '/opt/vllm/.venv', redacted: false, owner: '陈静', self: false, lastSeenAt: null },
   ] : [],
     empty: () => h('div', { class: 'group' }, quietEmpty('ready', BUILDS_EMPTY)) });
-  put(root, pageHead('推理引擎', 'Agent 发现的推理框架与安装环境。'), list.root, discoveryDetails(ctx, 'installed'));
+  put(root, pageHead('推理引擎', '代理发现的推理引擎与安装环境。'), list.root, discoveryDetails(ctx, 'installed'));
   return root;
 }
 
@@ -234,9 +236,9 @@ function discoveryPanel(ctx, kind) {
   const title = kind === 'engines' ? '本机发现 · 推理服务'
     : kind === 'models' ? '本机发现 · 模型目录' : '本机发现 · 已安装的引擎';
   const intro = kind === 'engines'
-    ? '检查本机服务与 Agent 上报，补充登记遗漏的本人服务。'
+    ? '检查本机服务与代理上报，补充登记遗漏的本人服务。'
     : kind === 'models'
-      ? '检查授权目录中发现的模型。自动扫描由所有者的 Agent 执行。'
+      ? '检查授权目录中发现的模型。自动扫描由所有者的代理执行。'
       : '查看已发现的安装位置与版本。';
 
   async function scan() {
@@ -296,7 +298,7 @@ function discoveryPanel(ctx, kind) {
           ? `已查找${st.data?.model_roots_automatic ? '（自动查找的默认位置）' : ''}：${st.data.model_roots.join('、')}`
           : '管理员关闭了模型目录查找（--no-model-scan）。' }
         : { title: '没有发现已安装的推理引擎', body: '查找范围：PATH、/usr/local/bin、/opt/*/bin、模型目录下的虚拟环境，以及 /opt 与 /usr/local 下以引擎命名的源码树。服务账户读不到的目录会被跳过。' });
-    const head = kind === 'engines' ? ['端口', '运行用户', '推理框架', '模型', '']
+    const head = kind === 'engines' ? ['端口', '运行用户', '引擎', '模型', '']
       : kind === 'models' ? ['路径', '格式', '架构', '大小', '']
         : ['引擎', '版本', '识别方式', '路径', ''];
     return h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
@@ -421,7 +423,7 @@ export function flattenAgentReports(data) {
   return rows;
 }
 
-const AGENT_KIND_LABEL = { engine: '推理服务', folded: '其他端口', installed: '已安装引擎', model: '模型' };
+const AGENT_KIND_LABEL = { engine: '推理服务', folded: '其他端口', installed: '已安装的推理引擎', model: '模型' };
 
 export function agentReportsPanel(ctx) {
   const holder = h('div', {});
@@ -527,7 +529,7 @@ export async function models(ctx) {
   ctx = pageScope(ctx, root);
   const formSlot = h('div', { hidden: true });
   const listing = registryList(ctx, { project: modelsFromOps, render: modelsTable, demoRows: list,
-    empty: () => h('div', { class: 'group' }, quietEmpty('ready', { title: '还没有登记模型', body: 'Agent 自动发现，也可以手动登记。' })) });
+    empty: () => h('div', { class: 'group' }, quietEmpty('ready', { title: '还没有登记模型', body: '代理自动发现，也可以手动登记。' })) });
   const st = { open: false, msg: null, form: { name: '', weight_path: '', format: 'hf', parameter_count: '', description: '' } };
 
   async function submit() {
@@ -563,7 +565,7 @@ export async function models(ctx) {
     if (st.msg) put(formSlot, h('p', { class: 'form-error', role: 'alert' }, st.msg));
     if (st.open) put(formSlot, form());
   }
-  put(root, pageHead('模型库', '模型文件与版本。Agent 持续跟踪位置。',
+  put(root, pageHead('模型库', '模型文件与版本。代理持续跟踪位置。',
     h('button', { type: 'button', class: 'btn primary', onclick: () => { st.open = true; draw(); } }, '登记模型')),
     formSlot, listing.root, discoveryDetails(ctx, 'models'));
   return root;
@@ -657,7 +659,7 @@ export async function register(ctx) {
       const sel = h('select', { onchange: (e) => { st.framework = e.target.value; } }, FRAMEWORKS.map(([v, l]) => h('option', { value: v, selected: v === st.framework }, l)));
       put(root, 
         section('服务配置', h('div', { class: 'group' },
-          field('推理框架', sel),
+          field('引擎', sel),
           field('监听端口', h('input', { class: 'tnum', inputmode: 'numeric', placeholder: '8000', value: st.port, oninput: (e) => { st.port = e.target.value.trim(); } })),
           field('服务名称', h('input', { placeholder: 'qwen2.5-7b-sft-v3', value: st.name, oninput: (e) => { st.name = e.target.value.trim(); }, style: { width: '260px' } }))),
           '服务仅需监听 127.0.0.1，端口须在管理员允许的列表内（默认 8000、8001、8081、9000、9001）。服务名称即调用时的 model 参数，不能与你已有的服务重名。'));
@@ -694,7 +696,7 @@ export async function account(ctx) {
   const me = ctx.me ?? {};
   const row = (label, value) => h('div', { class: 'cell' }, h('span', { class: 'grow' }, label), h('span', { class: value ? null : 'muted' }, value ?? '—'));
   return h('div', { class: 'page narrow' },
-    pageHead('我的账户', '平台账户、命令行与 Agent 令牌。调用模型用的 API 密钥在「我的 API → API 密钥」。'),
+    pageHead('我的账户', '平台账户、命令行与代理令牌。调用模型用的 API 密钥在「我的 API → API 密钥」。'),
     section('账户', h('div', { class: 'group' },
       row('用户名', me.username ?? me.subject),
       row('显示名称', me.display_name),
@@ -706,10 +708,10 @@ export async function account(ctx) {
       h('div', { class: 'cell' }, h('span', { class: 'grow' }, '模型调用（OpenAI 兼容）'), h('span', { class: 'mono' }, `${location.origin}/v1`)),
       h('div', { class: 'cell' }, h('span', { class: 'grow' }, '命令行工具'), h('span', { class: 'mono' }, 'llmlab --help')),
       h('a', { class: 'cell action', href: '#/gateway/keys' }, '管理 API 密钥')),
-    '用上面创建的令牌配置 llmlab 后，可以执行 llmlab discover、engines、models 等命令；加 --json 输出给 Agent 解析。'));
+    '用上面创建的令牌配置 llmlab 后，可以执行 llmlab discover、engines、models 等命令；加 --json 输出给代理解析。'));
 }
 
-/* ---------- CLI / Agent 令牌 ---------- */
+/* ---------- 命令行 / 代理令牌 ---------- */
 const TTL_CHOICES = [['7 天', 7], ['30 天', 30], ['90 天', 90], ['365 天', 365]];
 const epochIso = (sec) => (typeof sec === 'number' ? new Date(sec * 1000).toISOString() : null);
 
@@ -730,7 +732,7 @@ async function agentTokens(ctx) {
     st.issued = r.data; st.msg = null; await refresh(); draw();
   }
   async function revoke(id) {
-    if (!globalThis.confirm?.('撤销后，使用这个令牌的命令行和 Agent 会立即失去访问权限。确定撤销？')) return;
+    if (!globalThis.confirm?.('撤销后，使用这个令牌的命令行和代理会立即失去访问权限。确定撤销？')) return;
     if (!ctx.demo) { const r = await send(PATHS.tokenRevoke, { token_id: id }); if (!r.ok) { st.msg = r.message ?? `撤销失败（${r.reason}）`; draw(); return; } await refresh(); }
     else list = list.map((t) => (t.token_id === id ? { ...t, revoked: true } : t));
     draw();
@@ -738,9 +740,9 @@ async function agentTokens(ctx) {
 
   function draw() {
     while (holder.firstChild) holder.firstChild.remove();
-    if (!list) { put(holder, section('命令行 / Agent 令牌', h('div', { class: 'group' }, quietEmpty(state, { title: '令牌服务未开启', body: '本部署尚未开启命令行令牌。' })))); return; }
+    if (!list) { put(holder, section('命令行 / 代理令牌', h('div', { class: 'group' }, quietEmpty(state, { title: '令牌服务未开启', body: '本部署尚未开启命令行令牌。' })))); return; }
     const live = list.filter((t) => !t.revoked);
-    put(holder, section('命令行 / Agent 令牌', h('div', { class: 'group' },
+    put(holder, section('命令行 / 代理令牌', h('div', { class: 'group' },
       live.length ? live.map((t) => h('div', { class: 'cell' },
         h('div', { class: 'grow' }, h('div', { class: 'title' }, t.label ?? '未命名'),
           h('div', { class: 'sub' }, `${relTime(epochIso(t.last_used_at)) === '—' ? '尚未使用' : `最近使用 ${relTime(epochIso(t.last_used_at))}`} · ${new Date(t.expires_at * 1000).toLocaleDateString()} 到期`)),
@@ -751,7 +753,7 @@ async function agentTokens(ctx) {
         h('select', { onchange: (e) => { st.days = Number(e.target.value); } }, TTL_CHOICES.map(([l, d]) => h('option', { value: d, selected: d === st.days }, l))),
         h('button', { type: 'button', class: 'btn primary', onclick: mint }, '创建令牌')),
       st.issued ? h('div', { class: 'cell', style: { 'flex-direction': 'column', 'align-items': 'stretch', gap: '8px' } },
-        h('div', { class: 'muted', style: { 'font-size': '13px' } }, '令牌只显示这一次。交给你的 Agent 后，它就能像你一样在命令行里发现、登记和使用资源：'),
+        h('div', { class: 'muted', style: { 'font-size': '13px' } }, '令牌只显示这一次。交给你的代理后，它就能像你一样在命令行里发现、登记和使用资源：'),
         h('div', { class: 'code' }, `export LLMLAB_API_BASE=${location.origin}\nexport LLMLAB_TOKEN=${st.issued.token}\nllmlab whoami\nllmlab discover\nllmlab discover --register 8000`)) : null),
     '令牌拥有与你的账户相同的资源权限（管理员账户的令牌也能查看全实验室），账户停用或令牌撤销后立即失效。'));
     if (st.msg) put(holder, h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.msg));
@@ -1100,9 +1102,9 @@ export async function users(ctx) {
 // 推理引擎、监控、评测都以插件形式接入。自带网页界面的插件，在这里多一个跳转入口
 // （新标签页打开，不嵌入）；没有界面的插件（例如只有 API 的 vLLM）就是一张普通卡片。
 const EXTENSIONS = [
-  { key: 'strata', name: 'Strata', glyph: 'S', tint: '#1D1D1F', kind: '推理框架 · 默认', desc: '实验室默认推理框架，提供 OpenAI 兼容接口。', contrib: '推理适配器 · 原生控制台', status: 'strata' },
-  { key: 'vllm', name: 'vLLM', glyph: 'v', tint: '#5856D6', kind: '推理框架', desc: '成员自行启动的 vLLM 服务经此适配器完成登记、健康检查与指标采集。', contrib: '推理适配器 · /metrics 指标映射', status: null },
-  { key: 'sglang', name: 'SGLang', glyph: 'G', tint: '#AF52DE', kind: '推理框架', desc: '支持 SGLang 服务的登记与指标采集。', contrib: '推理适配器', status: null },
+  { key: 'strata', name: 'Strata', glyph: 'S', tint: '#1D1D1F', kind: '推理引擎 · 默认', desc: '实验室默认推理引擎，提供 OpenAI 兼容接口。', contrib: '推理适配器 · 原生控制台', status: 'strata' },
+  { key: 'vllm', name: 'vLLM', glyph: 'v', tint: '#5856D6', kind: '推理引擎', desc: '成员自行启动的 vLLM 服务经此适配器完成登记、健康检查与指标采集。', contrib: '推理适配器 · /metrics 指标映射', status: null },
+  { key: 'sglang', name: 'SGLang', glyph: 'G', tint: '#AF52DE', kind: '推理引擎', desc: '支持 SGLang 服务的登记与指标采集。', contrib: '推理适配器', status: null },
   { key: 'prometheus', name: 'Prometheus', glyph: 'P', tint: '#FF9500', kind: '指标数据源', desc: '采集 GPU、主机与各推理服务的指标，供「资源监控」查询。', contrib: '数据源 · 资源监控图表', status: 'prometheus' },
   { key: 'grafana', name: 'Grafana', glyph: 'G', tint: '#FF6B2C', kind: '高级分析', desc: '深度排查与自定义看板；门户内图表覆盖日常查看。', contrib: '高级分析看板', status: 'grafana' },
   { key: 'evalscope', name: 'EvalScope', glyph: 'E', tint: '#FF2D55', kind: '评测框架', desc: '对已登记的推理服务发起基准评测，结果在「模型评测」中展示。', contrib: '模型评测页面 · 原生报告', status: 'evalscope' },
