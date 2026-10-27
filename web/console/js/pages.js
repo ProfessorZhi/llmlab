@@ -1,10 +1,13 @@
 /*! web/console/js/pages.js — 控制台各页面。
  *  每个页面是 async (ctx) => Element。ctx.demo 为真时只使用 demo.js 的示例数据。 */
 import { h, put, clear } from './dom.js';
+import { pageScope, readOps } from './page-data.js';
+import { registryList } from './registry-list.js';
 import {
   createRefresher, REFRESH_CHOICES, refreshLabel, rememberRefreshMs, savedRefreshMs, usageStatus,
 } from './live-refresh.js';
 import { fmtInt, fmtGiB } from './charts.js';
+import { resourceCharts } from './resource-charts.js';
 import {
   PATHS, loadOps, loadHost, loadUsers, loadIntegrations, loadDiscovery, loadTokens, loadSystem, loadData,
   safeJumpUrl, send,
@@ -28,8 +31,8 @@ const panel = (cls, title, sub, ...body) => h('section', { class: `panel ${cls}`
 
 /* ============================== 概览 ============================== */
 // 平台的核心是资源监控与推理服务；API 调用统计是次要信息，没配置、没调用都属正常。
-const CALLS_EMPTY = { title: '暂无调用记录', body: '把推理服务发布到「网关」并用 API 密钥调用后，这里会显示调用统计。' };
-const SERVICES_EMPTY = { title: '还没有登记推理服务', body: '在自己的 Linux 用户下启动推理引擎，再用平台账户登记，这里会显示它的运行状态与显存占用。' };
+const CALLS_EMPTY = { title: '暂无调用记录', body: '为自己的服务创建 API 接入并调用后，这里会显示调用统计。' };
+const SERVICES_EMPTY = { title: '还没有登记推理服务', body: '启动自己的推理服务后，Agent 会自动登记。' };
 
 function servicesTable(list, { compact = false } = {}) {
   // 「运行 build」只在服务端**真的知道**时才成一列。平台目前没有「进程 ↔ 可执行
@@ -38,7 +41,7 @@ function servicesTable(list, { compact = false } = {}) {
   const showBuild = !compact && list.some((x) => x.build);
   const cols = compact
     ? ['推理服务', '推理框架', '所有者', '运行用户', '显存', '状态']
-    : ['推理服务', '推理框架', ...(showBuild ? ['运行 build'] : []), '所有者', '运行用户', '访问范围', '显存', '健康', '状态'];
+    : ['推理服务', '推理框架', ...(showBuild ? ['运行 build'] : []), '所有者', '运行用户', '显存', '健康', '状态'];
   const vramCol = cols.indexOf('显存');
   return h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
     h('thead', {}, h('tr', {}, cols.map((t, i) => h('th', { scope: 'col', class: i === vramCol ? 'num' : null }, t)))),
@@ -50,16 +53,18 @@ function servicesTable(list, { compact = false } = {}) {
       showBuild ? h('td', { class: x.build ? null : 'muted' }, x.build ?? '—') : null,
       h('td', {}, x.owner ?? '—', x.self ? h('span', { class: 'muted' }, '（我）') : null),
       h('td', { class: x.runAs ? 'tnum' : 'muted' }, x.runAs ?? '—'),
-      compact ? null : h('td', {}, x.share),
       h('td', { class: 'num' }, x.vramMiB == null ? '—' : `${fmtGiB(x.vramMiB)} GB`),
       compact ? null : h('td', {}, statusBadge(x.health)),
-      h('td', {}, statusBadge(x.runtime)))))));
+      // 状态旁边必须带「什么时候确认的」。只写一个「未确认」而不给时间，读者
+      // 只能猜是刚刚漏了一拍还是五天没人看过。
+      h('td', {}, statusBadge(x.runtime),
+        x.confirmedAt ? h('div', { class: 'muted tnum', style: { 'font-size': '12px' } }, `确认于 ${relTime(x.confirmedAt)}`) : null))))));
 }
 
 function gpuFacts(hf, hostState) {
   if (!hf) return quietEmpty(hostState, { title: '暂无 GPU 读数', body: '接入 Prometheus 后，这里显示 GPU 利用率、温度与功耗。' });
   const row = (label, value) => h('div', { class: 'cell' }, h('span', { class: 'grow' }, label), h('span', { class: 'tnum' }, value ?? '—'));
-  const SERVICES = [['prometheus', 'Prometheus'], ['strata', 'Strata'], ['gateway', 'Gateway'], ['evalscope', 'EvalScope']];
+  const SERVICES = [['prometheus', 'Prometheus'], ['strata', 'Strata'], ['grafana', 'Grafana'], ['evalscope', 'EvalScope']];
   const svc = (v) => (v === true ? { tone: 'ok', text: '在线' } : v === false ? { tone: 'bad', text: '未响应' } : { tone: 'off', text: '未检测' });
   return h('div', { style: { display: 'flex', 'flex-direction': 'column', gap: '14px' } },
     h('div', { class: 'group' },
@@ -84,20 +89,36 @@ function gatewayCalls(o, kpis) {
 }
 
 export async function overview(ctx) {
-  let model;
-  let states = {};
-  if (ctx.demo) {
-    model = demoOverview();
-  } else {
-    const [ops, host, gw] = await Promise.all([loadOps(), loadHost(), loadData(PATHS.gatewayOverview)]);
-    states = { ops: ops.state, host: host.state, calls: gw.state };
-    model = overviewModel({ ops: ops.value, host: host.value });
-    if (gw.state === 'ready') Object.assign(model, gatewayCalls(gw.value, model.kpis));
-  }
+  if (ctx.demo) return renderOverview(demoOverview(), {});
+  const values = { ops: null, host: null, calls: null };
+  const states = { ops: 'loading', host: 'loading', calls: 'loading' };
+  const model = () => {
+    const value = overviewModel({ ops: values.ops, host: values.host });
+    if (values.calls) Object.assign(value, gatewayCalls(values.calls, value.kpis));
+    return value;
+  };
+  const root = renderOverview(model(), states);
+  ctx = pageScope(ctx, root);
+  const sources = { ops: () => readOps(ctx), host: () => loadHost({ signal: ctx.signal }), calls: () => loadData(PATHS.gatewayOverview, { signal: ctx.signal }) };
+  for (const [key, load] of Object.entries(sources)) load().then(r => {
+    if (ctx.signal.aborted) return;
+    values[key] = r.value; states[key] = r.state;
+    const next = renderOverview(model(), states);
+    // Each source owns its panels; a late GPU read must not reset API chart controls.
+    const parts = { ops: [1, 2, 3], host: [1, 2], calls: [1, 4] }[key];
+    const nodes = [...next.children];
+    for (const i of parts) root.children[i].replaceWith(nodes[i]);
+  });
+  return root;
+}
+
+function renderOverview(model, states) {
   const now = new Date();
   const stamp = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  // 登记只有一个主入口（「推理服务」页）。这里留一个次级链接，不再挂 primary：
+  // 两个都做成主按钮，用户会以为是两件不同的事。
   const head = pageHead('概览', `RTX A6000 工作站 · 数据截至 ${stamp}`,
-    h('a', { class: 'btn primary', href: '#/services/register' }, '登记推理服务'));
+    h('a', { class: 'btn', href: '#/services/register' }, '登记推理服务'));
 
   const vramBody = model.vram
     ? vramPanel(model.vram)
@@ -105,7 +126,7 @@ export async function overview(ctx) {
 
   const services = model.services;
   const servicesBody = services
-    ? (services.length ? servicesTable(services, { compact: true }) : quietEmpty('ready', SERVICES_EMPTY))
+    ? (services.length ? servicesTable(services.slice(0, 10), { compact: true }) : quietEmpty('ready', SERVICES_EMPTY))
     : quietEmpty(states.ops ?? 'not_configured', { title: '推理服务列表暂不可用', body: '当前会话还读不到注册中心的服务列表。' });
 
   const dist = model.distribution
@@ -124,11 +145,11 @@ export async function overview(ctx) {
     h('div', { class: 'row' },
       panel('grow', '显存分配', model.vram ? `GPU 显存 ${fmtGiB(model.vram.totalMiB, 0)} GB · 每个方块代表 0.25 GB` : null, vramBody),
       panel('side', 'GPU 与服务', null, gpuFacts(model.host, states.host ?? 'not_configured'))),
-    panel('', '推理服务与模型', services?.length ? `${services.length} 个已登记 · 点击「推理服务」查看详情与访问范围` : null, servicesBody),
+    panel('', '推理服务与模型', services?.length ? `${services.length} 个已登记 · 显示前 10 项` : null, servicesBody, h('a', { class: 'linkbtn', href: '#/services' }, '查看全部服务')),
     h('section', { style: { display: 'flex', 'flex-direction': 'column', gap: '16px' }, 'aria-labelledby': 'calls-title' },
       h('div', { class: 'page-head' },
         h('h2', { id: 'calls-title', style: { margin: 0, 'font-size': '19px', 'font-weight': 600 } }, 'API 调用'),
-        h('a', { class: 'linkbtn', href: '#/gateway' }, '打开网关')),
+        h('a', { class: 'linkbtn', href: '#/gateway' }, '打开调用统计')),
       hasCalls
         ? h('div', { class: 'row' },
           panel('grow', '调用分布', `内环为${model.distribution?.innerLabel ?? 'API 密钥'}，外环为其调用的模型`, dist),
@@ -138,29 +159,19 @@ export async function overview(ctx) {
 
 /* ============================== 推理服务 ============================== */
 export async function services(ctx) {
-  let list; let state = 'ready';
-  if (ctx.demo) list = demoServices();
-  else {
-    const r = await loadOps();
-    state = r.state;
-    list = r.state === 'ready' ? servicesFromOps(r.value) : null;
-  }
-  const body = list
-    ? (list.length ? servicesTable(list) : h('div', { class: 'group' }, quietEmpty('ready', SERVICES_EMPTY)))
-    : emptyState(state);
-  return h('div', { class: 'page' },
-    pageHead('推理服务', '实验室内已登记的推理引擎进程。服务归登记它的平台账户所有，「运行用户」是登记时检测到的监听进程所属 Linux 用户。服务跑在哪个可执行文件上，平台目前没有证据（扫描器不读进程），所以不猜。',
-      h('a', { class: 'btn primary', href: '#/services/register' }, '手动登记')),
-    body,
-    discoveryPanel(ctx, 'engines'),
-    agentReportsPanel(ctx));
+  const root = h('div', { class: 'page' });
+  ctx = pageScope(ctx, root);
+  const list = registryList(ctx, { project: servicesFromOps, render: servicesTable, demoRows: ctx.demo ? demoServices() : [],
+    empty: () => h('div', { class: 'group' }, quietEmpty('ready', SERVICES_EMPTY)) });
+  put(root, pageHead('推理服务', '本人服务的连接状态与运行参数。',
+    h('a', { class: 'btn primary', href: '#/services/register' }, '登记推理服务')), list.root, discoveryDetails(ctx, 'engines'));
+  return root;
 }
 
 /* ============================== 推理引擎 ============================== */
 const BUILDS_EMPTY = {
-  title: '引擎库还是空的',
-  body: '装着的引擎由本机代理扫描后自动入账到本人账户名下：在自己的 Linux 账户下运行 `llmlab agent`。'
-    + '它只读目录、不执行找到的程序，所以可执行文件的版本号通常是空的。',
+  title: '尚未发现推理引擎',
+  body: '在自己的 Linux 账户下运行 llmlab agent，自动同步安装环境。',
 };
 
 /** 引擎库里的一行：这是**文件**，不是进程。 */
@@ -175,24 +186,22 @@ function buildsTable(list) {
       h('td', {}, b.owner ?? '—', b.self ? h('span', { class: 'muted' }, '（我）') : null),
       h('td', { class: b.path ? 'mono' : 'muted', style: { 'font-size': '12px', 'word-break': 'break-all' } },
         b.path ?? (b.redacted ? '仅所有者可见' : '—'),
-        b.env ? h('div', { class: 'muted', style: { 'font-size': '12px' } }, `虚拟环境 ${b.env}`) : null),
+        b.env ? h('div', { class: 'muted', style: { 'font-size': '12px' } }, `环境 ${b.env}`) : null,
+        b.locations?.length > 1 ? h('details', {}, h('summary', {}, `${b.locations.length} 个安装文件`), b.locations.map(p => h('div', { class: 'mono muted' }, p))) : null),
       h('td', { class: 'muted' }, relTime(b.lastSeenAt)))))));
 }
 
 export async function engines(ctx) {
-  let list; let state = 'ready';
-  if (ctx.demo) list = [
+  const root = h('div', { class: 'page' });
+  ctx = pageScope(ctx, root);
+  const list = registryList(ctx, { project: buildsFromOps, render: buildsTable,
+    demoRows: ctx.demo ? [
     { id: 'b1', framework: 'llama.cpp', version: 'b4120', foundAs: 'executable', path: '/usr/local/bin/llama-server', env: null, redacted: false, owner: '我', self: true, lastSeenAt: new Date(Date.now() - 12 * 60000).toISOString() },
     { id: 'b2', framework: 'vllm', version: '0.6.3', foundAs: 'python_package', path: '/opt/vllm/.venv/lib/python3.12/site-packages/vllm-0.6.3.dist-info', env: '/opt/vllm/.venv', redacted: false, owner: '陈静', self: false, lastSeenAt: null },
-  ];
-  else { const r = await loadOps(); state = r.state; list = r.state === 'ready' ? buildsFromOps(r.value) : null; }
-  return h('div', { class: 'page' },
-    pageHead('推理引擎', '磁盘上装着的引擎 build：一个可执行文件、一个 Python 包或一棵源码树。它说明这台机器**能**跑什么；「推理服务」是正在跑起来的那个进程。'
-      + '这些行由本机代理扫描后自动记在本人账户名下 —— 没有手工登记入口，因为一个只有扫描才看得见的文件，人填不出来。'),
-    list
-      ? (list.length ? buildsTable(list) : h('div', { class: 'group' }, quietEmpty('ready', BUILDS_EMPTY)))
-      : emptyState(state),
-    discoveryPanel(ctx, 'installed'));
+  ] : [],
+    empty: () => h('div', { class: 'group' }, quietEmpty('ready', BUILDS_EMPTY)) });
+  put(root, pageHead('推理引擎', 'Agent 发现的推理框架与安装环境。'), list.root, discoveryDetails(ctx, 'installed'));
+  return root;
 }
 
 /* ---------- 本机发现：推理服务与模型共用 ---------- */
@@ -200,7 +209,24 @@ const fmtBytes = (n) => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : `
 
 const ENGINE_FOUND_AS = { executable: '可执行文件', python_package: 'Python 包', source_tree: '源码/构建树' };
 
-const scannedKinds = new Set();
+
+
+function discoveryDetails(ctx, kind) {
+  let loaded = false;
+  let pending = null;
+  const listeners = new Set();
+  ctx = { ...ctx, discoveryRead: () => {
+    if (!pending) pending = loadDiscovery({ signal: ctx.signal }).then(r => {
+      if (!ctx.signal?.aborted) for (const fn of listeners) fn(r);
+      return r;
+    }).finally(() => { pending = null; });
+    return pending;
+  }, onDiscovery: fn => listeners.add(fn) };
+  const details = h('details', { class: 'discovery-details', ontoggle: () => {
+    if (details.open && !loaded) { loaded = true; put(details, discoveryPanel(ctx, kind), kind !== 'installed' ? agentReportsPanel(ctx) : null); }
+  } }, h('summary', {}, '发现记录与诊断'));
+  return details;
+}
 
 function discoveryPanel(ctx, kind) {
   const holder = h('div', {});
@@ -208,13 +234,12 @@ function discoveryPanel(ctx, kind) {
   const title = kind === 'engines' ? '本机发现 · 推理服务'
     : kind === 'models' ? '本机发现 · 模型目录' : '本机发现 · 已安装的引擎';
   const intro = kind === 'engines'
-    ? '列出本机回环地址上正在监听、端口在允许列表内的服务，并读取它的模型清单与运行用户。只读；点「登记」才会加入资源池。'
+    ? '检查本机服务与 Agent 上报，补充登记遗漏的本人服务。'
     : kind === 'models'
-      ? '在管理员授权的模型目录里查找 Hugging Face 模型目录与 GGUF 文件。只读取 config.json 与文件名、大小，不打开权重。'
-      : '磁盘上装着哪些推理引擎，跑没跑都列。不启动、不执行找到的程序；版本只从 pip 的元数据目录读，可执行文件的版本不探测。';
+      ? '检查授权目录中发现的模型。自动扫描由所有者的 Agent 执行。'
+      : '查看已发现的安装位置与版本。';
 
   async function scan() {
-    scannedKinds.add(kind);
     st.busy = true; st.msg = null; draw();
     if (ctx.demo) {
       st.data = { configured: true, problems: [], installed_engines: [
@@ -229,23 +254,33 @@ function discoveryPanel(ctx, kind) {
       ] };
       st.state = 'ready';
     } else {
-      const r = await loadDiscovery();
+      const r = await (ctx.discoveryRead?.() ?? loadDiscovery({ signal: ctx.signal }));
+      if (ctx.signal?.aborted) return;
       st.state = r.state; st.data = r.state === 'ready' ? r.value : null;
     }
     st.busy = false; draw();
   }
 
+  /** 发现到的服务不在这里另开一条登记流程：带着已知字段进同一个向导。
+   *  两条流程意味着两套校验、两套报错文案，迟早会给出互相矛盾的结论。 */
+  function registerHref(item) {
+    const q = new URLSearchParams();
+    if (item.port != null) q.set('port', String(item.port));
+    if (item.suggested_name) q.set('name', item.suggested_name);
+    if (item.framework) q.set('framework', item.framework);
+    return `#/services/register?${q.toString()}`;
+  }
+
   async function register(item) {
     const key = item.port ?? item.path;
     if (ctx.demo) { st.done.add(key); draw(); return; }
-    const body = kind === 'engines'
-      ? { name: item.suggested_name, target_url: item.target_url, protocol: 'openai_compatible', ...(item.framework ? { tags: [`framework:${item.framework}`] } : {}) }
-      : { name: item.suggested_name, weight_path: item.path, format: item.format };
-    const r = await send(kind === 'engines' ? PATHS.registryEngines : PATHS.registryModels, body);
+    const body = { name: item.suggested_name, weight_path: item.path, format: item.format };
+    const r = await send(PATHS.registryModels, body);
     if (!r.ok) {
       st.msg = r.status === 409 ? '已被登记（地址或名称冲突）。' : (r.message ?? `登记失败（${r.reason}）`);
       draw(); return;
     }
+    if (ctx.signal?.aborted) return;
     st.done.add(key); st.msg = null;
     // 登记后整页重绘：上方的已登记列表与这里的候选状态一起刷新。
     if (ctx.rerender) { ctx.rerender(); return; }
@@ -276,7 +311,9 @@ function discoveryPanel(ctx, kind) {
             ? h('span', { class: 'muted' }, item.registered_by_me || st.done.has(key) ? '已登记（我）' : '已被登记')
             : (kind === 'engines' && !item.openai_compatible)
               ? h('span', { class: 'muted' }, '不是 OpenAI 兼容接口')
-              : h('button', { type: 'button', class: 'btn', onclick: () => register(item) }, '登记');
+              : kind === 'engines'
+                ? h('a', { class: 'btn', href: registerHref(item) }, '去登记')
+                : h('button', { type: 'button', class: 'btn', onclick: () => register(item) }, '登记');
         const cells = kind === 'engines'
           ? [h('td', { class: 'tnum' }, String(item.port)), h('td', { class: 'tnum' }, item.run_as_user ?? (item.run_as_uid != null ? `uid ${item.run_as_uid}` : '—')),
             h('td', {}, engineLabel(item.framework)), h('td', {}, (item.models ?? []).join('、') || '—')]
@@ -306,8 +343,7 @@ function discoveryPanel(ctx, kind) {
         (st.data?.problems ?? []).length ? h('p', { class: 'muted', style: { margin: 0, 'font-size': '12px' } }, `提示：${st.data.problems.join('；')}`) : null)));
   }
   draw();
-  // 这次会话里扫过一次，重绘（例如登记之后）就直接重新扫，不让结果凭空消失。
-  if (scannedKinds.has(kind)) scan();
+  ctx.onDiscovery?.(r => { st.state = r.state; st.data = r.value; draw(); });
   return holder;
 }
 
@@ -410,7 +446,8 @@ export function agentReportsPanel(ctx) {
       };
       st.state = 'ready';
     } else {
-      const r = await loadDiscovery();
+      const r = await (ctx.discoveryRead?.() ?? loadDiscovery({ signal: ctx.signal }));
+      if (ctx.signal?.aborted) return;
       st.state = r.state; st.data = r.state === 'ready' ? r.value : null;
     }
     st.busy = false; draw();
@@ -469,25 +506,39 @@ export function agentReportsPanel(ctx) {
 }
 
 /* ============================== 模型库 ============================== */
+function modelsTable(list) {
+  return h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
+          h('thead', {}, h('tr', {}, ['模型', '格式 / 用途', '参数量 / 大小', '所有者', '位置'].map((t) => h('th', { scope: 'col' }, t)))),
+          h('tbody', {}, list.map((m) => h('tr', {},
+            h('td', {}, h('div', { style: { 'font-weight': 500 } }, m.name), m.description ? h('div', { class: 'muted', style: { 'font-size': '12px' } }, m.description) : null),
+            h('td', {}, m.format === 'hf' ? 'Hugging Face' : m.format === 'gguf' ? 'GGUF' : (m.format ?? '—'), m.task ? h('div', { class: 'muted' }, ({ chat: '对话', vision: '视觉语言', image: '图像', video: '视频', embedding: '向量', rerank: '重排', decision: '决策', unknown: '待识别' })[m.task] ?? m.task) : null),
+            h('td', { class: 'tnum' }, m.params ?? '—', m.sizeBytes != null ? h('div', { class: 'muted' }, fmtBytes(m.sizeBytes)) : null),
+            h('td', {}, m.owner ?? '—', m.self ? h('span', { class: 'muted' }, '（我）') : null),
+            h('td', { class: m.weightPath ? 'mono' : 'muted', style: { 'font-size': '12px', 'word-break': 'break-all' } }, m.weightPath ?? (m.self ? '—' : '仅所有者可见'), m.locations?.length ? h('details', { class: 'model-locations' }, h('summary', {}, `${m.locations.filter(l => l.state === 'present').length} 个已观测位置`), m.locations.map(l => h('div', {}, l.path, h('span', { class: 'muted' }, l.state === 'present' ? ' · 已发现' : ' · 未找到')))) : null))))));
+}
+
 export async function models(ctx) {
-  let list; let state = 'ready';
+  let list = [];
   if (ctx.demo) list = [
     { id: 'm1', name: 'Qwen2.5-32B-Instruct', format: 'hf', params: '32B', owner: '张伟', self: true, weightPath: '/data/models/Qwen2.5-32B-Instruct', description: '对话' },
     { id: 'm2', name: 'bge-m3', format: 'hf', params: '568M', owner: '陈静', self: false, weightPath: null, description: '向量化' },
   ];
-  else { const r = await loadOps(); state = r.state; list = r.state === 'ready' ? modelsFromOps(r.value) : null; }
   const root = h('div', { class: 'page' });
+  ctx = pageScope(ctx, root);
+  const formSlot = h('div', { hidden: true });
+  const listing = registryList(ctx, { project: modelsFromOps, render: modelsTable, demoRows: list,
+    empty: () => h('div', { class: 'group' }, quietEmpty('ready', { title: '还没有登记模型', body: 'Agent 自动发现，也可以手动登记。' })) });
   const st = { open: false, msg: null, form: { name: '', weight_path: '', format: 'hf', parameter_count: '', description: '' } };
 
   async function submit() {
     const f = st.form;
     if (!f.name) { st.msg = '请填写模型名称。'; draw(); return; }
-    if (ctx.demo) { list.push({ id: `m${list.length + 1}`, name: f.name, format: f.format, params: f.parameter_count || null, owner: '我', self: true, weightPath: f.weight_path || null, description: f.description || null }); st.open = false; draw(); return; }
+    if (ctx.demo) { list.push({ id: `m${list.length + 1}`, name: f.name, format: f.format, params: f.parameter_count || null, owner: '我', self: true, weightPath: f.weight_path || null, description: f.description || null }); st.open = false; listing.setRows(list); draw(); return; }
     const body = Object.fromEntries(Object.entries(f).filter(([, v]) => v));
     const r = await send(PATHS.registryModels, body);
     if (!r.ok) { st.msg = r.status === 409 ? '你已有同名模型。' : (r.message ?? `登记失败（${r.reason}）`); draw(); return; }
-    const fresh = await loadOps();
-    if (fresh.state === 'ready') list = modelsFromOps(fresh.value);
+    if (ctx.signal.aborted) return;
+    await listing.refresh();
     st.open = false; st.msg = null; st.form = { name: '', weight_path: '', format: 'hf', parameter_count: '', description: '' };
     draw();
   }
@@ -504,31 +555,17 @@ export async function models(ctx) {
       h('div', { class: 'cell', style: { gap: '10px', 'justify-content': 'flex-end' } },
         h('button', { type: 'button', class: 'btn', onclick: () => { st.open = false; st.msg = null; draw(); } }, '取消'),
         h('button', { type: 'button', class: 'btn primary', onclick: submit }, '登记'))),
-    '权重位置只是登记引用：平台不移动、不复制、不打开权重文件，其他成员也看不到这个路径。');
+    '路径仅本人可见。登记只保存引用。');
   }
 
   function draw() {
-    while (root.firstChild) root.firstChild.remove();
-    put(root, pageHead('模型库', '实验室登记的模型。模型和推理服务都是资源池里的资源：模型说明「是什么」，推理服务负责「运行它」。',
-      h('button', { type: 'button', class: 'btn primary', onclick: () => { st.open = true; draw(); } }, '登记模型')));
-    if (st.msg) put(root, h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.msg));
-    if (st.open) put(root, form());
-    put(root, list
-      ? (list.length
-        ? h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
-          h('thead', {}, h('tr', {}, ['模型', '格式', '参数量', '所有者', '权重位置'].map((t) => h('th', { scope: 'col' }, t)))),
-          h('tbody', {}, list.map((m) => h('tr', {},
-            h('td', {}, h('div', { style: { 'font-weight': 500 } }, m.name), m.description ? h('div', { class: 'muted', style: { 'font-size': '12px' } }, m.description) : null),
-            h('td', {}, m.format === 'hf' ? 'Hugging Face' : m.format === 'gguf' ? 'GGUF' : (m.format ?? '—')),
-            h('td', { class: 'tnum' }, m.params ?? '—'),
-            h('td', {}, m.owner ?? '—', m.self ? h('span', { class: 'muted' }, '（我）') : null),
-            h('td', { class: m.weightPath ? 'mono' : 'muted', style: { 'font-size': '12px', 'word-break': 'break-all' } }, m.weightPath ?? (m.self ? '—' : '仅所有者可见')))))))
-        : h('div', { class: 'group' }, quietEmpty('ready', { title: '还没有登记模型', body: '点击「登记模型」手动添加，或用下方的本机发现从授权目录里挑选。' })))
-      : emptyState(state));
-    put(root, discoveryPanel(ctx, 'models'));
-    put(root, agentReportsPanel(ctx));
+    clear(formSlot); formSlot.hidden = !st.open && !st.msg;
+    if (st.msg) put(formSlot, h('p', { class: 'form-error', role: 'alert' }, st.msg));
+    if (st.open) put(formSlot, form());
   }
-  draw();
+  put(root, pageHead('模型库', '模型文件与版本。Agent 持续跟踪位置。',
+    h('button', { type: 'button', class: 'btn primary', onclick: () => { st.open = true; draw(); } }, '登记模型')),
+    formSlot, listing.root, discoveryDetails(ctx, 'models'));
   return root;
 }
 
@@ -536,7 +573,19 @@ export async function models(ctx) {
 const FRAMEWORKS = [['vllm', 'vLLM'], ['sglang', 'SGLang'], ['tei', 'Text Embeddings Inference'], ['ollama', 'Ollama'], ['llama.cpp', 'llama.cpp'], ['strata', 'Strata']];
 
 export async function register(ctx) {
-  const st = { step: 1, framework: 'vllm', port: '', name: '', scope: 'private', checks: null, error: null, cli: null, busy: false };
+  // 「发现记录」里点「去登记」带过来已知字段，走的是这同一个向导。
+  const preset = (() => {
+    if (typeof location === 'undefined') return new URLSearchParams();
+    const at = location.hash.indexOf('?');
+    return new URLSearchParams(at >= 0 ? location.hash.slice(at + 1) : '');
+  })();
+  const st = {
+    step: 1,
+    framework: FRAMEWORKS.some(([v]) => v === preset.get('framework')) ? preset.get('framework') : 'vllm',
+    port: preset.get('port') ?? '',
+    name: preset.get('name') ?? '',
+    checks: null, error: null, cli: null, busy: false,
+  };
   const root = h('div', { class: 'page narrow' });
 
   const field = (label, input) => h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, label), input);
@@ -570,7 +619,7 @@ export async function register(ctx) {
       name: st.name,
       protocol: 'openai_compatible',
       target_url: target(),
-      tags: [`framework:${st.framework}`, `scope:${st.scope}`],
+      tags: [`framework:${st.framework}`],
     });
     st.busy = false;
     if (!r.ok) { st.error = failText(r, '发布'); draw(); return; }
@@ -592,7 +641,7 @@ export async function register(ctx) {
 
   function draw() {
     while (root.firstChild) root.firstChild.remove();
-    const labels = ['服务配置', '登记检查', '发布'];
+    const labels = ['服务配置', '登记检查', '完成'];
     put(root, 
       h('header', {},
         h('a', { class: 'crumb', href: '#/services' }, '推理服务'),
@@ -611,19 +660,16 @@ export async function register(ctx) {
           field('推理框架', sel),
           field('监听端口', h('input', { class: 'tnum', inputmode: 'numeric', placeholder: '8000', value: st.port, oninput: (e) => { st.port = e.target.value.trim(); } })),
           field('服务名称', h('input', { placeholder: 'qwen2.5-7b-sft-v3', value: st.name, oninput: (e) => { st.name = e.target.value.trim(); }, style: { width: '260px' } }))),
-          '服务仅需监听 127.0.0.1，端口须在管理员允许的列表内（默认 8000、8001、8081、9000、9001）。服务名称即调用时的 model 参数，不能与你已有的服务重名。'),
-        h('fieldset', { style: { border: 0, padding: 0, margin: 0 } },
-          h('legend', { class: 'section-title', style: { 'margin-bottom': '8px' } }, '访问范围'),
-          h('div', { class: 'group' }, [['private', '仅本人'], ['all', '全部成员'], ['selected', '指定成员']].map(([v, l]) =>
-            h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, l),
-              h('input', { type: 'radio', name: 'scope', value: v, checked: st.scope === v, onchange: () => { st.scope = v; }, style: { width: '18px', height: '18px' } }))))));
+          '服务仅需监听 127.0.0.1，端口须在管理员允许的列表内（默认 8000、8001、8081、9000、9001）。服务名称即调用时的 model 参数，不能与你已有的服务重名。'));
+      // 「访问范围」不再出现在这里：这个选择从来没有产生过任何效果（只写进一个
+      // tag，服务本身没有可见性字段），给用户一个按了不生效的开关，比不给更糟。
     } else if (st.step === 2) {
       put(root, section('校验结果', h('div', { class: 'group' }, st.checks.list.map((c) => h('div', { class: 'check' }, checkIcon(c.ok),
         h('div', {}, h('div', { style: { 'font-weight': 500 } }, c.title), h('div', { class: 'muted', style: { 'font-size': '13px' } }, c.detail)))))));
     } else {
       put(root, 
-        h('div', { style: { display: 'flex', 'align-items': 'center', gap: '12px' } }, checkIcon(true, 28), h('h2', { style: { margin: 0, 'font-size': '22px', 'font-weight': 600 } }, '服务已发布')),
-        h('p', { class: 'muted', style: { margin: 0 } }, `${st.name} 当前访问范围为「${{ private: '仅本人', all: '全部成员', selected: '指定成员' }[st.scope]}」，可在「推理服务」中查看运行状态。`),
+        h('div', { style: { display: 'flex', 'align-items': 'center', gap: '12px' } }, checkIcon(true, 28), h('h2', { style: { margin: 0, 'font-size': '22px', 'font-weight': 600 } }, '服务已登记')),
+        h('p', { class: 'muted', style: { margin: 0 } }, `${st.name} 已登记，可在「推理服务」中查看连接状态。要用 API 调用它，还需要在「API 接入」里把它发布成一个模型名，再到「API 密钥」里创建一把密钥。`),
         section('调用示例', h('div', { class: 'code' },
           `curl ${location.origin}/v1/chat/completions \\\n  -H "Authorization: Bearer $LLMLAB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model": "${st.name}", "messages": [{"role": "user", "content": "Hello"}]}'`)));
     }
@@ -634,7 +680,7 @@ export async function register(ctx) {
     put(root, h('div', { class: 'actions' },
       h('button', { type: 'button', class: 'btn', onclick: () => { if (st.step === 1) ctx.navigate('#/services'); else { st.step -= 1; st.error = null; draw(); } } }, st.step === 1 ? '取消' : '上一步'),
       st.step === 1 ? h('button', { type: 'button', class: 'btn primary', disabled: st.busy, onclick: verify }, st.busy ? '正在校验…' : '开始校验')
-        : st.step === 2 ? h('button', { type: 'button', class: 'btn primary', disabled: blocked || st.busy, onclick: publish }, st.busy ? '正在发布…' : '发布')
+        : st.step === 2 ? h('button', { type: 'button', class: 'btn primary', disabled: blocked || st.busy, onclick: publish }, st.busy ? '正在登记…' : '登记')
           : h('a', { class: 'btn primary', href: '#/services' }, '完成')),
       h('p', { class: 'muted', style: { margin: 0, 'padding-top': '20px', 'border-top': '1px solid var(--hairline)', 'font-size': '13px' } },
         '管理员可以在「用户与权限」中为某个账户指定 Linux 用户，指定后该账户只能登记由这个 Linux 用户运行的服务。'));
@@ -648,7 +694,7 @@ export async function account(ctx) {
   const me = ctx.me ?? {};
   const row = (label, value) => h('div', { class: 'cell' }, h('span', { class: 'grow' }, label), h('span', { class: value ? null : 'muted' }, value ?? '—'));
   return h('div', { class: 'page narrow' },
-    pageHead('我的账户', '平台账户、命令行与 Agent 令牌。调用模型用的 API 密钥在「网关 → API 密钥」。'),
+    pageHead('我的账户', '平台账户、命令行与 Agent 令牌。调用模型用的 API 密钥在「我的 API → API 密钥」。'),
     section('账户', h('div', { class: 'group' },
       row('用户名', me.username ?? me.subject),
       row('显示名称', me.display_name),
@@ -660,7 +706,7 @@ export async function account(ctx) {
       h('div', { class: 'cell' }, h('span', { class: 'grow' }, '模型调用（OpenAI 兼容）'), h('span', { class: 'mono' }, `${location.origin}/v1`)),
       h('div', { class: 'cell' }, h('span', { class: 'grow' }, '命令行工具'), h('span', { class: 'mono' }, 'llmlab --help')),
       h('a', { class: 'cell action', href: '#/gateway/keys' }, '管理 API 密钥')),
-    '用上面创建的令牌配置 llmlab 后，可以执行 llmlab discover、engines、models、endpoints 等命令；加 --json 输出给 Agent 解析。'));
+    '用上面创建的令牌配置 llmlab 后，可以执行 llmlab discover、engines、models 等命令；加 --json 输出给 Agent 解析。'));
 }
 
 /* ---------- CLI / Agent 令牌 ---------- */
@@ -671,12 +717,14 @@ async function agentTokens(ctx) {
   const holder = h('div', {});
   let list = []; let state = 'ready';
   if (ctx.demo) list = [{ token_id: 't1', label: 'claude-code', scopes: ['registry:read', 'registry:write', 'registry:endpoint:invoke', 'registry:endpoint:share'], created_at: Date.now() / 1000 - 86400, expires_at: Date.now() / 1000 + 29 * 86400, last_used_at: Date.now() / 1000 - 600, revoked: false }];
-  else { const r = await loadTokens(); state = r.state; list = r.state === 'ready' ? r.value : null; }
+  else { const r = await loadTokens({ signal: ctx.signal }); state = r.state; list = r.state === 'ready' ? r.value : null; }
   const st = { label: 'my-agent', days: 30, issued: null, msg: null };
 
-  async function refresh() { if (ctx.demo) return; const r = await loadTokens(); if (r.state === 'ready') list = r.value; }
+  async function refresh() { if (ctx.demo) return; const r = await loadTokens({ signal: ctx.signal }); if (r.state === 'ready') list = r.value; }
   async function mint() {
-    if (ctx.demo) { st.issued = { token: 'llt_demo_xxxxxxxxxxxxxxxxxxxx', label: st.label }; draw(); return; }
+    // 前缀与真实签发格式一致（`backend/auth/tokens.py:105` TOKEN_PREFIX），
+    // 但带 `demo` 标记，避免演示屏上的假令牌被当成真的。
+    if (ctx.demo) { st.issued = { token: 'llmlab_demo_xxxxxxxxxxxxxxxxxxxx', label: st.label }; draw(); return; }
     const r = await send(PATHS.tokens, { label: st.label || null, ttl_seconds: st.days * 86400 });
     if (!r.ok) { st.msg = r.message ?? `创建失败（${r.reason}）`; draw(); return; }
     st.issued = r.data; st.msg = null; await refresh(); draw();
@@ -738,7 +786,7 @@ function myShare(sys, me, gpuTotalMiB) {
     h('div', { class: 'mine' },
       gauge('内存', memTotal ? row.memory_mib / memTotal : null, `${fmtGiB(row.memory_mib)} GB`, '#30B0C7'),
       gauge('CPU（整机）', row.cpu_ratio == null ? null : row.cpu_ratio / (cores || 1), row.cpu_ratio == null ? '—' : `${(row.cpu_ratio * 100).toFixed(1)}% 核`, '#34C759'),
-      gauge('显存', row.vram_mib != null && gpuTotalMiB ? row.vram_mib / gpuTotalMiB : (gpuTotalMiB ? 0 : null), row.vram_mib == null ? '0 GB' : `${fmtGiB(row.vram_mib)} GB`, '#5856D6'),
+      gauge('显存', row.vram_mib != null && gpuTotalMiB ? row.vram_mib / gpuTotalMiB : null, row.vram_mib == null ? '—' : `${fmtGiB(row.vram_mib)} GB`, '#5856D6'),
       h('div', { class: 'gauge' }, h('div', { class: 'gauge-value', style: { 'font-size': '30px', 'min-width': '56px', 'text-align': 'center' } }, fmtInt(row.processes)),
         h('div', {}, h('div', { class: 'gauge-label' }, '进程数'), h('div', { class: 'muted', style: { 'font-size': '12.5px' } }, `${(sys.gpu_processes ?? []).filter((g) => g.user === me).length} 个在用 GPU`)))));
 }
@@ -759,7 +807,7 @@ function userDonuts(sys, me, gpuTotalMiB, focus = {}, onFocus = null) {
   const memUsed = (sys.per_user ?? []).reduce((t, u) => t + (u.memory_mib ?? 0), 0);
   const vramUsed = humans.reduce((t, u) => t + (u.vram_mib ?? 0), 0);
   const gib = (v) => `${fmtGiB(v)} GB`;
-  return panel('', '按用户看资源', '点扇区或图例聚焦；「我」默认高亮。内存只统计进程常驻内存，缓存与内核占用计入「其他 / 空闲」。',
+  return h('div', {}, h('p', { class: 'chart-caption' }, '内存按进程统计；缓存与内核占用包含在其他项中。'),
     h('div', { class: 'donut-grid' },
       h('div', {}, h('div', { class: 'section-title', style: { 'margin-bottom': '8px' } }, '内存'),
         donutPanel(items('memory_mib'), {
@@ -770,12 +818,12 @@ function userDonuts(sys, me, gpuTotalMiB, focus = {}, onFocus = null) {
         // cpu_ratio 以「核」计（1.0 = 跑满一个线程）；这里换成占整机的百分比。
         donutPanel(items('cpu_ratio').map((i) => ({ ...i, value: ((i.value ?? 0) / (sys.cpu?.cores || 1)) * 100 })), {
           title: 'CPU（整机）', fmt: (v) => `${v.toFixed(v < 1 ? 2 : 1)}%`, focus: focus.cpu, onFocus: onFocus && ((id) => onFocus('cpu', id)),
-          rest: { label: '空闲', value: Math.max(0, 100 - (sys.per_user ?? []).reduce((t, u) => t + ((u.cpu_ratio ?? 0) / (sys.cpu?.cores || 1)) * 100, 0)) },
+          rest: { label: '其他 / 空闲', value: Math.max(0, 100 - (sys.per_user ?? []).reduce((t, u) => t + ((u.cpu_ratio ?? 0) / (sys.cpu?.cores || 1)) * 100, 0)) },
         })),
       gpuTotalMiB ? h('div', {}, h('div', { class: 'section-title', style: { 'margin-bottom': '8px' } }, '显存'),
         donutPanel(items('vram_mib').filter((i) => i.id !== '__system'), {
           title: 'GPU 显存', fmt: gib, focus: focus.vram, onFocus: onFocus && ((id) => onFocus('vram', id)),
-          rest: { label: '空闲', value: Math.max(0, gpuTotalMiB - vramUsed) },
+          rest: { label: '其他 / 空闲', value: Math.max(0, gpuTotalMiB - vramUsed) },
         })) : null));
 }
 
@@ -815,7 +863,7 @@ function hostSystem(sys, me) {
 }
 
 /** 页面的那些块。数据全在 ``st`` 里，重绘只换内容，不换控件（频率、聚焦都不重来）。 */
-function usageBlocks(ctx, st) {
+function usageSections(ctx, st) {
   const model = st.model;
   const sys = st.sys;
   const hf = model.host;
@@ -825,23 +873,29 @@ function usageBlocks(ctx, st) {
   const cards = [
     { label: 'GPU 显存', tint: '#5856D6', glyph: 'memory', value: hf?.vramUsedMiB == null ? '—' : fmtGiB(hf.vramUsedMiB), unit: hf?.vramTotalMiB ? `/ ${fmtGiB(hf.vramTotalMiB, 0)} GB` : null, note: hf?.vramUsedMiB != null && hf.vramTotalMiB ? `已用 ${Math.round(hf.vramUsedMiB / hf.vramTotalMiB * 100)}%` : '暂无 GPU 读数' },
     { label: 'GPU 利用率', tint: '#FF9500', glyph: 'usage', value: hf?.utilRatio == null ? '—' : `${Math.round(hf.utilRatio * 100)}%`, note: [hf?.tempC != null ? `${Math.round(hf.tempC)} °C` : null, hf?.powerW != null ? `${Math.round(hf.powerW)} W` : null].filter(Boolean).join(' · ') || '暂无 GPU 读数' },
-    { label: 'CPU', tint: '#34C759', glyph: 'cpu', value: sys ? `${(sys.cpu.utilization_ratio * 100).toFixed(1)}%` : '—', note: sys ? `${sys.cpu.cores} 线程 · 负载 ${sys.cpu.load1} / ${sys.cpu.load5} / ${sys.cpu.load15}` : '暂无主机读数' },
+    { label: 'CPU', tint: '#34C759', glyph: 'cpu', value: sys?.cpu?.utilization_ratio != null ? `${(sys.cpu.utilization_ratio * 100).toFixed(1)}%` : '—', note: sys ? `${sys.cpu.cores} 线程 · 负载 ${sys.cpu.load1} / ${sys.cpu.load5} / ${sys.cpu.load15}` : '暂无主机读数' },
     { label: '内存', tint: '#30B0C7', glyph: 'services', value: mem ? fmtGiB(mem.used_mib) : '—', unit: mem ? `/ ${fmtGiB(mem.total_mib, 0)} GB` : null, note: mem ? `Swap ${fmtGiB(mem.swap_used_mib)} / ${fmtGiB(mem.swap_total_mib, 0)} GB${mem.swap_used_ratio > 0.9 ? ' · 已满' : ''}` : '暂无主机读数' },
   ];
-  return [
-    metricCards(cards),
-    h('div', { class: 'row' },
+  return {
+    cards: () => metricCards(cards),
+    gpu: () => h('div', { class: 'row' },
       panel('grow', '显存分配', model.vram ? `GPU 显存 ${fmtGiB(model.vram.totalMiB, 0)} GB · 每个方块代表 0.25 GB` : null,
         model.vram ? vramPanel(model.vram) : quietEmpty(st.hostState, { title: '暂无显存读数', body: '接入 Prometheus 后，这里会按推理服务显示显存分配。' })),
       panel('side', 'GPU 与服务', null, gpuFacts(hf, st.hostState))),
-    sys ? myShare(sys, me, hf?.vramTotalMiB) : null,
-    sys ? userDonuts(sys, me, hf?.vramTotalMiB, st.focus, (key, id) => { st.focus[key] = id; }) : null,
-    sys ? hostSystem(sys, me) : null,
-    panel('', '各推理服务资源占用', null, model.services
+    mine: () => sys ? myShare(sys, me, hf?.vramTotalMiB) : null,
+    distribution: () => {
+      if (!sys) return null;
+      const donuts = () => userDonuts(sys, me, hf?.vramTotalMiB, st.focus, (key, id) => { st.focus[key] = id; });
+      if (st.chart.view) st.chart.view.update(sys, donuts);
+      else st.chart.view = resourceCharts(sys, st.chart, donuts);
+      return st.chart.view;
+    },
+    system: () => sys ? hostSystem(sys, me) : null,
+    services: () => panel('', '各推理服务资源占用', null, model.services
       ? (withVram.length ? servicesTable(withVram, { compact: true }) : quietEmpty('ready', { title: '暂无按服务统计的显存', body: '推理服务登记并上报进程指标后，这里会列出每个服务的显存占用。' }))
       : quietEmpty(st.opsState, SERVICES_EMPTY)),
-    h('p', { class: 'muted', style: { margin: 0, 'font-size': '12.5px' } }, '调用量、Token 与延迟统计在「网关」一栏。'),
-  ];
+    note: () => h('p', { class: 'muted', style: { margin: 0, 'font-size': '12.5px' } }, '本人的 API 调用量、Token 与延迟统计在「调用统计」中查看。'),
+  };
 }
 
 export async function usage(ctx) {
@@ -849,90 +903,90 @@ export async function usage(ctx) {
     everyMs: savedRefreshMs(),
     ops: null, host: null, sys: null,
     opsState: 'ready', hostState: 'ready',
-    model: null, at: null, failed: [],
+    model: overviewModel({ ops: null, host: null }), at: null, failed: [],
     // 三份读数各自的时间：一份坏掉时，另外两份仍在更新，状态行要能分开说。
     seen: { ops: null, host: null, system: null },
-    focus: {},
+    focus: {}, chart: {},
   };
   // 演示数据是常量：给它一个定时器只会每秒重画同一批数字。
   if (ctx.demo) {
     st.model = demoOverview();
     st.sys = SNAP_SYSTEM;
     return h('div', { class: 'page' },
-      pageHead('资源监控', 'GPU、主机与各推理服务的资源占用。读数只读获取，取不到的一律显示「—」。'),
-      ...usageBlocks(ctx, st));
+      pageHead('资源监控', 'GPU、主机与用户资源占用。'),
+      ...Object.values(usageSections(ctx, st)).map(build => build()));
   }
 
-  // 内容每秒重画一次，控件（频率切换、状态行）在外面，不受影响。
-  const body = h('div', { class: 'page-body' });
+  // Each source updates its own sections. Slow inventory must not hold up live
+  // CPU/GPU readings; chart controls stay mounted while their data changes.
+  const sections = Object.fromEntries(Object.keys(usageSections(ctx, st)).map(key => [key, h('div', { class: 'usage-section' })]));
+  const body = h('div', { class: 'page-body usage-live' }, ...Object.values(sections));
   const status = h('span', { class: 'muted tnum', 'aria-live': 'polite', style: { 'font-size': '12.5px' } }, '正在取数…');
-  const draw = () => {
-    put(clear(body), ...usageBlocks(ctx, st));
+  const draw = (keys = Object.keys(sections)) => {
+    const builders = usageSections(ctx, st);
+    for (const key of keys) {
+      const content = builders[key]();
+      if (key !== 'distribution' || sections[key].firstChild !== content) put(clear(sections[key]), content);
+    }
     status.textContent = usageStatus(st);
   };
-
-  const refresh = async () => {
-    const [ops, host, system] = await Promise.all([loadOps(), loadHost(), loadSystem()]);
-    const now = new Date();
-    const failed = [];
-    // 失败项带着「这一块上一次拿到是什么时候」，状态行才能说清屏幕上停住的是哪一块。
-    const miss = (key, label, state) => failed.push({ label, state, at: st.seen[key] });
-    let updated = 0;
-    if (ops.state === 'ready') { st.ops = ops.value; st.opsState = 'ready'; st.seen.ops = now; updated += 1; }
-    else { st.opsState = ops.state; miss('ops', '服务清单', ops.state); }
-    if (host.state === 'ready') { st.host = host.value; st.hostState = 'ready'; st.seen.host = now; updated += 1; }
-    else { st.hostState = host.state; miss('host', 'GPU 读数', host.state); }
-    if (system.state === 'ready' && system.value.cpu) { st.sys = system.value; st.seen.system = now; updated += 1; }
-    else if (system.state !== 'ready') { miss('system', '主机读数', system.state); }
-    // 这一拍失败时保留上一次的读数——「这次没取到」与「机器上什么都没有」不是一件事。
-    st.model = overviewModel({ ops: st.ops, host: st.host });
-    if (updated) st.at = now;
-    st.failed = failed;
-    draw();
+  let disposed = false;
+  const lifetime = new AbortController();
+  const sources = {
+    ops: { load: loadOps, label: '服务清单', sections: ['gpu', 'services'] },
+    host: { load: loadHost, label: 'GPU 读数', sections: ['cards', 'gpu', 'mine', 'distribution'] },
+    system: { load: loadSystem, label: '主机读数', sections: ['cards', 'mine', 'distribution', 'system'] },
   };
-
-  await refresh();
+  const failures = {};
+  const refresh = async key => {
+    const result = await sources[key].load({ signal: lifetime.signal });
+    if (disposed) return;
+    const now = new Date();
+    if (key !== 'system') st[`${key}State`] = result.state;
+    if (result.state === 'ready' && (key !== 'system' || result.value.cpu)) {
+      st[key === 'system' ? 'sys' : key] = result.value;
+      const observed = new Date(result.value.observed_at ?? result.value.observedAt ?? now);
+      st.seen[key] = Number.isFinite(observed.getTime()) ? observed : now;
+      st.at = new Date(Math.max(...Object.values(st.seen).filter(Boolean).map(d => d.getTime())));
+      delete failures[key];
+    } else {
+      failures[key] = { label: sources[key].label, state: result.state === 'ready' ? 'error' : result.state, at: st.seen[key] };
+    }
+    st.model = overviewModel({ ops: st.ops, host: st.host });
+    st.failed = Object.keys(sources).map(name => failures[name]).filter(Boolean);
+    draw(sources[key].sections);
+  };
 
   const pick = (option) => {
     st.everyMs = REFRESH_CHOICES.find(([label]) => label === option)?.[1] ?? 1000;
     rememberRefreshMs(st.everyMs);
     control.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.textContent === option)));
-    refresher.every(st.everyMs);
+    for (const [key, refresher] of Object.entries(refreshers)) refresher.every(intervalFor(key));
     status.textContent = usageStatus(st);
   };
   const control = segmented('刷新频率', REFRESH_CHOICES.map(([label]) => label), refreshLabel(st.everyMs), pick);
 
   const page = h('div', { class: 'page' },
-    pageHead('资源监控', 'GPU、主机与各推理服务的资源占用。读数只读获取，取不到的一律显示「—」。磁盘与网络的速率是两次采样之差，刷新越快窗口越短。',
+    pageHead('资源监控', 'GPU、主机与用户资源占用。服务清单每 15 秒更新。',
       h('div', { style: { display: 'flex', 'flex-direction': 'column', gap: '6px', 'align-items': 'flex-end' } }, control, status)),
     body);
 
-  const refresher = createRefresher({
-    intervalMs: st.everyMs,
-    run: refresh,
-    isAttached: () => page.isConnected,
-  });
-  refresher.start();
+  const intervalFor = key => st.everyMs === 0 ? 0 : key === 'ops' ? Math.max(15000, st.everyMs) : st.everyMs;
+  const refreshers = Object.fromEntries(Object.keys(sources).map(key => [key, createRefresher({
+    intervalMs: intervalFor(key), run: () => refresh(key), isAttached: () => page.isConnected,
+  })]));
+  page.dispose = () => {
+    disposed = true;
+    lifetime.abort();
+    Object.values(refreshers).forEach(refresher => refresher.stop());
+  };
+  draw();
+  for (const key of Object.keys(sources)) void refresh(key).finally(() => { if (!disposed) refreshers[key].start(); });
   return page;
 }
 
 /* ============================== 模型评测 ============================== */
-export async function evaluation(ctx) {
-  let runs; let state = 'ready';
-  if (ctx.demo) runs = demoEvaluation();
-  else { const r = await loadOps(); state = r.state; runs = r.state === 'ready' ? r.value.evaluation?.runs ?? [] : null; }
-  const STATUS = { done: { tone: 'ok', text: '已完成' }, running: { tone: 'warn', text: '进行中' }, queued: { tone: 'off', text: '排队中' }, failed: { tone: 'bad', text: '失败' }, unknown: { tone: 'off', text: '未知' } };
-  const body = runs
-    ? (runs.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
-      h('thead', {}, h('tr', {}, ['模型服务', '数据集', '得分', '状态', '提交时间'].map((t, i) => h('th', { scope: 'col', class: i === 2 ? 'num' : null }, t)))),
-      h('tbody', {}, runs.map((r) => h('tr', {},
-        h('td', {}, r.model_id), h('td', {}, r.dataset),
-        h('td', { class: 'num' }, r.metric == null ? '—' : `${(r.metric * 100).toFixed(1)}`),
-        h('td', {}, statusBadge(STATUS[r.status] ?? STATUS.unknown)), h('td', { class: 'muted' }, relTime(r.created_at)))))))
-      : h('div', { class: 'group' }, h('div', { class: 'empty' }, h('strong', {}, '还没有评测记录'), '在「扩展」中启用 EvalScope 后即可对已注册的模型服务发起评测。')))
-    : emptyState(state);
-  return h('div', { class: 'page' }, pageHead('模型评测', '由 EvalScope 执行的基准评测结果。'), body);
-}
+export { evaluation } from './benchmark-page.js';
 
 /* ============================== 用户与权限 ============================== */
 const USERS_SUBTITLE = '平台账户独立于 Linux 账户，登录不依赖主机账户。登记推理服务时会自动记录它由哪个 Linux 用户运行。';
@@ -947,7 +1001,7 @@ function copyButton(text) {
 export async function users(ctx) {
   let list; let state = 'ready';
   if (ctx.demo) list = DEMO_USERS.map((u) => ({ ...u }));
-  else { const r = await loadUsers(); state = r.state; list = r.state === 'ready' ? r.value : null; }
+  else { const r = await loadUsers({ signal: ctx.signal }); state = r.state; list = r.state === 'ready' ? r.value : null; }
   const root = h('div', { class: 'page' });
   if (!list) {
     put(root, pageHead('用户与权限', USERS_SUBTITLE), emptyState(state));
@@ -961,7 +1015,7 @@ export async function users(ctx) {
     if (!r.ok) { st.msg = r.message ?? `操作未完成（${r.reason}）`; draw(); return; }
     st.msg = null;
     after?.(r.data ?? {});
-    const fresh = await loadUsers();
+    const fresh = await loadUsers({ signal: ctx.signal });
     if (fresh.state === 'ready') list = fresh.value;
     draw();
   }
@@ -1049,7 +1103,6 @@ const EXTENSIONS = [
   { key: 'strata', name: 'Strata', glyph: 'S', tint: '#1D1D1F', kind: '推理框架 · 默认', desc: '实验室默认推理框架，提供 OpenAI 兼容接口。', contrib: '推理适配器 · 原生控制台', status: 'strata' },
   { key: 'vllm', name: 'vLLM', glyph: 'v', tint: '#5856D6', kind: '推理框架', desc: '成员自行启动的 vLLM 服务经此适配器完成登记、健康检查与指标采集。', contrib: '推理适配器 · /metrics 指标映射', status: null },
   { key: 'sglang', name: 'SGLang', glyph: 'G', tint: '#AF52DE', kind: '推理框架', desc: '支持 SGLang 服务的登记与指标采集。', contrib: '推理适配器', status: null },
-  { key: 'gateway', name: 'Gateway', glyph: 'W', tint: '#007AFF', kind: '网关', desc: '统一入口：校验 API 密钥、转发请求并记录请求元数据。', contrib: '请求日志 · 调用量统计', status: 'gateway' },
   { key: 'prometheus', name: 'Prometheus', glyph: 'P', tint: '#FF9500', kind: '指标数据源', desc: '采集 GPU、主机与各推理服务的指标，供「资源监控」查询。', contrib: '数据源 · 资源监控图表', status: 'prometheus' },
   { key: 'grafana', name: 'Grafana', glyph: 'G', tint: '#FF6B2C', kind: '高级分析', desc: '深度排查与自定义看板；门户内图表覆盖日常查看。', contrib: '高级分析看板', status: 'grafana' },
   { key: 'evalscope', name: 'EvalScope', glyph: 'E', tint: '#FF2D55', kind: '评测框架', desc: '对已登记的推理服务发起基准评测，结果在「模型评测」中展示。', contrib: '模型评测页面 · 原生报告', status: 'evalscope' },
@@ -1057,21 +1110,21 @@ const EXTENSIONS = [
 
 export async function extensions(ctx) {
   let services = {}; let state = 'ready';
-  let links = new Map(); let linksState = 'ready';
+  let links = new Map(); let linksState = ctx.demo ? 'ready' : 'loading';
   if (ctx.demo) {
     services = demoOverview().host.services;
     links = new Map([['strata', { has_ui: true, ui_url: '/strata/', visibility: 'all' }], ['grafana', { has_ui: true, ui_url: '/grafana/', visibility: 'admin' }]]);
-  } else {
-    const [host, integrations] = await Promise.all([loadHost(), loadIntegrations()]);
-    state = host.state; services = host.state === 'ready' ? (hostFacts(host.value)?.services ?? {}) : {};
-    linksState = integrations.state;
-    if (integrations.state === 'ready') links = new Map(integrations.value.map((row) => [row.key, row]));
   }
   const admin = ctx.isAdmin?.() === true;
   const root = h('div', { class: 'page' });
+  ctx = pageScope(ctx, root);
   const st = { editing: null, draft: '', visibility: 'all', msg: null };
 
   const statusOf = (key) => {
+    const runtime = links.get(key)?.runtime;
+    if (runtime?.services != null) return { tone: runtime.online ? 'ok' : 'off', text: `${runtime.online} / ${runtime.services} 个服务在线` };
+    if (runtime?.connected === true) return { tone: key === 'evalscope' && !runtime.perf && !runtime.eval ? 'warn' : 'ok', text: key === 'evalscope' && !runtime.perf && !runtime.eval ? '仅健康检查可用' : '已接入' };
+    if (runtime?.connected === false) return { tone: 'bad', text: '无法连接' };
     if (!key) return { tone: 'off', text: '按服务登记时检测' };
     const v = services[key];
     if (v === true) return { tone: 'ok', text: '已连接' };
@@ -1086,7 +1139,7 @@ export async function extensions(ctx) {
     st.msg = null; st.editing = null;
     ctx.invalidateLaunch?.();
     const rows = r.data?.integrations;
-    if (Array.isArray(rows)) links = new Map(rows.map((row) => [row.key, row]));
+    if (Array.isArray(rows)) links = new Map(rows.map((row) => [row.key, { ...row, runtime: row.runtime ?? links.get(row.key)?.runtime }]));
     draw();
   }
 
@@ -1101,6 +1154,7 @@ export async function extensions(ctx) {
   }
 
   function editor(e) {
+    if (linksState !== 'ready') return null;
     if (st.editing !== e.key) {
       const link = links.get(e.key);
       return h('button', { type: 'button', class: 'linkbtn', onclick: () => {
@@ -1120,19 +1174,28 @@ export async function extensions(ctx) {
 
   function draw() {
     while (root.firstChild) root.firstChild.remove();
-    put(root, pageHead('插件', '推理框架、监控与评测以插件形式接入。自带网页界面的插件可以从这里跳转打开；没有界面的就是单纯的推理或数据插件，在平台内直接使用。'));
+    put(root, pageHead('插件', '查看推理、监控和评测工具的接入状态。'));
     if (st.msg) put(root, h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.msg));
-    if (linksState !== 'ready' && !ctx.demo) put(root, h('p', { class: 'muted', style: { margin: 0, 'font-size': '13px' } }, '跳转地址暂时无法读取，插件卡片仍按已知信息显示。'));
+    if (linksState === 'loading') put(root, h('p', { class: 'muted', role: 'status' }, '正在检查连接…'));
+    if (!['ready', 'loading'].includes(linksState) && !ctx.demo) put(root, h('p', { class: 'muted', style: { margin: 0, 'font-size': '13px' } }, '跳转地址暂时无法读取，插件卡片仍按已知信息显示。'));
     put(root, h('div', { class: 'ext-grid' }, EXTENSIONS.map((e) => h('article', { class: 'ext' },
       h('div', { class: 'ext-head' },
         h('span', { class: 'ext-glyph', style: { background: e.tint }, 'aria-hidden': 'true' }, e.glyph),
         h('div', { style: { flex: '1 1 auto', 'min-width': 0 } }, h('h2', { class: 'ext-name' }, e.name), h('div', { class: 'muted', style: { 'font-size': '13px' } }, e.kind)),
-        statusBadge(statusOf(e.status))),
+        statusBadge(statusOf(e.key))),
       h('p', { style: { margin: 0, 'font-size': '13px' } }, e.desc),
-      h('div', { class: 'ext-contrib' }, h('div', { class: 'muted' }, '贡献点'), h('div', {}, e.contrib)),
+      links.get(e.key)?.runtime?.targets != null ? h('div', { class: 'muted' }, `${links.get(e.key).runtime.targets_up} / ${links.get(e.key).runtime.targets} 个采集目标在线`) : null,
+      e.key === 'evalscope' ? h('a', { class: 'linkbtn', href: '#/evaluation' }, '打开模型评测') : null,
+      h('div', { class: 'ext-contrib' }, h('div', { class: 'muted' }, '平台功能'), h('div', {}, e.contrib)),
       h('div', { style: { display: 'flex', 'align-items': 'center', gap: '12px', 'flex-wrap': 'wrap' } }, jump(e), admin ? editor(e) : null)))));
   }
   draw();
+  if (!ctx.demo) (ctx.integrationsCache?.read({ signal: ctx.signal }) ?? loadIntegrations({ signal: ctx.signal })).then(r => {
+    if (ctx.signal.aborted) return;
+    linksState = r.state; state = r.state;
+    if (r.state === 'ready') links = new Map(r.value.map(row => [row.key, row]));
+    draw();
+  });
   return root;
 }
 

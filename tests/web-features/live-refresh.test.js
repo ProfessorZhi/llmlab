@@ -259,11 +259,26 @@ test('资源监控页真的接上了这支定时器，而不是自己另写一�
 
   assert.match(source, /from '\.\/live-refresh\.js'/, '刷新节奏只有一处定义');
   assert.match(source, /createRefresher\(\{/, '页面用这支骨架');
-  assert.match(source, /isAttached: \(\) => page\.isConnected/, '页面被换掉时要停');
-  assert.doesNotMatch(source, /setInterval\(/, '不要再散一个自己的定时器');
+  assert.match(source, /isAttached:\s*\(\)\s*=>\s*page\.isConnected/,
+    '页面被换掉时要停：isAttached 必须绑在页面的连接状态上');
+  assert.doesNotMatch(source, /\bsetInterval\(/, '不要再散一个自己的定时器');
 
   // 演示数据是常量：那一支必须在建定时器之前返回，不能给它挂一个每秒重画的循环。
-  const demoReturn = source.indexOf('if (ctx.demo) {', source.indexOf('export async function usage'));
-  const start = source.indexOf('refresher.start()', demoReturn);
-  assert.ok(demoReturn > 0 && start > demoReturn, 'demo 分支先返回，真实分支才起定时器');
+  // 现在的页面用的是一组 refreshers（复数），启动点写作 refreshers[key].start()，
+  // 所以这里锚在「usage 函数、demo 分支的 return、创建/启动刷新器」三处，而不是旧
+  // 的单个 refresher.start()，也不钉行号。
+  const usageAt = source.indexOf('export async function usage');
+  assert.ok(usageAt >= 0, '找不到 usage 页面函数，接线测试不能静默通过');
+
+  const demoAt = source.indexOf('if (ctx.demo) {', usageAt);
+  assert.ok(demoAt > usageAt, 'usage 里找不到 demo 分支');
+
+  const demoReturnAt = source.indexOf('return', demoAt);
+  const refresherAt = source.indexOf('createRefresher({', usageAt);
+  const startAt = source.indexOf('.start()', usageAt);
+  assert.ok(demoReturnAt > demoAt, 'demo 分支没有返回');
+  assert.ok(refresherAt > usageAt, 'usage 里找不到 createRefresher(');
+  assert.ok(startAt > usageAt, 'usage 里找不到刷新器的启动点');
+  assert.ok(demoReturnAt < refresherAt, 'demo 分支必须在创建刷新器之前返回');
+  assert.ok(demoReturnAt < startAt, 'demo 分支必须在启动刷新之前返回');
 });

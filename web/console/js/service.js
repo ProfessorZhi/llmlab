@@ -1,8 +1,11 @@
 /*! web/console/js/service.js — 单个推理服务的详情：运行参数、实时负载、网关发布。
  *  参数因引擎而异，表单完全由后端返回的参数表（schema）生成。 */
-import { h, toast, put } from './dom.js';
+import { h, toast, put, clear } from './dom.js';
 import { fmtInt, fmtGiB } from './charts.js';
-import { PATHS, loadData, loadEngineLive, loadOps, send, engineParams, engineParamsUpdate } from './data.js';
+import {
+  PATHS, loadData, loadEngineLive, send, engineParams, engineParamsUpdate, engineServe, agentTaskPath,
+} from './data.js';
+import { pageScope, readOps } from './page-data.js';
 import { servicesFromOps, engineLabel } from './viewmodel.js';
 import { demoServices, demoParams, demoGateway } from './demo.js';
 import { SNAP_ENGINE_LIVE } from './snapshot.js';
@@ -47,13 +50,14 @@ function paramsView(ctx, data, onSaved) {
       const flags = data.schema.filter((p) => values[p.key] !== undefined && (p.kind !== 'bool' || values[p.key])).map((p) => (p.kind === 'bool' ? p.flag : `${p.flag} ${values[p.key]}`));
       const pending = data.schema.some((p) => p.observable && obs[p.key] != null && values[p.key] !== obs[p.key]);
       onSaved({ ...data, desired: values, state: pending ? 'pending' : 'applied', command: `strata serve ${flags.join(' ')} --port 8080`, desired_updated_at: new Date().toISOString() });
-      toast('已保存目标参数');
+      toast('已保存目标参数，服务没有重启');
       return;
     }
     const r = await send(engineParamsUpdate(data.engine_id), { values });
+    if (ctx.signal?.aborted) return;
     st.busy = false;
-    if (!r.ok) { st.msg = r.message ?? (r.state === 'denied' ? '只有服务所有者或管理员可以修改参数。' : `保存失败（${r.reason}）`); draw(); return; }
-    toast('已保存目标参数');
+    if (!r.ok) { st.msg = r.message ?? (r.state === 'denied' ? '只有服务所有者可以修改参数。' : `保存失败（${r.reason}）`); draw(); return; }
+    toast('已保存目标参数，服务没有重启');
     onSaved(r.data);
   }
 
@@ -102,12 +106,111 @@ function paramsView(ctx, data, onSaved) {
         input(p)))))),
       hint,
       st.msg ? h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.msg) : null,
-      data.can_edit ? h('div', { class: 'actions' }, h('button', { type: 'button', class: 'btn primary', disabled: st.busy, onclick: save }, st.busy ? '正在保存…' : '保存目标参数'))
-        : h('p', { class: 'muted', style: { margin: 0, 'font-size': '13px' } }, '只有服务所有者或管理员可以修改参数。'),
-      data.command ? section('生效方式', h('div', { class: 'code' }, data.command),
-        '平台不会替你重启进程。在运行这个服务的 Linux 用户下用上面的命令重启后，实测值与目标一致，状态会自动变成「已生效」。') : null);
+      data.can_edit ? h('div', { class: 'actions' },
+        h('button', { type: 'button', class: 'btn primary', disabled: st.busy, onclick: save }, st.busy ? '正在保存…' : '保存目标参数'),
+        // 保存只写目标值。一句话写在按钮旁边，比事后解释为什么参数没生效有用。
+        h('span', { class: 'muted', style: { 'font-size': '13px' } }, '只记录目标值，不会重启服务；重启后才按新参数运行。'))
+        : h('p', { class: 'muted', style: { margin: 0, 'font-size': '13px' } }, '只有服务所有者可以修改参数。'),
+      data.command ? section('启动参数参考', h('div', { class: 'code' }, data.command),
+        '将这些参数合并到原有启动配置，保留模型路径等必需项，由本人重启服务。刷新后核对实测值。') : null);
     drawHint();
   }
+  draw();
+  return holder;
+}
+
+/* ---------------- 服务控制：把任务下发给本人的代理 ---------------- */
+
+/** 任务状态 -> 用户该看到的那句话。
+ *
+ *  这里最要紧的一条：**「已下发」不是「已启动」**。平台能把任务排进代理的队列，
+ *  但进程到底起没起来只有代理回报才算数。所以 done 之前一律不说「已启动」，
+ *  failed 也照实说失败——一个停在 queued 的任务，说明代理没在跑，不是服务起好了。 */
+const TASK_STATE = {
+  queued: { tone: 'warn', text: '已下发给你的代理，等待领取' },
+  running: { tone: 'warn', text: '代理正在执行' },
+  done: { tone: 'ok', text: '代理已执行' },
+  failed: { tone: 'bad', text: '代理执行失败' },
+};
+
+const CONTROL_ACTIONS = [['start', '启动'], ['stop', '停止'], ['restart', '重启']];
+
+/** 代理回报的 result 里挑一句人话；挑了就没有，不硬编。 */
+function resultText(result) {
+  if (!result || typeof result !== 'object') return typeof result === 'string' ? result : '';
+  return [result.detail, result.message, result.reason].find((v) => typeof v === 'string' && v) ?? '';
+}
+
+const sleep = (ms) => new Promise((settle) => setTimeout(settle, ms));
+
+function controlView(ctx, engineId, onSettled) {
+  const holder = h('div', {});
+  // generation 是每一次下发的代号：上一次的轮询醒来时发现自己过期就退出，
+  // 否则连点两次按钮时，旧任务的回报会盖掉新任务的状态。
+  const st = { busy: false, task: null, msg: null, generation: 0 };
+
+  function draw() {
+    const badge = st.task ? (TASK_STATE[st.task.state] ?? { tone: 'off', text: String(st.task.state) }) : null;
+    const detail = st.task ? resultText(st.task.result) : '';
+    // put 只追加不清空：每次重画都必须先清，否则状态会一层层叠上去。
+    // section 只收 (标题, 内容, 脚注) —— 状态、报错、说明都得放进内容里，多传的参数会被丢掉。
+    put(clear(holder), section('服务控制', h('div', { style: { display: 'flex', 'flex-direction': 'column', gap: '10px' } },
+      h('div', { class: 'actions', style: { 'flex-wrap': 'wrap' } },
+        CONTROL_ACTIONS.map(([kind, label]) => h('button', {
+          type: 'button',
+          class: 'btn',
+          disabled: st.busy,
+          onclick: () => dispatch(kind),
+        }, label))),
+      badge ? h('div', {}, statusBadge(badge),
+        detail ? h('span', { class: 'muted', style: { 'margin-left': '8px', 'font-size': '13px' } }, detail) : null) : null,
+      st.msg ? h('p', { class: 'form-error', role: 'alert', style: { margin: 0, 'text-align': 'left' } }, st.msg) : null,
+      h('p', { class: 'muted', style: { margin: 0, 'font-size': '13px' } },
+        '平台只把任务下发给你的代理，不代你执行：进程由你本机运行的 llmlab agent --watch 以你自己的 Linux 身份启动。'))));
+  }
+
+  async function dispatch(kind) {
+    if (st.busy) return;
+    const generation = ++st.generation;
+    st.busy = true; st.msg = null; st.task = null; draw();
+    if (ctx.demo) {
+      st.busy = false;
+      st.msg = '演示数据：这里不会真的下发任务。';
+      draw();
+      return;
+    }
+    const r = await send(engineServe(engineId), { kind });
+    if (ctx.signal?.aborted || generation !== st.generation) return;
+    st.busy = false;
+    if (!r.ok) {
+      st.msg = r.message ?? (r.state === 'denied'
+        ? '这个服务没有可用的本人代理：平台没有记录它运行在哪个 Linux 用户下，或者你不是它的所有者。'
+        : `下发失败（${r.reason}）`);
+      draw();
+      return;
+    }
+    st.task = r.data; draw();
+    poll(generation, r.data.id);
+  }
+
+  async function poll(generation, id) {
+    for (let i = 0; i < 30; i += 1) {
+      await sleep(2000);
+      if (ctx.signal?.aborted || generation !== st.generation) return;
+      const r = await loadData(agentTaskPath(id), { signal: ctx.signal });
+      if (ctx.signal?.aborted || generation !== st.generation) return;
+      if (r.state !== 'ready') continue;
+      st.task = r.value; draw();
+      if (st.task.state === 'done' || st.task.state === 'failed') {
+        onSettled?.();
+        return;
+      }
+    }
+    // 一分钟还没有结果：多半是代理没在跑。平台这边没有任何办法替它执行。
+    st.msg = '还没有收到执行结果。平台只负责下发，执行由你本机的代理完成——确认 llmlab agent --watch 正在运行。';
+    draw();
+  }
+
   draw();
   return holder;
 }
@@ -121,10 +224,10 @@ function liveView(live) {
   const maxCtx = live.engine?.max_context && live.engine?.parallel ? live.engine.max_context / live.engine.parallel : null;
   return h('div', { style: { display: 'flex', 'flex-direction': 'column', gap: '22px' } },
     metricCards([
-      { label: '运行中', tint: '#34C759', glyph: 'services', value: fmtInt(L.running ?? 0), unit: `/ ${slots.length || live.engine?.parallel || '—'} 路`, note: L.queued ? `排队 ${L.queued}` : '无排队' },
+      { label: '运行中', tint: '#34C759', glyph: 'services', value: fmtInt(L.running), unit: `/ ${slots.length || live.engine?.parallel || '—'} 路`, note: L.queued == null ? '排队数未上报' : `排队 ${L.queued}` },
       { label: '生成速度', tint: '#007AFF', glyph: 'usage', value: live.throughput?.tok_s == null ? '—' : live.throughput.tok_s.toFixed(1), unit: 'tok/s', note: live.recent?.length ? `最近一次 ${live.recent[0].decode_tok_s} tok/s` : '暂无请求' },
       { label: '累计请求', tint: '#AF52DE', glyph: 'requests', value: fmtInt(live.totals?.requests), note: live.totals?.since ? `自 ${relTime(live.totals.since)}` : ' ' },
-      { label: '累计 Token', tint: '#FF9500', glyph: 'token', value: fmtInt((live.totals?.prompt_tokens ?? 0) + (live.totals?.output_tokens ?? 0)), note: `输出 ${fmtInt(live.totals?.output_tokens)}` },
+      { label: '累计 Token', tint: '#FF9500', glyph: 'token', value: live.totals?.prompt_tokens == null || live.totals?.output_tokens == null ? '—' : fmtInt(live.totals.prompt_tokens + live.totals.output_tokens), note: `输出 ${fmtInt(live.totals?.output_tokens)}` },
     ]),
     section('并发槽位', h('div', { class: 'slots' }, slots.map((s) => h('div', { class: `slot ${s.state}` },
       h('div', { class: 'slot-head' }, h('span', { class: 'tnum' }, `#${s.index}`), statusBadge(SLOT_STATE[s.state] ?? { tone: 'off', text: s.state })),
@@ -141,65 +244,101 @@ function liveView(live) {
 /* ---------------- 页面 ---------------- */
 export async function detail(ctx, engineId) {
   const root = h('div', { class: 'page' });
-  let svc = null; let params; let live = null; let route = null;
+  ctx = pageScope(ctx, root);
+  let svc = null, params = null, opsDone = false, live = null, route = null;
+  let tab = 'params', liveBusy = false, gatewayLoaded = false;
+  // 只建一次：重新绘制参数区时把它挪回去，轮询状态才不会丢。
+  let control = null;
+  const title = h('h1', { class: 'page-title' }, '推理服务');
+  const facts = h('p', { class: 'page-sub' }, '正在读取…');
+  const badge = h('div', {}), tabsSlot = h('div', {});
+  const panes = Object.fromEntries(['params', 'live', 'gateway'].map(key => [key, h('div', { hidden: key !== tab }, h('p', { class: 'muted' }, '正在读取…'))]));
+  put(root, h('header', {}, h('a', { class: 'crumb', href: '#/services' }, '推理服务'),
+    h('div', { class: 'page-head', style: { 'margin-top': '6px' } }, h('div', {}, title, facts), badge)), tabsSlot, ...Object.values(panes));
+  const framework = () => params?.value?.framework ?? svc?.engine;
+  let tabsKey = null;
+  function drawHeader() {
+    if (ctx.signal.aborted) return;
+    title.textContent = svc?.label ?? params?.value?.engine_name ?? '推理服务';
+    facts.textContent = [engineLabel(framework()), svc?.port ? `端口 ${svc.port}` : null, svc?.owner ? `所有者 ${svc.owner}` : null,
+      svc?.runAs ? `运行用户 ${svc.runAs}` : null, svc?.vramMiB != null ? `显存 ${fmtGiB(svc.vramMiB)} GB` : null].filter(Boolean).join(' · ');
+    clear(badge); if (svc) put(badge, statusBadge(svc.runtime));
+    const tabs = [['运行参数', 'params'], ...(['strata', 'vllm', 'sglang'].includes(framework()) ? [['实时负载', 'live']] : []), ['API 接入', 'gateway']];
+    const key = JSON.stringify(tabs);
+    if (tabsKey !== key) {
+      tabsKey = key;
+      const seg = segmented('详情分区', tabs.map(([label]) => label), tabs.find(([, id]) => id === tab)?.[0] ?? '运行参数', label => {
+        tab = tabs.find(([name]) => name === label)[1];
+        seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.textContent === label)));
+        for (const [id, pane] of Object.entries(panes)) pane.hidden = id !== tab;
+        if (tab === 'live' && !live) refreshLive();
+        if (tab === 'gateway' && !gatewayLoaded) refreshGateway();
+      });
+      put(clear(tabsSlot), seg);
+    }
+  }
+  /** 任务执行完之后再读一次运行概览，让页头的状态跟上代理回报的结果。 */
+  function readService(force = false) {
+    readOps(ctx, force ? { force: true } : {}).then(r => {
+      if (ctx.signal.aborted) return;
+      opsDone = true;
+      svc = r.state === 'ready' ? (servicesFromOps(r.value) ?? []).find(s => s.id === engineId) : null;
+      drawHeader();
+      if (params && !params.value?.engine_name) drawParams();
+    });
+  }
+  /** 引擎行在，才谈得上控制：它同时证明了这条服务存在、归属，以及运行在哪个 uid 下。 */
+  function controlPane() {
+    if (!control) control = controlView(ctx, engineId, () => readService(true));
+    return control;
+  }
+  function drawParams() {
+    if (ctx.signal.aborted || !params) return;
+    const pane = clear(panes.params);
+    if (!svc && !params.value?.engine_name && opsDone) put(pane, emptyState(params.state === 'ready' ? 'error' : params.state, { title: '找不到这个推理服务', body: '它可能已被删除，或不属于当前账户。' }));
+    else if (params.state !== 'ready') put(pane, h('div', { class: 'group' }, quietEmpty(params.state, { title: '参数暂不可用', body: '本次未能取得运行参数，请稍后重新进入。' })));
+    else put(pane, controlPane(),
+      params.value.supported
+        ? paramsView(ctx, params.value, next => { params = { state: 'ready', value: next }; drawParams(); })
+        : h('div', { class: 'group' }, quietEmpty('ready', { title: `${engineLabel(framework())} 暂无参数表`, body: '这个推理框架还没有声明可调参数。' })));
+  }
+  async function refreshLive() {
+    if (liveBusy || ctx.signal.aborted) return;
+    liveBusy = true;
+    const pane = panes.live;
+    const button = pane.querySelector?.('button'); if (button) button.disabled = true;
+    const r = ctx.demo ? { state: 'ready', value: SNAP_ENGINE_LIVE } : await loadEngineLive({ engineId, signal: ctx.signal });
+    if (ctx.signal.aborted) return;
+    liveBusy = false; live = r.value ?? { reachable: false, reason: r.reason };
+    const reasons = { unauthorized: '引擎要求认证，请配置该服务的指标凭据。', metrics_not_enabled: '引擎尚未开放 /metrics，请在引擎配置中启用指标。', service_offline: '该服务已离线。', unreachable: '暂时无法连接该服务。', bad_payload: '引擎返回的指标格式无法识别。' };
+    put(clear(pane), live.reachable ? liveView(live) : quietEmpty(r.state, { title: '暂无服务指标', body: reasons[live.reason] || '这次未能取得指标，稍后可以刷新。' }),
+      h('button', { type: 'button', class: 'btn', onclick: refreshLive }, '刷新指标'));
+  }
+  async function refreshGateway() {
+    gatewayLoaded = true;
+    const r = ctx.demo ? { state: 'ready', value: demoGateway() } : await loadData(PATHS.gatewayModels, { signal: ctx.signal });
+    if (ctx.signal.aborted) return;
+    route = r.value?.routes?.find(item => item.engine_id === engineId) ?? null;
+    const pane = clear(panes.gateway);
+    if (r.state !== 'ready') {
+      gatewayLoaded = false;
+      put(pane, emptyState(r.state), h('button', { type: 'button', class: 'btn', onclick: refreshGateway }, '重试'));
+    } else put(pane, route ? h('div', { class: 'group' },
+      h('div', { class: 'cell' }, h('span', { class: 'grow' }, '对外模型名'), h('code', { class: 'mono' }, route.model)),
+      h('div', { class: 'cell' }, h('span', { class: 'grow' }, '使用范围'), '仅本人'),
+      h('div', { class: 'cell' }, h('span', { class: 'grow' }, '状态'), statusBadge(route.enabled ? { tone: 'ok', text: '可调用' } : { tone: 'off', text: '已暂停' })),
+      h('a', { class: 'cell action', href: '#/gateway/models' }, '管理 API 接入'), h('a', { class: 'cell action', href: '#/gateway/playground' }, '测试 API'))
+      : h('div', { class: 'group' }, quietEmpty('ready', { title: '尚未创建 API 接入', body: '为自己的服务设置 API 名称，随后可以测试并查看调用记录。' }), h('a', { class: 'cell action', href: '#/gateway/models' }, '创建 API 接入')));
+  }
+  drawHeader();
   if (ctx.demo) {
-    svc = demoServices().find((s) => s.id === engineId) ?? null;
-    params = { state: 'ready', value: demoParams() };
-    live = SNAP_ENGINE_LIVE;
-    route = demoGateway().routes.find((r) => r.engine_id === engineId) ?? null;
+    svc = demoServices().find(s => s.id === engineId) ?? null;
+    params = { state: 'ready', value: demoParams() }; opsDone = true; drawHeader(); drawParams();
   } else {
-    const [ops, p, gw] = await Promise.all([loadOps(), loadData(engineParams(engineId)), loadData(PATHS.gatewayModels)]);
-    svc = ops.state === 'ready' ? (servicesFromOps(ops.value) ?? []).find((s) => s.id === engineId) ?? null : null;
-    params = p;
-    route = gw.state === 'ready' ? gw.value.routes.find((r) => r.engine_id === engineId) ?? null : null;
-    // 实时负载目前只有 Strata 的只读代理（部署里没有这条路由就是 404 ⇒ 不画）。
-    const framework = p.value?.framework ?? svc?.engine;
-    if (framework === 'strata') {
-      const l = await loadEngineLive();
-      if (l.state === 'ready' && l.value.reachable) live = l.value;
-    }
+    const cached = ctx.opsCache?.peek();
+    if (cached) { svc = (servicesFromOps(cached.value) ?? []).find(s => s.id === engineId); drawHeader(); }
+    readService();
+    loadData(engineParams(engineId), { signal: ctx.signal }).then(r => { if (ctx.signal.aborted) return; params = r; drawHeader(); drawParams(); });
   }
-  const name = svc?.label ?? params.value?.engine_name;
-  if (!name) {
-    put(root, h('a', { class: 'crumb', href: '#/services' }, '推理服务'), emptyState(params.state === 'ready' ? 'error' : params.state, { title: '找不到这个推理服务', body: '它可能已被删除，或没有共享给你。' }));
-    return root;
-  }
-  const framework = params.value?.framework ?? svc?.engine;
-  const tabs = [['运行参数', 'params'], live ? ['实时负载', 'live'] : null, ['网关', 'gateway']].filter(Boolean);
-  let tab = 'params';
-  const body = h('div', {});
-  const drawTab = () => {
-    while (body.firstChild) body.firstChild.remove();
-    if (tab === 'params') {
-      if (params.state !== 'ready') put(body, h('div', { class: 'group' }, quietEmpty(params.state, { title: '参数接口未启用', body: '本部署尚未提供推理服务参数管理。' })));
-      else if (!params.value.supported) put(body, h('div', { class: 'group' }, quietEmpty('ready', { title: `${engineLabel(framework)} 暂无参数表`, body: '这个推理框架还没有声明可调参数。在服务登记时打上 framework 标签（vllm / sglang / llama.cpp / strata / ollama）即可启用。' })));
-      else put(body, paramsView(ctx, params.value, (next) => { params = { state: 'ready', value: next }; drawTab(); }));
-    } else if (tab === 'live') put(body, liveView(live));
-    else {
-      put(body, route
-        ? h('div', { class: 'group' },
-          h('div', { class: 'cell' }, h('span', { class: 'grow' }, '对外模型名'), h('code', { class: 'mono' }, route.model)),
-          h('div', { class: 'cell' }, h('span', { class: 'grow' }, '共享范围'), route.visibility === 'all' ? '全实验室' : '仅自己'),
-          h('div', { class: 'cell' }, h('span', { class: 'grow' }, '状态'), statusBadge(route.enabled ? { tone: 'ok', text: '可调用' } : { tone: 'off', text: '已暂停' })),
-          h('a', { class: 'cell action', href: '#/gateway/models' }, '在「模型路由」中管理'))
-        : h('div', { class: 'group' }, quietEmpty('ready', { title: '尚未发布到网关', body: '发布后，成员可以用自己的 API 密钥按模型名调用这个服务。' }),
-          h('a', { class: 'cell action', href: '#/gateway/models' }, '去发布')));
-    }
-  };
-  const seg = segmented('详情分区', tabs.map(([l]) => l), '运行参数', (l) => {
-    tab = tabs.find(([x]) => x === l)[1];
-    seg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.textContent === l)));
-    drawTab();
-  });
-  const facts = [engineLabel(framework), svc?.port ? `端口 ${svc.port}` : null, svc?.owner ? `所有者 ${svc.owner}` : null, svc?.runAs ? `运行用户 ${svc.runAs}` : null, svc?.vramMiB != null ? `显存 ${fmtGiB(svc.vramMiB)} GB` : null].filter(Boolean);
-  put(root, 
-    h('header', {},
-      h('a', { class: 'crumb', href: '#/services' }, '推理服务'),
-      h('div', { class: 'page-head', style: { 'margin-top': '6px' } },
-        h('div', {}, h('h1', { class: 'page-title' }, name), h('p', { class: 'page-sub' }, facts.join(' · '))),
-        svc ? statusBadge(svc.runtime) : null)),
-    seg, body);
-  drawTab();
   return root;
 }
-

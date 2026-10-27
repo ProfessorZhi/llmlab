@@ -1,10 +1,11 @@
-/*! web/console/js/gateway.js — 「网关」一栏：同源 /v1 的 OpenAI 兼容网关。
- *  概览、模型路由、API 密钥、调用日志、在线体验。每人用自己的密钥、看自己的调用；
+/*! web/console/js/gateway.js — 「调用统计」一栏：同源 /v1 的 OpenAI 兼容网关。
+ *  概览、API 接入、API 密钥、调用日志、在线体验。每人用自己的密钥、看自己的调用；
  *  服务所有者能看到谁调用了自己的服务（只有计数，没有内容）；管理员可切到全实验室。 */
+import { readOps } from './page-data.js';
 import { h, toast, put } from './dom.js';
 import { fmtInt, colorAt } from './charts.js';
 import {
-  PATHS, loadData, loadOps, send, gatewayKeyRevoke, gatewayKeyUpdate, gatewayModelUpdate, gatewayLogDetail,
+  PATHS, loadData, send, gatewayKeyRevoke, gatewayKeyUpdate, gatewayModelUpdate, gatewayLogDetail,
   loadModelKeys, createModelKey,
 } from './data.js';
 import { servicesFromOps, engineLabel, modelColorMap } from './viewmodel.js';
@@ -53,27 +54,32 @@ function failText(r, verb) {
 /* ============================== 网关概览 ============================== */
 export async function overview(ctx) {
   const st = { window: '24h', view: 'mine' };
+  let drawVersion = 0;
   const root = h('div', { class: 'page' });
 
   async function load() {
     if (ctx.demo) return { state: 'ready', value: demo().overview(st.window, st.view) };
     const q = new URLSearchParams({ window: st.window, ...(st.view === 'all' ? { view: 'all' } : {}) });
-    return loadData(`${PATHS.gatewayOverview}?${q}`);
+    return loadData(`${PATHS.gatewayOverview}?${q}`, { signal: ctx.signal });
   }
 
   async function draw() {
+    const version = ++drawVersion;
     const r = await load();
+    if (ctx.signal?.aborted || version !== drawVersion) return;
     while (root.firstChild) root.firstChild.remove();
     const seg = segmented('时间范围', WINDOWS.map(([l]) => l), WINDOWS.find(([, v]) => v === st.window)[0], (l) => { st.window = WINDOWS.find(([x]) => x === l)[1]; draw(); });
-    put(root, pageHead('网关', '实验室统一的 OpenAI 兼容入口。所有调用经网关转发到各推理服务，引擎自身的密钥只留在服务端。',
+    // 标题与左侧导航用同一个词。原来导航写「调用统计」、页内写「网关」，
+    // 同一个地址出现两个名字，用户会以为导航到错了地方。
+    put(root, pageHead('调用统计', '本人经平台 OpenAI 兼容入口发出的调用。请求由平台转发到各推理服务，引擎自身的密钥只留在服务端。',
       viewToggle(ctx, st.view, (v) => { st.view = v; draw(); }), seg));
     if (r.state !== 'ready') { put(root, h('div', { class: 'group' }, quietEmpty(r.state, { title: '网关未启用', body: '本部署尚未接入网关。' }))); return; }
     const o = r.value;
     const c = o.calls;
-    const totalTok = (c.prompt_tokens ?? 0) + (c.completion_tokens ?? 0);
+    const totalTok = c.prompt_tokens == null || c.completion_tokens == null ? null : c.prompt_tokens + c.completion_tokens;
     put(root, metricCards([
       { label: '请求数', tint: '#007AFF', glyph: 'requests', value: fmtInt(c.requests), note: o.view === 'all' ? '全实验室' : '我发起的' },
-      { label: 'Tokens', tint: '#AF52DE', glyph: 'token', value: c.requests ? tokens(totalTok) : '—', note: c.requests ? `输入 ${tokens(c.prompt_tokens)} · 输出 ${tokens(c.completion_tokens)}` : '暂无调用' },
+      { label: 'Tokens', tint: '#AF52DE', glyph: 'token', value: c.requests ? tokens(totalTok) : '—', note: c.requests ? `输入 ${tokens(c.prompt_tokens)} · 输出 ${tokens(c.completion_tokens)}${c.usage_reported != null && c.usage_reported < c.requests ? ' · 部分调用未上报' : ''}` : '暂无调用' },
       { label: '成功率', tint: '#34C759', glyph: 'check', value: pct(c.success_rate), note: c.requests ? `${fmtInt(Math.round(c.requests * (1 - (c.success_rate ?? 1))))} 次失败` : '暂无调用' },
       { label: 'P95 延迟', tint: '#FF9500', glyph: 'timer', value: ms(c.latency_p95_ms), note: c.ttft_p50_ms != null ? `首字 P50 ${ms(c.ttft_p50_ms)}` : `P50 ${ms(c.latency_p50_ms)}` },
     ]));
@@ -119,7 +125,7 @@ export async function overview(ctx) {
             h('td', {}, h('span', { class: 'swatch', style: { background: colorAt(i), 'border-radius': '50%', display: 'inline-block', width: '8px', height: '8px', 'margin-right': '8px' } }), x.name),
             h('td', { class: 'num' }, fmtInt(x.requests)), h('td', { class: 'num' }, tokens(x.tokens)),
             h('td', { class: 'num muted' }, pct(x.requests / mine.requests)))))))
-          : quietEmpty('ready', { title: '这段时间没有人调用你的服务', body: '模型发布并共享给全实验室后，成员的调用会显示在这里。' })));
+          : quietEmpty('ready', { title: '这段时间没有人调用你的服务', body: '为自己的服务创建 API 接入后，成员的调用会显示在这里。' })));
     }
   }
   await draw();
@@ -127,7 +133,6 @@ export async function overview(ctx) {
 }
 
 /* ============================== 模型路由 ============================== */
-const VIS = { all: '全实验室', private: '仅自己' };
 
 function snippets(base, model) {
   const m = model ?? '<模型名>';
@@ -147,19 +152,19 @@ function snippetPanel(base, model) {
 }
 
 async function ownEngines(ctx) {
-  if (ctx.demo) return demoServices().filter((s) => s.kind === 'engine');
-  const r = await loadOps();
+  if (ctx.demo) return demoServices().filter((s) => s.kind === 'engine' && s.self);
+  const r = await readOps(ctx);
   if (r.state !== 'ready') return [];
-  return (servicesFromOps(r.value) ?? []).filter((s) => s.kind === 'engine' && (s.self || ctx.isAdmin()));
+  return (servicesFromOps(r.value) ?? []).filter((s) => s.kind === 'engine' && s.self);
 }
 
 export async function models(ctx) {
   const root = h('div', { class: 'page' });
-  const st = { routes: null, base: null, state: 'ready', engines: await ownEngines(ctx), form: { engine_id: '', model: '', visibility: 'all' }, msg: null, busy: false };
+  const st = { routes: null, base: null, state: 'ready', engines: [], form: { engine_id: '', model: '', visibility: 'private', upstream_model: '' }, msg: null, busy: false };
 
   async function refresh() {
-    if (ctx.demo) { st.routes = demo().routes; st.base = null; return; }
-    const r = await loadData(PATHS.gatewayModels);
+    if (ctx.demo) { st.routes = demo().routes.filter(r => r.owner_is_self); st.base = null; return; }
+    const r = await loadData(PATHS.gatewayModels, { signal: ctx.signal });
     st.state = r.state;
     st.routes = r.state === 'ready' ? r.value.routes : null;
     st.base = r.value?.base_url ?? null;
@@ -187,34 +192,31 @@ export async function models(ctx) {
       const eng = st.engines.find((e) => e.id === f.engine_id);
       const alias = f.model || eng.label;
       if (demo().routes.some((r) => r.model === alias)) { st.busy = false; st.msg = '这个模型名已经被发布了，换一个名字。'; draw(); return; }
-      demo().routes.push({ route_id: `rt_${Date.now()}`, model: alias, engine_id: eng.id, engine_name: eng.label, engine_status: 'verified', framework: eng.engine, upstream_model: null, owner: 'account:fjd', owner_name: eng.owner, owner_is_self: true, visibility: f.visibility, enabled: true, upstream_credential: false, created_at: new Date().toISOString() });
+      demo().routes.push({ route_id: `rt_${Date.now()}`, model: alias, engine_id: eng.id, engine_name: eng.label, engine_status: 'verified', framework: eng.engine, upstream_model: f.upstream_model || null, owner: 'account:fjd', owner_name: eng.owner, owner_is_self: true, visibility: f.visibility, enabled: true, upstream_credential: false, created_at: new Date().toISOString() });
     } else {
-      const r = await send(PATHS.gatewayPublish, { engine_id: f.engine_id, model: f.model || undefined, visibility: f.visibility });
+      const r = await send(PATHS.gatewayPublish, { engine_id: f.engine_id, model: f.model || undefined, visibility: 'private', upstream_model: f.upstream_model || undefined });
       if (!r.ok) { st.busy = false; st.msg = failText(r, '发布'); draw(); return; }
     }
-    st.busy = false; st.form = { engine_id: '', model: '', visibility: 'all' };
-    toast('已发布到网关');
+    st.busy = false; st.form = { engine_id: '', model: '', visibility: 'private', upstream_model: '' };
+    toast('已创建本人 API 接入');
     await refresh(); draw();
   }
 
   function routesTable() {
     if (!st.routes) return h('div', { class: 'group' }, quietEmpty(st.state, { title: '网关未启用', body: '本部署尚未接入网关。' }));
-    if (!st.routes.length) return h('div', { class: 'group' }, quietEmpty('ready', { title: '还没有发布的模型', body: '把自己登记的推理服务发布到网关，成员就能用自己的密钥通过统一地址调用它。' }));
+    if (!st.routes.length) return h('div', { class: 'group' }, quietEmpty('ready', { title: '还没有发布的模型', body: '把自己登记的推理服务创建 API 接入，成员就能用自己的密钥通过统一地址调用它。' }));
     return h('div', { class: 'table-wrap' }, h('table', { class: 'data' },
-      h('thead', {}, h('tr', {}, ['模型名', '推理服务', '所有者', '共享范围', '状态', ''].map((t) => h('th', { scope: 'col' }, t)))),
+      h('thead', {}, h('tr', {}, ['模型名', '推理服务', '所有者', '上游模型', '状态', ''].map((t) => h('th', { scope: 'col' }, t)))),
       h('tbody', {}, st.routes.map((r) => {
-        const mine = r.owner_is_self || ctx.isAdmin();
+        const mine = r.owner_is_self;
         return h('tr', {},
           h('td', {}, h('div', { class: 'mono', style: { 'font-weight': 600, 'font-size': '13px' } }, r.model),
             r.upstream_model && r.upstream_model !== r.model ? h('div', { class: 'muted', style: { 'font-size': '12px' } }, `→ ${r.upstream_model}`) : null),
           h('td', {}, r.engine_name ? h('a', { href: `#/services/${encodeURIComponent(r.engine_id)}` }, r.engine_name) : h('span', { class: 'muted' }, '服务已删除'),
             h('div', { class: 'muted', style: { 'font-size': '12px' } }, [engineLabel(r.framework), r.upstream_credential ? '引擎密钥由服务端注入' : null].filter(Boolean).join(' · '))),
           h('td', {}, r.owner_name ?? '—', r.owner_is_self ? h('span', { class: 'muted' }, '（我）') : null),
-          h('td', {}, mine
-            ? h('select', { 'aria-label': `${r.model} 的共享范围`, onchange: (e) => update(r, { visibility: e.target.value }) },
-              Object.entries(VIS).map(([v, l]) => h('option', { value: v, selected: v === r.visibility }, l)))
-            : VIS[r.visibility]),
-          h('td', {}, statusBadge(!r.enabled ? { tone: 'off', text: '已暂停' } : r.engine_status === 'verified' ? { tone: 'ok', text: '可调用' } : r.engine_status === 'missing' ? { tone: 'bad', text: '服务缺失' } : { tone: 'warn', text: '服务未验证' })),
+          h('td', { class: 'mono' }, r.upstream_model || '沿用 API 模型名'),
+          h('td', {}, statusBadge(!r.enabled ? { tone: 'off', text: '已暂停' } : r.engine_state === 'stale' ? { tone: 'warn', text: '观测已过期' } : r.engine_state === 'offline' ? { tone: 'off', text: '已离线' } : r.engine_status === 'verified' ? { tone: 'ok', text: '可调用' } : r.engine_status === 'missing' ? { tone: 'bad', text: '服务缺失' } : { tone: 'warn', text: '服务未验证' })),
           h('td', { style: { 'white-space': 'nowrap', 'text-align': 'right' } }, mine ? [
             h('button', { type: 'button', class: 'linkbtn', onclick: () => update(r, { enabled: !r.enabled }) }, r.enabled ? '暂停' : '恢复'),
             '  ',
@@ -224,34 +226,33 @@ export async function models(ctx) {
   }
 
   function publishForm() {
-    const published = new Set((st.routes ?? []).map((r) => r.engine_id));
-    const choices = st.engines.filter((e) => !published.has(e.id));
+    const choices = st.engines;
     if (!st.engines.length) {
-      return section('发布到网关', h('div', { class: 'group' }, quietEmpty('ready', { title: '你还没有可发布的推理服务', body: '先在「推理服务」里登记自己运行的引擎，再回来发布。' })));
+      return section('创建 API 接入', h('div', { class: 'group' }, quietEmpty('ready', { title: '你还没有可发布的推理服务', body: '先在「推理服务」里登记自己运行的引擎，再回来发布。' })));
     }
     const f = st.form;
     const field = (label, input) => h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, label), input);
-    return section('发布到网关', h('div', { class: 'group' },
+    return section('创建 API 接入', h('div', { class: 'group' },
       field('推理服务', h('select', { onchange: (e) => { f.engine_id = e.target.value; } },
         h('option', { value: '' }, choices.length ? '选择一个服务…' : '你的服务都已发布'),
         choices.map((e) => h('option', { value: e.id, selected: e.id === f.engine_id }, `${e.label} · ${engineLabel(e.engine)}${e.port ? ` · :${e.port}` : ''}`)))),
-      field('对外模型名', h('input', { placeholder: '留空则用服务名', value: f.model, style: { width: '240px' }, oninput: (e) => { f.model = e.target.value.trim(); } })),
-      field('共享范围', h('select', { onchange: (e) => { f.visibility = e.target.value; } }, Object.entries(VIS).map(([v, l]) => h('option', { value: v, selected: v === f.visibility }, l)))),
+      field('API 模型名', h('input', { placeholder: '留空则用服务名', value: f.model, style: { width: '240px' }, oninput: (e) => { f.model = e.target.value.trim(); } })),
+      field('上游模型名', h('input', { placeholder: '引擎 /v1/models 返回的名称', value: f.upstream_model, oninput: (e) => { f.upstream_model = e.target.value.trim(); } })),
       h('div', { class: 'cell', style: { 'justify-content': 'flex-end' } },
         h('button', { type: 'button', class: 'btn primary', disabled: st.busy || !choices.length, onclick: publish }, st.busy ? '正在发布…' : '发布'))),
-    '共享的是正在运行的那一个服务实例：大家的请求排队进同一组并发槽位，不会重复占用显存。想独占就选「仅自己」。');
+    'API 接入仅本人可用，复用已经运行的服务。上游模型名需与引擎一致；自动发现了唯一模型时可留空。');
   }
 
   function draw() {
     while (root.firstChild) root.firstChild.remove();
     put(root, 
-      pageHead('模型路由', '网关上可调用的模型名，以及它们落到哪个推理服务。服务所有者决定共享给谁、何时暂停。'),
+      pageHead('API 接入', '把本人的推理服务发布成一个模型名，之后就能用密钥调用它。当前版本仅本人可用。'),
       routesTable(),
       st.msg ? h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.msg) : null,
       publishForm(),
       snippetPanel(baseUrl(st.base), st.routes?.find((r) => r.enabled)?.model));
   }
-  await refresh();
+  await Promise.all([refresh(), ownEngines(ctx).then(rows => { st.engines = rows; })]);
   draw();
   return root;
 }
@@ -326,7 +327,7 @@ function modelServicePanel(ctx, mst, { mint, copy }) {
 
 export async function keys(ctx) {
   const root = h('div', { class: 'page' });
-  const st = { view: 'mine', list: null, state: 'ready', routes: [], issued: null, msg: null, busy: false, showRevoked: false,
+  const st = { personalMode: true, view: 'mine', list: null, state: 'ready', routes: [], issued: null, msg: null, busy: false, showRevoked: false,
     form: { label: '', models: [], rpm: 60, concurrency: 2, ttl: 30, log_bodies: false } };
   // 模型服务密钥（仅管理员）：与网关密钥分开展示，所以状态也分开存。
   const mst = { state: 'ready', keys: null, issued: null, busy: false, label: '', msg: null };
@@ -334,20 +335,20 @@ export async function keys(ctx) {
   async function refresh() {
     if (ctx.demo) {
       st.list = demo().keys.filter((k) => st.view === 'all' || k.owner === 'account:fjd');
-      st.routes = demo().routes;
+      st.routes = demo().routes.filter(r => r.owner_is_self);
       return;
     }
     // 成员不去请求这两条管理员路由：为了一块自己看不到的面板触发一次 403，
     // 只会让「没有权限」和「接口坏了」在日志里长得一样。
-    const modelKeys = ctx.isAdmin() ? loadModelKeys() : Promise.resolve({ state: 'ready', value: [] });
-    const [r, m, mk] = await Promise.all([
-      loadData(st.view === 'all' ? `${PATHS.gatewayKeys}?view=all` : PATHS.gatewayKeys),
-      loadData(PATHS.gatewayModels),
-      modelKeys,
+    const [r, m] = await Promise.all([
+      loadData(st.view === 'all' ? `${PATHS.gatewayKeys}?view=all` : PATHS.gatewayKeys, { signal: ctx.signal }),
+      loadData(PATHS.gatewayModels, { signal: ctx.signal }),
     ]);
     st.state = r.state;
     st.list = r.state === 'ready' ? r.value.keys : null;
     st.routes = m.state === 'ready' ? m.value.routes : [];
+    st.personalMode = m.value?.sharing_enabled !== true;
+    const mk = ctx.isAdmin() && !st.personalMode ? await loadModelKeys({ signal: ctx.signal }) : { state: 'ready', value: [] };
     mst.state = mk.state;
     mst.keys = mk.state === 'ready' ? mk.value : null;
   }
@@ -423,7 +424,7 @@ export async function keys(ctx) {
           h('input', { type: 'checkbox', checked: f.models.includes(r.model), onchange: (e) => { f.models = e.target.checked ? [...f.models, r.model] : f.models.filter((m) => m !== r.model); } }),
           h('span', { class: 'mono' }, r.model))) : h('span', { class: 'muted', style: { 'font-size': '13px' } }, '暂无已发布模型'))),
       field('每分钟请求上限', h('input', { type: 'number', class: 'tnum', min: 1, max: 6000, value: f.rpm, style: { width: '96px' }, oninput: (e) => { f.rpm = e.target.value; } }), 'RPM'),
-      field('同时进行的请求', h('input', { type: 'number', class: 'tnum', min: 1, max: 16, value: f.concurrency, style: { width: '96px' }, oninput: (e) => { f.concurrency = e.target.value; } }), '超出时返回 429，保护共享的并发槽位'),
+      field('同时进行的请求', h('input', { type: 'number', class: 'tnum', min: 1, max: 16, value: f.concurrency, style: { width: '96px' }, oninput: (e) => { f.concurrency = e.target.value; } }), '超出时返回 429，限制本人 API 的请求并发'),
       field('记录请求内容', h('label', { class: 'switch' }, h('input', { type: 'checkbox', role: 'switch', checked: f.log_bodies, onchange: (e) => { f.log_bodies = e.target.checked; } }), h('span', { 'aria-hidden': 'true' })), '默认关闭。打开后正文保留 7 天，便于排查；仅你和管理员可见'),
       field('有效期', h('select', { onchange: (e) => { f.ttl = e.target.value === '' ? null : Number(e.target.value); } }, TTL.map(([l, d]) => h('option', { value: d ?? '', selected: d === f.ttl }, l)))),
       h('div', { class: 'cell', style: { 'justify-content': 'flex-end' } },
@@ -451,7 +452,7 @@ export async function keys(ctx) {
             ? h('label', { class: 'switch', title: '记录请求内容' }, h('input', { type: 'checkbox', role: 'switch', 'aria-label': `为 ${k.label ?? k.prefix} 记录请求内容`, checked: Boolean(k.log_bodies), onchange: () => toggleBodies(k) }), h('span', { 'aria-hidden': 'true' }))
             : h('span', { class: 'muted' }, k.log_bodies ? '开' : '关')),
           h('td', {}, statusBadge(KEY_STATE[k.state] ?? KEY_STATE.revoked)),
-          h('td', { style: { 'text-align': 'right' } }, k.state === 'active' ? h('button', { type: 'button', class: 'linkbtn danger', onclick: () => revoke(k) }, '撤销') : null))))))
+          h('td', { style: { 'text-align': 'right' } }, k.state === 'active' && (!all || !st.personalMode) ? h('button', { type: 'button', class: 'linkbtn danger', onclick: () => revoke(k) }, '撤销') : null))))))
         : h('div', { class: 'group' }, quietEmpty('ready', { title: all ? '实验室里还没有有效密钥' : '你还没有 API 密钥', body: '在下方创建一把，就能用 OpenAI SDK 调用网关上的模型。' })),
       hidden > 0 || st.showRevoked ? h('button', { type: 'button', class: 'linkbtn', style: { 'align-self': 'flex-start' }, onclick: () => { st.showRevoked = !st.showRevoked; draw(); } },
         st.showRevoked ? '隐藏已撤销 / 已过期' : `显示已撤销 / 已过期（${hidden}）`) : null);
@@ -466,7 +467,7 @@ export async function keys(ctx) {
       table(),
       st.msg ? h('p', { class: 'form-error', role: 'alert', style: { 'text-align': 'left' } }, st.msg) : null,
       st.view === 'mine' ? createForm() : null,
-      modelServicePanel(ctx, mst, { mint: mintModelKey, copy: copyKey }));
+      !st.personalMode ? modelServicePanel(ctx, mst, { mint: mintModelKey, copy: copyKey }) : null);
   }
 
   await refresh();
@@ -493,7 +494,7 @@ function sourceLabel(r) {
 
 async function loadDetail(ctx, id) {
   if (ctx.demo) { const d = demo().detail(id); return d ? { state: 'ready', value: d } : { state: 'error' }; }
-  return loadData(gatewayLogDetail(id));
+  return loadData(gatewayLogDetail(id), { signal: ctx.signal });
 }
 
 function pretty(v) {
@@ -503,7 +504,9 @@ function pretty(v) {
 
 /** 单次请求的全量记录：右侧抽屉。 */
 async function openDetail(ctx, row) {
-  const close = () => { sheet.remove(); document.removeEventListener('keydown', onKey); };
+  const controller = new AbortController();
+  const close = () => { controller.abort(); sheet.remove(); document.removeEventListener('keydown', onKey); ctx.signal?.removeEventListener('abort', close); };
+  if (ctx.signal?.aborted) return;
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   const body = h('div', { class: 'sheet-body' }, h('p', { class: 'muted' }, '正在加载…'));
   const sheet = h('div', { class: 'sheet-backdrop', onclick: (e) => { if (e.target === sheet) close(); } },
@@ -511,9 +514,11 @@ async function openDetail(ctx, row) {
       h('div', { class: 'sheet-head' }, h('div', {}, h('div', { class: 'muted', style: { 'font-size': '12px' } }, '请求详情'), h('div', { class: 'mono', style: { 'font-weight': 600 } }, row.request_id)),
         h('button', { type: 'button', class: 'btn', onclick: close }, '关闭')),
       body));
-  document.put(body, sheet);
+  document.body.append(sheet);
+  ctx.signal?.addEventListener('abort', close, { once: true });
   document.addEventListener('keydown', onKey);
-  const r = await loadDetail(ctx, row.request_id);
+  const r = await loadDetail({ ...ctx, signal: controller.signal }, row.request_id);
+  if (controller.signal.aborted) return;
   while (body.firstChild) body.firstChild.remove();
   if (r.state !== 'ready') { put(body, emptyState(r.state)); return; }
   const d = r.value;
@@ -540,9 +545,11 @@ async function openDetail(ctx, row) {
 export async function logs(ctx, { full = false } = {}) {
   const root = h('div', { class: 'page' });
   const params = hashParams();
+  let refreshVersion = 0;
   const st = { view: params.get('view') === 'all' && ctx.isAdmin() ? 'all' : 'mine', outcome: '', model: '', key: params.get('key') ?? '', rows: null, keys: [], state: 'ready' };
 
   async function refresh() {
+    const version = ++refreshVersion;
     if (ctx.demo) {
       st.keys = demo().keys.filter((k) => st.view === 'all' || k.owner === 'account:fjd');
       st.rows = demo().rows.filter((r) => (st.view === 'all' || r.caller === 'account:fjd') && (!st.outcome || r.outcome === st.outcome) && (!st.model || r.model === st.model)
@@ -554,7 +561,8 @@ export async function logs(ctx, { full = false } = {}) {
     if (st.outcome) q.set('outcome', st.outcome);
     if (st.model) q.set('model', st.model);
     if (st.key && st.key !== PLAYGROUND_KEY) q.set('key_ref', st.key);
-    const [r, k] = await Promise.all([loadData(`${PATHS.gatewayLogs}?${q}`), loadData(st.view === 'all' ? `${PATHS.gatewayKeys}?view=all` : PATHS.gatewayKeys)]);
+    const [r, k] = await Promise.all([loadData(`${PATHS.gatewayLogs}?${q}`, { signal: ctx.signal }), loadData(st.view === 'all' ? `${PATHS.gatewayKeys}?view=all` : PATHS.gatewayKeys, { signal: ctx.signal })]);
+    if (ctx.signal?.aborted || version !== refreshVersion) return;
     st.state = r.state;
     st.rows = r.state === 'ready' ? r.value.rows.filter((x) => st.key !== PLAYGROUND_KEY || x.channel === 'playground') : null;
     st.keys = k.state === 'ready' ? k.value.keys : [];
@@ -583,7 +591,7 @@ export async function logs(ctx, { full = false } = {}) {
         all ? h('td', {}, r.caller_name) : null,
         h('td', { class: 'muted' }, sourceLabel(r), r.has_body ? h('span', { class: 'dot-mark', title: '已记录内容' }) : null),
         h('td', { class: 'mono', style: { 'font-size': '12.5px' } }, r.model ?? '—'),
-        h('td', { class: 'num' }, r.prompt_tokens == null && r.completion_tokens == null ? '—' : `${fmtInt(r.prompt_tokens ?? 0)} → ${fmtInt(r.completion_tokens ?? 0)}`),
+        h('td', { class: 'num' }, r.prompt_tokens == null && r.completion_tokens == null ? '—' : `${tokens(r.prompt_tokens)} → ${tokens(r.completion_tokens)}`),
         h('td', { class: 'num' }, ms(r.total_ms)),
         h('td', {}, statusBadge(r.outcome === 'success' ? { tone: 'ok', text: String(r.status ?? 200) } : { tone: 'bad', text: String(r.status ?? '失败') })))))));
   }
@@ -602,7 +610,7 @@ export async function logs(ctx, { full = false } = {}) {
   function exportJsonl() {
     const blob = new Blob([st.rows.map((r) => JSON.stringify(r)).join('\n') + '\n'], { type: 'application/x-ndjson' });
     const a = h('a', { href: URL.createObjectURL(blob), download: `llmlab-gateway-logs-${new Date().toISOString().slice(0, 10)}.jsonl` });
-    document.put(body, a); a.click(); a.remove();
+    document.body.append(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
@@ -639,9 +647,9 @@ export const logsFull = (ctx) => logs(ctx, { full: true });
 export async function playground(ctx) {
   const root = h('div', { class: 'page' });
   let routes = [];
-  if (ctx.demo) routes = demo().routes;
-  else { const r = await loadData(PATHS.gatewayModels); routes = r.state === 'ready' ? r.value.routes : null; }
-  const usable = (routes ?? []).filter((r) => r.enabled);
+  if (ctx.demo) routes = demo().routes.filter(r => r.owner_is_self);
+  else { const r = await loadData(PATHS.gatewayModels, { signal: ctx.signal }); routes = r.state === 'ready' ? r.value.routes : null; }
+  const usable = (routes ?? []).filter((r) => r.enabled && !['offline', 'stale'].includes(r.engine_state));
   const st = { model: usable[0]?.model ?? '', system: '', temperature: 0.7, max_tokens: 512, messages: [], busy: false, last: null };
 
   const log = h('div', { class: 'chat-log', 'aria-live': 'polite' });
@@ -678,10 +686,10 @@ export async function playground(ctx) {
     st.busy = false; drawLog();
   }
 
-  if (!routes) { put(root, pageHead('在线体验', null), h('div', { class: 'group' }, emptyState('not_configured'))); return root; }
+  if (!routes) { put(root, pageHead('API 测试', null), h('div', { class: 'group' }, emptyState('not_configured'))); return root; }
   const field = (label, el) => h('label', { class: 'cell' }, h('span', { class: 'fieldname' }, label), el);
   put(root, 
-    pageHead('在线体验', '直接在浏览器里和网关上的模型对话，用来快速验证服务与参数。'),
+    pageHead('API 测试', '直接在浏览器里和网关上的模型对话，用来快速验证服务与参数。'),
     usable.length ? h('div', { class: 'row' },
       h('section', { class: 'panel grow chat' }, log,
         h('div', { class: 'chat-input' }, input,
@@ -696,7 +704,7 @@ export async function playground(ctx) {
         h('label', { class: 'cell', style: { 'flex-direction': 'column', 'align-items': 'stretch', gap: '6px' } }, h('span', { class: 'fieldname' }, '系统提示词'),
           h('textarea', { rows: 4, placeholder: '可选', oninput: (e) => { st.system = e.target.value; } }))),
       '单次最多 1024 个输出 Token；需要更长输出请用 API。')))
-      : h('div', { class: 'group' }, quietEmpty('ready', { title: '还没有可调用的模型', body: '在「模型路由」把推理服务发布到网关后，就能在这里对话。' })));
+      : h('div', { class: 'group' }, quietEmpty('ready', { title: '还没有可调用的模型', body: '在「模型路由」把推理服务创建 API 接入后，就能在这里对话。' })));
   drawLog();
   return root;
 }

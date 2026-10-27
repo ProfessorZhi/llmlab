@@ -54,6 +54,11 @@ export const gatewayLogDetail = (id) => `/api/gateway/logs/${pathId(id)}`;
 export const gatewayModelUpdate = (id) => `/api/gateway/models/${pathId(id)}/update`;
 export const engineParams = (id) => `/api/v2/registry/engines/${pathId(id)}/params`;
 export const engineParamsUpdate = (id) => `/api/v2/registry/engines/${pathId(id)}/params/update`;
+export const engineLivePath = (id) => `/api/v2/registry/engines/${pathId(id)}/live`;
+/** 下发一条启动/停止/重启任务给**本人的代理**。返回的是任务，不是执行结果。 */
+export const engineServe = (id) => `/api/v2/registry/engines/${pathId(id)}/serve`;
+/** 查一条任务的状态：queued / running 都不是结果，done / failed 才是。 */
+export const agentTaskPath = (id) => `/api/v2/registry/agent-tasks/${pathId(id)}`;
 
 const NOT_CONFIGURED = new Set([404, 501, 503]);
 
@@ -64,8 +69,11 @@ function stateForStatus(status) {
   return 'error';
 }
 
-export async function getJSON(path, { fetchImpl = globalThis.fetch, timeoutMs = 8000 } = {}) {
+export async function getJSON(path, { fetchImpl = globalThis.fetch, timeoutMs = 8000, signal } = {}) {
   const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+  const cancel = () => ctrl?.abort();
+  if (signal?.aborted) cancel();
+  else signal?.addEventListener('abort', cancel, { once: true });
   const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
   try {
     const res = await fetchImpl(path, { method: 'GET', headers: { Accept: 'application/json' }, credentials: 'same-origin', signal: ctrl?.signal });
@@ -83,10 +91,14 @@ export async function getJSON(path, { fetchImpl = globalThis.fetch, timeoutMs = 
     return { state: 'error', status: 0, value: null, reason: err?.name === 'AbortError' ? 'timeout' : 'network' };
   } finally {
     if (timer) clearTimeout(timer);
+    signal?.removeEventListener('abort', cancel);
   }
 }
 
 let csrfToken = null;
+let revision = 0;
+export const readRevision = () => revision;
+export function invalidateReads() { revision++; }
 
 export async function csrf({ fetchImpl = globalThis.fetch } = {}) {
   if (csrfToken) return csrfToken;
@@ -115,6 +127,7 @@ export async function send(path, body, { method = 'POST', fetchImpl = globalThis
       rememberCsrf(null);
       return { ok: false, state: stateForStatus(res.status), status: res.status, data: null, reason: payload?.error?.code ?? `http-${res.status}`, message: payload?.error?.detail ?? payload?.error?.message ?? null };
     }
+    invalidateReads();
     if (payload?.data?.csrf_token) rememberCsrf(payload.data.csrf_token);
     return { ok: true, state: 'ready', status: res.status, data: payload?.data ?? payload, reason: null, message: null };
   } catch {
@@ -174,9 +187,9 @@ export async function loadSystem(opts) {
  * - ``reachable: false`` 是**合法**结果，不是错误：引擎没起来、凭据没配，都是要显示的现状；
  * - 认不出的 schema 才判契约错误，宁可空着，也不要把别的 JSON 当引擎读数渲染。
  */
-export async function loadEngineLive(opts) {
+export async function loadEngineLive(opts = {}) {
   // BFF 代理在本机环回上；2 秒拿不到就说明引擎没在答，等满 8 秒只是让页面更卡。
-  const r = await getJSON(PATHS.engineLive, { timeoutMs: 6000, ...opts });
+  const r = await getJSON(opts.engineId ? engineLivePath(opts.engineId) : PATHS.engineLive, { timeoutMs: 6000, ...opts });
   if (r.state !== 'ready') return r;
   const data = r.value?.data ?? r.value;
   if (!data || typeof data !== 'object' || typeof data.reachable !== 'boolean'
@@ -258,6 +271,7 @@ export function safeJumpUrl(url) {
 
 /** 各状态在页面上的说明文字。 */
 export const STATE_TEXT = Object.freeze({
+  loading: { title: '正在读取…', body: '数据就绪后自动显示。' },
   signed_out: { title: '需要登录', body: '会话已失效，请重新登录。' },
   denied: { title: '没有访问权限', body: '当前账户没有查看此内容的权限，请联系管理员。' },
   not_configured: { title: '数据源未接入', body: '本部署尚未启用该数据源，接入后此处会自动显示。' },

@@ -4,6 +4,17 @@ import { sunburstLayout, dotGridLayout, barsLayout, arcPath, fmtInt, fmtGiB } fr
 import { STATE_TEXT } from './data.js';
 import { engineLabel } from './viewmodel.js';
 
+// 环形图中心只放短标签，完整名称保留在图例、title 和无障碍描述中。
+function chartLabel(value, budget = 12) {
+  const chars = Array.from(String(value ?? ''));
+  let width = 0;
+  for (let i = 0; i < chars.length; i += 1) {
+    width += chars[i].codePointAt(0) > 255 ? 2 : 1;
+    if (width > budget) return chars.slice(0, Math.max(1, i - 1)).join('') + '…';
+  }
+  return chars.join('');
+}
+
 export function pageHead(title, sub, ...actions) {
   return h('header', { class: 'page-head' },
     h('div', {}, h('h1', { class: 'page-title' }, title), sub ? h('p', { class: 'page-sub' }, sub) : null),
@@ -16,7 +27,9 @@ export function emptyState(state, override) {
 }
 
 export function statusBadge(label) {
-  return h('span', { class: `status ${label.tone}` }, h('i', { 'aria-hidden': 'true' }), label.text);
+  // ``hint`` 是服务端给出的理由（例如「未知」为什么未知）。有就挂成 title，
+  // 没有就不挂 —— 一个空 title 冒出来比不解释更糟。
+  return h('span', { class: `status ${label.tone}`, title: label.hint ?? null }, h('i', { 'aria-hidden': 'true' }), label.text);
 }
 
 export function segmented(label, options, current, onPick) {
@@ -105,7 +118,8 @@ export function kpiBar(k) {
       k.utilRatio == null ? h('div', { class: 'kpi-note' }, '暂无 GPU 读数') : h('div', { class: 'kpi-note' }, gpuNote || ' ')),
     cell('登记引擎',
       h('div', { class: 'kpi-value' }, k.servicesOnline == null ? '—' : String(k.servicesOnline), k.servicesTotal != null ? h('small', {}, ` / ${k.servicesTotal}`) : null),
-      h('div', { class: 'kpi-note' }, k.servicesTotal == null ? '暂无可信登记' : k.servicesTotal === 0 ? '尚未登记' : '健康 / 已登记')),
+      // 分子是「最近确认还在跑的服务数」，不是「登记验证通过过的」。两件事差得很远。
+      h('div', { class: 'kpi-note' }, k.servicesTotal == null ? '暂无可信登记' : k.servicesTotal === 0 ? '尚未登记' : '确认在跑 / 已登记')),
     cell('调用量',
       h('div', { class: 'kpi-value' }, k.requests == null ? '—' : fmtInt(k.requests)),
       h('div', { class: 'kpi-note' }, requestsNote(k))));
@@ -113,6 +127,7 @@ export function kpiBar(k) {
 
 /** 次要数据（API 调用等）的空态：没配置、没调用都属正常，用平静的说明而不是报错。读取失败仍如实说明。 */
 export function quietEmpty(state, text) {
+  if (state === 'loading') return emptyState('loading');
   if (state === 'error') return emptyState('error');
   if (state === 'signed_out') return emptyState('signed_out');
   return h('div', { class: 'empty quiet' }, h('strong', {}, text.title), text.body);
@@ -134,7 +149,7 @@ export function sunburstPanel(dist, colors) {
       s('svg', { viewBox: '0 0 360 360', width: 300, height: 300, role: 'img', 'aria-label': aria },
         lay.inner.map((p) => s('path', { d: p.d, fill: p.color, opacity: dim(p.id), stroke: 'var(--bg)', 'stroke-width': 2.5, 'stroke-linejoin': 'round' })),
         lay.outer.map((p) => s('path', { d: p.d, fill: p.color, opacity: dim(p.group), stroke: 'var(--bg)', 'stroke-width': 2.5, 'stroke-linejoin': 'round' })),
-        s('text', { x: 180, y: 168, 'text-anchor': 'middle', 'font-size': 13, fill: 'var(--secondary)' }, fg ? fg.label : '全部请求'),
+        s('text', { x: 180, y: 168, 'text-anchor': 'middle', 'font-size': 13, fill: 'var(--secondary)' }, s('title', {}, fg ? fg.label : '全部请求'), chartLabel(fg ? fg.label : '全部请求', 18)),
         s('text', { x: 180, y: 198, 'text-anchor': 'middle', 'font-size': 28, 'font-weight': 600, fill: 'var(--label)' }, fmtInt(fv))),
       h('div', { class: 'legend', role: 'group', 'aria-label': `按${dist.innerLabel}筛选` },
         lay.inner.map((p) => h('button', {
@@ -292,6 +307,8 @@ export function donutPanel(items, { title = '', fmt = fmtInt, rest = null, size 
     draw();
   };
   const draw = () => {
+    const active = document.activeElement;
+    const focusKey = holder.contains?.(active) ? active?.getAttribute?.('data-resource-focus') : null;
     while (holder.firstChild) holder.firstChild.remove();
     const c = size / 2; const r0 = size * 0.30; const r1 = size * 0.46;
     let a = 0;
@@ -308,15 +325,17 @@ export function donutPanel(items, { title = '', fmt = fmtInt, rest = null, size 
     const aria = `${title}：${all.map((i) => `${i.label} ${fmt(i.value)}`).join('，')}`;
     holder.append(
       s('svg', { viewBox: `0 0 ${size} ${size}`, width: size, height: size, role: 'img', 'aria-label': aria }, arcs,
-        s('text', { x: c, y: c - 6, 'text-anchor': 'middle', 'font-size': 12, fill: 'var(--secondary)' }, f ? f.label : title),
+        s('text', { x: c, y: c - 6, 'text-anchor': 'middle', 'font-size': 12, fill: 'var(--secondary)' }, s('title', {}, f ? f.label : title), chartLabel(f ? f.label : title)),
         s('text', { x: c, y: c + 18, 'text-anchor': 'middle', 'font-size': 20, 'font-weight': 600, fill: 'var(--label)' }, f ? `${total ? Math.round(f.value / total * 100) : 0}%` : fmt(total))),
       h('div', { class: 'legend', role: 'group', 'aria-label': `${title} 图例` }, all.map((it) => h(it.rest ? 'div' : 'button', {
         type: it.rest ? null : 'button', class: `legend-item${it.rest ? ' static' : ''}${it.me ? ' me' : ''}`, 'aria-pressed': it.rest ? null : String(focus === it.id),
+        'data-resource-focus': it.rest ? null : `${title}:${it.id}`,
         onclick: it.rest ? null : () => setFocus(focus === it.id ? null : it.id),
       }, h('span', { class: 'swatch', style: { background: it.color, 'border-radius': '50%' } }),
         h('span', { class: 'name' }, it.label, it.me ? h('span', { class: 'me-tag' }, '我') : null),
         h('span', { class: 'share' }, total ? `${(it.value / total * 100).toFixed(1)}%` : '—'),
         h('span', { class: 'val', style: { 'min-width': '64px', 'text-align': 'right' } }, fmt(it.value))))));
+    if (focusKey != null) [...holder.querySelectorAll('[data-resource-focus]')].find(node => node.getAttribute('data-resource-focus') === focusKey)?.focus({ preventScroll: true });
   };
   draw();
   return holder;

@@ -331,6 +331,11 @@ test('SDK snippets are placeholders only and sanitise the alias', () => {
  * can — edit it only against the Python table.
  */
 const BFF_ROUTE_CONTRACT = [
+  { name: 'evaluation.benchmarks.stop', method: 'POST', path: '/api/evaluation/benchmarks/stop', auth: 'session', kind: 'write', scope: null },
+  { name: 'evaluation.benchmarks', method: 'GET', path: '/api/evaluation/benchmarks', auth: 'session', kind: 'read', scope: null },
+  { name: 'evaluation.benchmarks.submit', method: 'POST', path: '/api/evaluation/benchmarks/submit', auth: 'session', kind: 'write', scope: null },
+  { name: 'evaluation.benchmarks.reconcile', method: 'POST', path: '/api/evaluation/benchmarks/reconcile', auth: 'session', kind: 'write', scope: null },
+  { name: 'registry.engines.live', method: 'GET', path: '/api/v2/registry/engines/{engine_id}/live', auth: 'session', kind: 'read', scope: null },
   { name: 'ops.read', method: 'GET', path: '/api/v2/ops', auth: 'session', kind: 'read', scope: null },
   { name: 'ops.usage', method: 'GET', path: '/api/v2/ops/usage', auth: 'session', kind: 'read', scope: 'observability:self:read' },
   { name: 'ops.engines', method: 'GET', path: '/api/v2/ops/engines', auth: 'session', kind: 'read', scope: 'observability:self:read' },
@@ -352,6 +357,8 @@ const BFF_ROUTE_CONTRACT = [
   { name: 'gateway.playground', method: 'POST', path: '/api/gateway/playground', auth: 'session', kind: 'write', scope: null },
   { name: 'registry.engines.params', method: 'GET', path: '/api/v2/registry/engines/{engine_id}/params', auth: 'session', kind: 'read', scope: 'registry:read' },
   { name: 'registry.engines.params.update', method: 'POST', path: '/api/v2/registry/engines/{engine_id}/params/update', auth: 'session', kind: 'write', scope: 'registry:write' },
+  { name: 'registry.engines.serve', method: 'POST', path: '/api/v2/registry/engines/{engine_id}/serve', auth: 'session', kind: 'write', scope: 'registry:write' },
+  { name: 'registry.agent_task', method: 'GET', path: '/api/v2/registry/agent-tasks/{task_id}', auth: 'session', kind: 'read', scope: 'registry:read' },
   { name: 'ops.invoke', method: 'POST', path: '/api/v2/ops/endpoints/{endpoint_id}/invoke', auth: 'session', kind: 'write', scope: 'registry:endpoint:invoke' },
   { name: 'portal.infra_summary', method: 'GET', path: '/api/infra/summary', auth: 'session', kind: 'read', scope: 'observability:host:read' },
   { name: 'portal.system_resources', method: 'GET', path: '/api/infra/system', auth: 'session', kind: 'read', scope: 'observability:host:read' },
@@ -403,7 +410,7 @@ test('the admin route matrix mirrors backend/bff/route_map.py exactly', () => {
   //      the pending set. Any other unexplained row fails.
   // 合并后只有一个 checkout：39（上游 PR#20 的网关/参数路由）+ 30 那版里上游没有的
   // 引擎实时读数与模型服务密钥，去掉重复项实际 43 条。镜像与 route_map 必须一致。
-  assert.equal(BFF_ROUTES.length, 43, 'the mirror is pinned to the 43-route contract');
+  assert.equal(BFF_ROUTES.length, 50, 'the mirror is pinned to the 50-route contract');
 
   // The independent pin: every row's method/path/session/read-write/scope must
   // match the recorded contract, including the rows a stacked checkout cannot

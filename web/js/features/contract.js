@@ -436,6 +436,10 @@ const ENGINE_FIELDS = Object.freeze([
   'engine_id', 'name', 'protocol', 'framework', 'port', 'owner', 'owner_name', 'owner_is_self',
   'status', 'ownership_state', 'ownership_verified', 'run_as_user', 'run_as_uid',
   'runtime_build_id', 'last_seen_at',
+  'state',
+  // 健康结论与它被取到的时间。没有这两项时，界面只能从 ``status`` 猜一个
+  // 「健康」出来 —— 而 ``status`` 说的是「登记验证通过过」，不是「此刻在跑」。
+  'health', 'health_reason', 'health_observed_at',
 ]);
 const ENGINE_STATUSES = Object.freeze(['registered', 'verified', 'unavailable']);
 
@@ -452,17 +456,31 @@ function checkEngine(row, index, subject, errors) {
   if (!ENGINE_STATUSES.includes(row.status)) {
     errors.push(`${where}.status is not supported: ${String(row.status)}`);
   }
+  if (row.state != null && !['seen', 'healthy', 'attached', 'offline', 'stale'].includes(row.state)) {
+    errors.push(`${where}.state is not supported: ${String(row.state)}`);
+  }
   if (subject !== null && (row.owner_is_self === true) !== (row.owner === subject)) {
     errors.push(`${where}.owner_is_self disagrees with the session subject`);
   }
   if (row.run_as_user !== undefined && row.run_as_user !== null && !isNonEmptyString(row.run_as_user)) {
     errors.push(`${where}.run_as_user must be a non-empty string or null`);
   }
+  if (row.health !== undefined && !Object.values(HEALTH).includes(row.health)) {
+    errors.push(`${where}.health is not supported: ${String(row.health)}`);
+  }
+  if (row.health === HEALTH.UNKNOWN && !isNonEmptyString(row.health_reason)) {
+    // 与部署行同一条规矩：说「未知」就要说清为什么未知。
+    errors.push(`${where}.health is unknown but states no reason`);
+  }
+  if (row.health_observed_at !== undefined && row.health_observed_at !== null && typeof row.health_observed_at !== 'string') {
+    errors.push(`${where}.health_observed_at must be a string or null`);
+  }
 }
 
 const MODEL_FIELDS = Object.freeze([
   'model_id', 'name', 'format', 'parameter_count', 'description', 'owner', 'owner_name',
   'owner_is_self', 'status', 'weight_path', 'created_at',
+  'kind', 'task', 'size_bytes', 'source', 'locations', 'last_seen_at',
 ]);
 
 function checkModel(row, index, subject, errors) {
@@ -482,6 +500,23 @@ function checkModel(row, index, subject, errors) {
   if (!mine && row.weight_path !== undefined && row.weight_path !== null) {
     // A weight path names the owner's directories; only the owner may see it.
     errors.push(`${where} carries another principal's weight path`);
+  }
+  if (row.size_bytes != null && (typeof row.size_bytes !== 'number' || !Number.isFinite(row.size_bytes) || row.size_bytes < 0)) {
+    errors.push(`${where}.size_bytes must be a non-negative number or null`);
+  }
+  if (row.locations != null) {
+    if (!Array.isArray(row.locations)) errors.push(`${where}.locations must be a list`);
+    else {
+      if (!mine && row.locations.length) errors.push(`${where} carries another principal's model locations`);
+      row.locations.forEach((loc, i) => {
+        const name = `${where}.locations[${i}]`;
+        if (!isPlainObject(loc)) { errors.push(`${name} must be an object`); return; }
+        checkForbidden(loc, ['model_id', 'path', 'uid', 'device', 'inode', 'mtime', 'tier', 'state', 'last_seen_at'], name, errors);
+        if (!isNonEmptyString(loc.path) || !loc.path.startsWith('/')) errors.push(`${name}.path must be absolute`);
+        if (loc.model_id !== row.model_id) errors.push(`${name}.model_id must match its model`);
+        if (!['present', 'missing'].includes(loc.state)) errors.push(`${name}.state is not supported`);
+      });
+    }
   }
 }
 

@@ -91,8 +91,11 @@ test('services: engines first, then owned/all/shared rows, without inventing run
   // 夹具是 synthetic 的，而 viewmodel 现在明确规定「合成负载不呈现为已部署的
   // 引擎/路由」。这里要验的是**映射**，所以显式关掉 synthetic；synthetic 那条
   // 规则单独在下面断言，别让两件事互相隐身。
-  const admin = servicesFromOps({ ...PAYLOADS.admin_private, synthetic: false });
-  assert.deepEqual(servicesFromOps(PAYLOADS.admin_private), [],
+  // 夹具里的 last_seen_at 是个固定时刻，所以「现在」也要钉住：拿真实时钟去比，
+  // 这份测试会在夹具日期之后的第 31 分钟开始自己失败。
+  const NOW = Date.parse('2026-10-15T12:05:00Z');
+  const admin = servicesFromOps({ ...PAYLOADS.admin_private, synthetic: false }, { now: NOW });
+  assert.deepEqual(servicesFromOps(PAYLOADS.admin_private, { now: NOW }), [],
     'a synthetic payload presents no engines or deployments');
   assert.deepEqual(admin.map((x) => x.kind), ['engine', 'deployment']);
   const [engine, deployment] = admin;
@@ -109,6 +112,44 @@ test('services: engines first, then owned/all/shared rows, without inventing run
   assert.equal(servicesFromOps({ registry: { adapter_attached: false } }), null);
 });
 
+test('services: 停了很久的服务不再显示「运行中」，而是「未确认」加最后确认时间', () => {
+  // 真事故：一条手工登记的服务已经停了 18 小时，因为 status 仍然是 verified，
+  // 列表一直显示「运行中 · 健康」。status 说的是「登记验证通过过」，不是「此刻在跑」。
+  const ops = { registry: { owned: [], shared: [], engines: [{
+    engine_id: 'e1', name: 'strata', protocol: 'openai_compatible', owner: 'account:aa', owner_is_self: true,
+    status: 'verified', state: 'attached',
+    last_seen_at: '2026-10-22T05:47:27Z', health_observed_at: '2026-10-22T05:47:27Z',
+    health: 'degraded', health_reason: null,
+  }] } };
+  const [row] = servicesFromOps(ops, { now: Date.parse('2026-10-26T17:00:00Z') });
+
+  assert.equal(row.runtime.text, '未确认');
+  assert.equal(Date.parse(row.confirmedAt), Date.parse('2026-10-22T05:47:27Z'),
+    '停在哪一刻要说出来，不能只给一个「未确认」');
+  assert.equal(row.health.text, '性能下降', '健康结论照探测记录说，不拿 status 顶替');
+});
+
+test('services: 刚被确认过的 verified 服务仍然是「运行中」', () => {
+  const ops = { registry: { owned: [], shared: [], engines: [{
+    engine_id: 'e1', name: 'qwen', protocol: 'openai_compatible', owner: 'account:aa', owner_is_self: true,
+    status: 'verified', state: 'attached', last_seen_at: '2026-10-26T16:58:00Z',
+    health: 'healthy', health_reason: null,
+  }] } };
+  const [row] = servicesFromOps(ops, { now: Date.parse('2026-10-26T17:00:00Z') });
+  assert.equal(row.runtime.text, '运行中');
+  assert.equal(row.health.text, '健康');
+});
+
+test('services: 没有健康探测记录时不编「健康」，只说「未探活」', () => {
+  const ops = { registry: { owned: [], shared: [], engines: [{
+    engine_id: 'e1', name: 'qwen', protocol: 'openai_compatible', owner: 'account:aa', owner_is_self: true,
+    status: 'verified', last_seen_at: '2026-10-26T16:58:00Z',
+  }] } };
+  const [row] = servicesFromOps(ops, { now: Date.parse('2026-10-26T17:00:00Z') });
+  assert.equal(row.health.text, '未探活');
+  assert.equal(row.runtime.text, '运行中');
+});
+
 test('services: a runtime Linux user observed at registration is shown as recorded', () => {
   const list = servicesFromOps({ registry: { owned: [], shared: [], engines: [
     { engine_id: 'e1', name: 'qwen', protocol: 'openai_compatible', framework: 'vllm', port: 8000, owner: 'account:aa', owner_name: '张伟', owner_is_self: true, status: 'registered', run_as_user: 'zhang', run_as_uid: 1001 },
@@ -122,14 +163,16 @@ test('services: a runtime Linux user observed at registration is shown as record
   assert.equal(list[1].runtime.text, '无法访问');
 });
 
-test('overview counts a verified engine as running', () => {
+test('overview 只把最近确认过的服务算作在线', () => {
+  const now = Date.parse('2026-10-26T17:00:00Z');
   const ops = { registry: { owned: [], shared: [], engines: [
-    { engine_id: 'e1', name: 'qwen', protocol: 'openai_compatible', owner: 'account:aa', owner_is_self: true, status: 'verified' },
+    { engine_id: 'e1', name: 'qwen', protocol: 'openai_compatible', owner: 'account:aa', owner_is_self: true, status: 'verified', last_seen_at: '2026-10-26T16:59:00Z' },
     { engine_id: 'e2', name: 'bge', protocol: 'openai_compatible', owner: 'account:aa', owner_is_self: true, status: 'unavailable' },
+    { engine_id: 'e3', name: 'stale', protocol: 'openai_compatible', owner: 'account:aa', owner_is_self: true, status: 'verified', last_seen_at: '2026-10-25T09:00:00Z' },
   ] } };
-  const m = overviewModel({ ops });
-  assert.equal(m.kpis.servicesOnline, 1);
-  assert.equal(m.kpis.servicesTotal, 2);
+  const m = overviewModel({ ops, now });
+  assert.equal(m.kpis.servicesOnline, 1, '停了半天的服务不算在线，登记验证通过过也不算');
+  assert.equal(m.kpis.servicesTotal, 3);
 });
 
 test('verified principal metrics feed the KPIs with their real names and units', () => {

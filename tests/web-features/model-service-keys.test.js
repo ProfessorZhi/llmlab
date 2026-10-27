@@ -95,9 +95,9 @@ test('a missing label is sent as null, not as an empty string', async () => {
   assert.deepEqual(JSON.parse(post.body), { label: null });
 });
 
-test('the panel is admin-only and members never request the route', () => {
+test('legacy credentials require admin and are never fetched in personal mode', () => {
   assert.match(gatewaySource, /if \(!ctx\.isAdmin\(\)\) return null;/);
-  assert.match(gatewaySource, /ctx\.isAdmin\(\) \? loadModelKeys\(\) : Promise\.resolve\(/);
+  assert.match(gatewaySource, /ctx\.isAdmin\(\) && !st\.personalMode \? await loadModelKeys\(\{ signal: ctx.signal \}\)/);
   assert.match(gatewaySource, /modelServicePanel\(ctx, mst, \{ mint: mintModelKey, copy: copyKey \}\)/);
 });
 

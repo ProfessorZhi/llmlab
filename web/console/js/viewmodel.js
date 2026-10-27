@@ -68,6 +68,32 @@ const ENGINE_STATUS = Object.freeze({
   registered: { tone: 'off', text: '未验证' },
 });
 
+/** 一次观测在多长时间内还算「确认过它还在」。与 Registry 的代理过期窗口
+ *  （``STALE_AFTER_SECONDS`` = 30 分钟）取同一个数：超过它，平台就没有任何
+ *  证据说明这个服务此刻还在跑，界面也就不能说「运行中」。 */
+export const CONFIRMED_WITHIN_MS = 30 * 60 * 1000;
+
+/** 一个时刻写成「10月22日 13:47」。只用在 title 里，所以不追求相对时间那套措辞。 */
+function stampOf(raw) {
+  const at = typeof raw === 'string' ? Date.parse(raw) : NaN;
+  if (!Number.isFinite(at)) return null;
+  const d = new Date(at);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** 这一行最后一次被确认的时刻：发现循环见到它，或探活拿到过结论，取较晚的一个。 */
+function lastConfirmed(...stamps) {
+  let best = null;
+  for (const raw of stamps) {
+    if (typeof raw !== 'string' || !raw) continue;
+    const at = Date.parse(raw);
+    if (!Number.isFinite(at)) continue;
+    if (best === null || at > best) best = at;
+  }
+  return best;
+}
+
 /** build id → 「框架 版本」，服务行据此显示它跑在哪个 build 上。 */
 function buildLabels(builds) {
   const map = new Map();
@@ -78,31 +104,55 @@ function buildLabels(builds) {
 }
 
 /** 推理服务列表：已登记的推理引擎在前，其上的模型部署在后（管理员看全部，成员看自己的与共享给自己的）。 */
-export function servicesFromOps(ops) {
+export function servicesFromOps(ops, { now = Date.now() } = {}) {
   const reg = ops?.registry;
   if (!reg || reg.adapter_attached === false) return null;
   // Registry demo rows are fixtures, not deployed engines or routes.
   if (ops.synthetic === true) return [];
   const builds = buildLabels(reg.builds);
-  const list = (reg.engines ?? []).map((e) => ({
-    id: e.engine_id,
-    kind: 'engine',
-    label: e.name,
-    engine: e.framework ?? e.protocol ?? null,
-    owner: e.owner_name ?? e.owner ?? null,
-    runAs: e.run_as_user ?? (Number.isInteger(e.run_as_uid) ? `uid ${e.run_as_uid}` : null),
-    port: e.port ?? null,
-    self: e.owner_is_self === true,
-    // 这个服务跑在哪个 build 上。服务端**没有**这条证据时是 null，页面就不显示
-    // 那一列（见 ops.engine_record）——空着一列「未关联」比不显示更容易被误读。
-    build: e.runtime_build_id ? (builds.get(e.runtime_build_id) ?? e.runtime_build_id) : null,
-    runtime: ENGINE_STATUS[e.status] ?? RUNTIME_LABEL.unknown,
-    health: e.status === 'verified' ? HEALTH_LABEL.healthy : e.status === 'unavailable' ? HEALTH_LABEL.unreachable : HEALTH_LABEL.unknown,
-    share: '—',
-    vramMiB: null,
-    updatedAt: e.last_seen_at ?? null,
-    sharedToMe: false,
-  }));
+  const list = (reg.engines ?? []).map((e) => {
+    // 「最后确认」= 发现循环见到它、或探活拿到过结论，取较晚的一个。
+    // 两者都没有，这一行就从来没有被确认过。
+    const confirmedAt = lastConfirmed(e.last_seen_at, e.health_observed_at);
+    const fresh = confirmedAt !== null && now - confirmedAt <= CONFIRMED_WITHIN_MS;
+    const confirmedIso = confirmedAt === null ? null : new Date(confirmedAt).toISOString();
+    return {
+      id: e.engine_id,
+      kind: 'engine',
+      label: e.name,
+      engine: e.framework ?? e.protocol ?? null,
+      owner: e.owner_name ?? e.owner ?? null,
+      runAs: e.run_as_user ?? (Number.isInteger(e.run_as_uid) ? `uid ${e.run_as_uid}` : null),
+      port: e.port ?? null,
+      self: e.owner_is_self === true,
+      // 这个服务跑在哪个 build 上。服务端**没有**这条证据时是 null，页面就不显示
+      // 那一列（见 ops.engine_record）——空着一列「未关联」比不显示更容易被误读。
+      build: e.runtime_build_id ? (builds.get(e.runtime_build_id) ?? e.runtime_build_id) : null,
+      // 「运行中」必须有最近的证据。``status === 'verified'`` 只说明登记验证曾经
+      // 通过过：一条手工登记的服务停了 18 小时，status 仍然是 verified。
+      runtime: e.state === 'offline' ? { tone: 'muted', text: '已离线' }
+        : e.state === 'stale' ? { tone: 'warn', text: '观测已过期' }
+          // 只有「验证通过」这一种结论需要新鲜度来支撑；「未验证」「无法访问」
+          // 说的是验证本身的状态，与此刻在不在跑无关，照原样显示。
+          : e.status === 'verified' && !fresh ? { tone: 'warn', text: '未确认' }
+            : ENGINE_STATUS[e.status] ?? RUNTIME_LABEL.unknown,
+      // 健康只照着探测记录说，没有记录就说「未探活」，不拿 status 顶替。
+      health: (() => {
+        if (e.state === 'offline') return HEALTH_LABEL.unreachable;
+        if (e.state === 'stale') return { ...HEALTH_LABEL.unknown, hint: '观测已过期，这份结论不再代表此刻' };
+        if (e.health == null) return { tone: 'off', text: '未探活', hint: '平台还没有对这个服务做过健康探测' };
+        // 探测结论本身也要带时间：一份五天前的「性能下降」不加时间，读起来就像此刻。
+        const when = stampOf(e.health_observed_at);
+        const hint = [e.health_reason, when ? `观测于 ${when}` : null].filter(Boolean).join(' · ');
+        return { ...(HEALTH_LABEL[e.health] ?? HEALTH_LABEL.unknown), hint: hint || null };
+      })(),
+      confirmedAt: confirmedIso,
+      share: '—',
+      vramMiB: null,
+      updatedAt: e.last_seen_at ?? null,
+      sharedToMe: false,
+    };
+  });
   const rows = (reg.all && reg.all.length ? reg.all : [...(reg.owned ?? [])]);
   const seen = new Set(rows.map((r) => r.deployment_id));
   for (const r of rows) {
@@ -119,6 +169,7 @@ export function servicesFromOps(ops) {
       health: HEALTH_LABEL[r.health] ?? HEALTH_LABEL.unknown,
       share: SHARE_LABEL[r.share?.mode] ?? '—',
       vramMiB: finite(r.resources?.vram_used_mib) ? r.resources.vram_used_mib : null,
+      confirmedAt: null,
       updatedAt: r.updated_at ?? null,
       sharedToMe: false,
     });
@@ -138,6 +189,7 @@ export function servicesFromOps(ops) {
       health: HEALTH_LABEL.unknown,
       share: SHARE_LABEL[e.share?.mode] ?? '—',
       vramMiB: null,
+      confirmedAt: null,
       updatedAt: null,
       sharedToMe: true,
     });
@@ -156,7 +208,10 @@ export function modelsFromOps(ops) {
     name: m.name,
     format: m.format ?? null,
     params: m.parameter_count ?? null,
-    description: m.description ?? null,
+    description: m.source === 'auto' && m.description?.startsWith('自动登记：') ? null : m.description ?? null,
+    task: m.task ?? null,
+    sizeBytes: m.size_bytes ?? null,
+    locations: m.locations ?? [],
     owner: m.owner_name ?? m.owner ?? null,
     self: m.owner_is_self === true,
     weightPath: m.weight_path ?? null,
@@ -170,7 +225,7 @@ export function buildsFromOps(ops) {
   if (!reg || reg.adapter_attached === false) return null;
   // 合成的 ops 载荷里没有真的磁盘扫描结果：不要把它们画成「本机装了什么」。
   if (ops.synthetic === true) return [];
-  return (reg.builds ?? []).map((b) => ({
+  return groupBuilds((reg.builds ?? []).map((b) => ({
     id: b.build_id,
     framework: b.framework ?? null,
     version: b.version ?? null,
@@ -181,10 +236,35 @@ export function buildsFromOps(ops) {
     redacted: b.binary_path_redacted === true || (b.binary_path == null && b.binary_path_sha256 != null),
     env: b.env ?? null,
     owner: b.owner_name ?? b.owner ?? null,
+    ownerId: b.owner,
     self: b.owner_is_self === true,
     state: b.state ?? null,
     lastSeenAt: b.last_seen_at ?? null,
-  }));
+  })));
+}
+
+/** One installation can be reported as an executable, package and source tree.
+ * Keep separate versions/environments; fold proven parent/venv representations only. */
+export function groupBuilds(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const env = row.env ?? rows.find(r => r.env && r.ownerId === row.ownerId && r.framework === row.framework && row.path?.startsWith(r.env + '/'))?.env ?? null;
+    const key = env ? JSON.stringify([row.ownerId, row.framework, env]) : row.id;
+    const group = groups.get(key);
+    if (!group) groups.set(key, { ...row, env, locations: row.path ? [row.path] : [] });
+    else {
+      if (row.path && !group.locations.includes(row.path)) group.locations.push(row.path);
+      if (row.foundAs === 'python_package') Object.assign(group, { version: row.version, path: row.path, foundAs: row.foundAs });
+      if (row.lastSeenAt > (group.lastSeenAt ?? '')) group.lastSeenAt = row.lastSeenAt;
+    }
+  }
+  const values = [...groups.values()];
+  return values.filter(row => {
+    if (row.foundAs !== 'source_tree' || !row.path) return true;
+    const child = values.find(r => r !== row && r.ownerId === row.ownerId && r.framework === row.framework && r.path?.startsWith(row.path + '/'));
+    if (!child) return true;
+    child.locations.push(row.path); return false;
+  });
 }
 
 export function keysFromOps(ops) {
@@ -279,11 +359,11 @@ export function modelColorMap(names) {
  * 概览页视图模型。
  * @param {{ops?:object|null, host?:object|null, log?:object|null, me?:object|null, demo?:object|null}} src
  */
-export function overviewModel({ ops = null, host = null, log = null, demo = null } = {}) {
+export function overviewModel({ ops = null, host = null, log = null, demo = null, now = Date.now() } = {}) {
   if (demo) return demo;
   const hf = hostFacts(host);
   const cf = callsFacts(log);
-  const services = servicesFromOps(ops);
+  const services = servicesFromOps(ops, { now });
   // 名称以 BFF 契约（portal-ops/1 metrics.items）为准；principal.* 是本人已验证密钥的计量。
   const reqs = metricValue(ops, 'principal.requests');
   const errs = metricValue(ops, 'principal.errors');

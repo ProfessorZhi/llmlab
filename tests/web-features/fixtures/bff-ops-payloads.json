@@ -397,6 +397,9 @@
         {
           "engine_id": "eng_id001",
           "framework": null,
+          "health": "healthy",
+          "health_observed_at": "2026-10-15T12:00:00Z",
+          "health_reason": "probe_succeeded",
           "last_seen_at": "2026-10-15T12:00:00Z",
           "name": "engine-alice",
           "owner": "linux:dell-test-01:4001",
@@ -409,6 +412,7 @@
           "run_as_uid": null,
           "run_as_user": null,
           "runtime_build_id": null,
+          "state": null,
           "status": "verified"
         }
       ],
@@ -417,13 +421,19 @@
           "created_at": "2026-10-15T12:00:00Z",
           "description": null,
           "format": null,
+          "kind": null,
+          "last_seen_at": null,
+          "locations": [],
           "model_id": "mdl_id002",
           "name": "model-alice",
           "owner": "linux:dell-test-01:4001",
           "owner_is_self": false,
           "owner_name": "alice",
           "parameter_count": null,
+          "size_bytes": null,
+          "source": "client_registered",
           "status": "registered",
+          "task": null,
           "weight_path": null
         }
       ],
@@ -780,6 +790,9 @@
         {
           "engine_id": "eng_id001",
           "framework": null,
+          "health": "healthy",
+          "health_observed_at": "2026-10-15T12:00:00Z",
+          "health_reason": "probe_succeeded",
           "last_seen_at": "2026-10-15T12:00:00Z",
           "name": "engine-alice",
           "owner": "linux:dell-test-01:4001",
@@ -792,6 +805,7 @@
           "run_as_uid": null,
           "run_as_user": null,
           "runtime_build_id": null,
+          "state": null,
           "status": "verified"
         }
       ],
@@ -800,13 +814,19 @@
           "created_at": "2026-10-15T12:00:00Z",
           "description": null,
           "format": null,
+          "kind": null,
+          "last_seen_at": null,
+          "locations": [],
           "model_id": "mdl_id002",
           "name": "model-alice",
           "owner": "linux:dell-test-01:4001",
           "owner_is_self": false,
           "owner_name": "alice",
           "parameter_count": null,
+          "size_bytes": null,
+          "source": "client_registered",
           "status": "registered",
+          "task": null,
           "weight_path": null
         }
       ],
@@ -1133,6 +1153,9 @@
         {
           "engine_id": "eng_id001",
           "framework": null,
+          "health": "healthy",
+          "health_observed_at": "2026-10-15T12:00:00Z",
+          "health_reason": "probe_succeeded",
           "last_seen_at": "2026-10-15T12:00:00Z",
           "name": "engine-alice",
           "owner": "linux:dell-test-01:4001",
@@ -1145,6 +1168,7 @@
           "run_as_uid": null,
           "run_as_user": null,
           "runtime_build_id": null,
+          "state": null,
           "status": "verified"
         }
       ],
@@ -1153,13 +1177,19 @@
           "created_at": "2026-10-15T12:00:00Z",
           "description": null,
           "format": null,
+          "kind": null,
+          "last_seen_at": null,
+          "locations": [],
           "model_id": "mdl_id002",
           "name": "model-alice",
           "owner": "linux:dell-test-01:4001",
           "owner_is_self": true,
           "owner_name": "alice",
           "parameter_count": null,
+          "size_bytes": null,
+          "source": "client_registered",
           "status": "registered",
+          "task": null,
           "weight_path": null
         }
       ],

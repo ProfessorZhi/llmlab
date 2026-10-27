@@ -34,6 +34,11 @@ import { escapeHtml } from '../dom.js';
  * the rows #85 adds are a named pending set — not a tolerated difference.
  */
 export const BFF_ROUTES = Object.freeze([
+  { name: 'evaluation.benchmarks.stop', method: 'POST', path: '/api/evaluation/benchmarks/stop', auth: 'session', kind: 'write', scope: null, owner: 'Integration#49', ui: '模型评测 · 停止本人任务' },
+  { name: 'evaluation.benchmarks', method: 'GET', path: '/api/evaluation/benchmarks', auth: 'session', kind: 'read', scope: null, owner: 'Integration#49', ui: '模型评测 · 记录与接入状态' },
+  { name: 'evaluation.benchmarks.submit', method: 'POST', path: '/api/evaluation/benchmarks/submit', auth: 'session', kind: 'write', scope: null, owner: 'Integration#49', ui: '模型评测 · 提交' },
+  { name: 'evaluation.benchmarks.reconcile', method: 'POST', path: '/api/evaluation/benchmarks/reconcile', auth: 'session', kind: 'write', scope: null, owner: 'Integration#49', ui: '模型评测 · 核对' },
+  { name: 'registry.engines.live', method: 'GET', path: '/api/v2/registry/engines/{engine_id}/live', auth: 'session', kind: 'read', scope: null, owner: 'Data#47', ui: '推理服务 · 个人指标' },
   { name: 'ops.read', method: 'GET', path: '/api/v2/ops', auth: 'session', kind: 'read', scope: null, owner: 'Integration#49', ui: '模型 / API / 监控 / 评测 / 管理' },
   { name: 'ops.usage', method: 'GET', path: '/api/v2/ops/usage', auth: 'session', kind: 'read', scope: 'observability:self:read', owner: 'Data#47', ui: '监控与日志' },
   { name: 'ops.engines', method: 'GET', path: '/api/v2/ops/engines', auth: 'session', kind: 'read', scope: 'observability:self:read', owner: 'Data#47', ui: '算力中心 · 引擎' },
@@ -60,6 +65,10 @@ export const BFF_ROUTES = Object.freeze([
   { name: 'gateway.playground', method: 'POST', path: '/api/gateway/playground', auth: 'session', kind: 'write', scope: null, owner: 'Integration#49', ui: '网关 · 在线体验' },
   { name: 'registry.engines.params', method: 'GET', path: '/api/v2/registry/engines/{engine_id}/params', auth: 'session', kind: 'read', scope: 'registry:read', owner: 'Integration#49', ui: '推理服务 · 运行参数' },
   { name: 'registry.engines.params.update', method: 'POST', path: '/api/v2/registry/engines/{engine_id}/params/update', auth: 'session', kind: 'write', scope: 'registry:write', owner: 'Integration#49', ui: '推理服务 · 保存目标参数' },
+  // M2：起停服务。平台只把任务排进**服务所有者本人的代理**队列，返回的是任务，
+  // 不是执行结果 —— 前端在 done/failed 之前不能显示成「已启动」。
+  { name: 'registry.engines.serve', method: 'POST', path: '/api/v2/registry/engines/{engine_id}/serve', auth: 'session', kind: 'write', scope: 'registry:write', owner: 'Integration#49', ui: '推理服务 · 启动/停止/重启' },
+  { name: 'registry.agent_task', method: 'GET', path: '/api/v2/registry/agent-tasks/{task_id}', auth: 'session', kind: 'read', scope: 'registry:read', owner: 'Integration#49', ui: '推理服务 · 任务状态' },
   // SEAM-1 (#115). A declared write boundary, not a button: the authority is
   // Registry's `RegistryService.invoke` (row ACL, readiness, payload bound,
   // audit-before-forward). No control is wired to this path in this build, and

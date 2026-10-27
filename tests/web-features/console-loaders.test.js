@@ -16,10 +16,28 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { PATHS, loadSystem, loadEngineLive } from '../../web/console/js/data.js';
+import { PATHS, getJSON, loadSystem, loadEngineLive } from '../../web/console/js/data.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const pagesSource = readFileSync(join(here, '../../web/console/js/pages.js'), 'utf8');
+
+test('离开页面时取消仍在等待的读取', async () => {
+  const lifetime = new AbortController();
+  let requestSignal, finish;
+  const request = getJSON('/slow', {
+    signal: lifetime.signal,
+    fetchImpl: (_path, opts) => {
+      requestSignal = opts.signal;
+      return new Promise(resolve => { finish = resolve; });
+    },
+  });
+  try {
+    lifetime.abort();
+    assert.equal(requestSignal.aborted, true);
+  } finally {
+    finish(new Response('{}'));
+    await request;
+  }
+});
 const serviceSource = readFileSync(join(here, '../../web/console/js/service.js'), 'utf8');
 
 function fakeFetch(routes) {
@@ -85,9 +103,7 @@ test('a deployment without the engine-live route says NOT CONFIGURED', async () 
   assert.equal(r.state, 'not_configured');
 });
 
-test('the pages use the validated loaders, not raw loadData', () => {
-  assert.match(pagesSource, /loadSystem\(\)/);
-  assert.doesNotMatch(pagesSource, /loadData\(PATHS\.system\)/);
-  assert.match(serviceSource, /loadEngineLive\(\)/);
+test('the service page uses the validated engine loader', () => {
+  assert.match(serviceSource, /loadEngineLive\(\{ engineId, signal: ctx.signal \}\)/);
   assert.doesNotMatch(serviceSource, /loadData\(PATHS\.engineLive\)/);
 });

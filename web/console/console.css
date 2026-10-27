@@ -123,7 +123,7 @@ button, input, select { font: inherit; color: inherit; letter-spacing: inherit; 
 /* ---------- 外框 ---------- */
 .app { min-height: 100vh; display: flex; flex-wrap: wrap; background: var(--canvas); }
 .sidebar {
-  flex: 1 1 248px; max-width: 100%;
+  flex: 0 0 232px; max-width: 100%;
   position: sticky; top: 0; align-self: flex-start; min-height: 100vh; max-height: 100vh; overflow-y: auto;
   background: var(--sidebar);
   -webkit-backdrop-filter: saturate(180%) blur(24px); backdrop-filter: saturate(180%) blur(24px);
@@ -170,11 +170,14 @@ button, input, select { font: inherit; color: inherit; letter-spacing: inherit; 
 .launch-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
 .nav-item .ext-mark { margin-left: auto; color: var(--tertiary); font-size: 12px; }
 
-.main { flex: 999 1 640px; min-width: 0; padding: 44px 52px 80px; }
+.main { flex: 1 1 0; min-width: 0; padding: 36px clamp(20px, 3vw, 52px) 80px; }
 .page { max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; animation: rise .35s var(--ease) both; }
 .page.narrow { max-width: 740px; gap: 26px; }
 /* 资源监控：这块内容每秒重绘，容器自己承担 .page 的纵向节奏。 */
 .page-body { display: flex; flex-direction: column; gap: 28px; }
+.usage-section { display: contents; }
+/* Live samples update in place; entrance animations must not replay each tick. */
+.usage-live .chart-row > svg { animation: none; }
 @media (max-width: 720px) {
   .main { padding: 24px 16px 56px; }
   /* 窄屏：侧栏收成顶部的半透明工具条 + 横向滚动的胶囊导航（iOS 习惯）。 */
@@ -359,7 +362,7 @@ table.data tr[aria-selected="true"] td .muted { color: rgba(255,255,255,0.85); }
 .check svg { flex: 0 0 auto; margin-top: 1px; }
 
 /* ---------- 插件卡片 ---------- */
-.ext-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 18px; }
+.ext-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 18px; }
 .ext {
   background: var(--card); border-radius: var(--radius-xl); box-shadow: var(--shadow-card); padding: 20px 22px;
   display: flex; flex-direction: column; gap: 12px;
@@ -498,16 +501,18 @@ table.data tr.selectable:focus-visible td { background: var(--selected-row); out
 
 /* 环形图 */
 .donut-row { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
-.donut-row svg { flex: 0 0 auto; }
+.donut-row svg { flex: 0 1 220px; max-width: 100%; height: auto; margin-inline: auto; }
 .donut-row .legend { flex: 1 1 180px; }
 .legend-item.me .name { font-weight: 600; }
 .me-tag { font-size: 10.5px; font-weight: 600; color: #FFFFFF; background: var(--blue); border-radius: 980px; padding: 1px 7px; margin-left: 6px; vertical-align: 1px; }
-.donut-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+.donut-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 24px; }
 tr.me td { background: color-mix(in srgb, var(--blue) 7%, transparent); }
 
 /* 我的占用 */
-.mine { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; }
+.mine { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 20px; }
 .mine .gauge { display: flex; align-items: center; gap: 12px; }
+.mine .gauge > svg { flex: 0 0 56px; }
+.mine .gauge > div { min-width: 0; overflow-wrap: anywhere; }
 .mine .gauge-label { font-size: 12.5px; color: var(--secondary); }
 .mine .gauge-value { font-family: var(--font-rounded); font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
@@ -523,3 +528,74 @@ tr.me td { background: color-mix(in srgb, var(--blue) 7%, transparent); }
 }
 .cell.param input[type="number"], .cell.param input:not([type]), .cell.param select { background: var(--fill); border-radius: 8px; padding: 5px 10px; min-height: 30px; }
 .cell.param input[type="number"]:focus { box-shadow: var(--ring); outline: none; }
+
+/* 内容可以变长；只让表格、代码和导航在自己的容器内滚动。 */
+.page, .page-body, .row, .panel, .group, .ext, .donut-grid > *, .donut-row { min-width: 0; max-width: 100%; }
+.page-head > div, .panel-head > div, .ext-head > div { min-width: 0; }
+.discovery-details { border-top: 1px solid var(--hairline); padding-top: 18px; }
+.discovery-details > summary { color: var(--secondary); cursor: pointer; font-size: 13px; padding: 6px 0; }
+.discovery-details[open] > summary { margin-bottom: 20px; }
+.resource-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 18px; margin-bottom: 24px; }
+.resource-heading .segmented { flex: 0 0 auto; max-width: 100%; }
+.resource-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); gap: 24px; }
+.resource-column { min-width: 0; }
+.resource-columns h3 { font-size: 13px; font-weight: 500; margin: 0 0 12px; color: var(--secondary); }
+.chart-scroll { overflow-x: auto; max-width: 100%; }
+.chart-scroll svg { display: block; min-width: 280px; width: 100%; }
+.resource-scatter > svg { display: block; width: 100%; max-width: 820px; margin: auto; overflow: visible; }
+.chart-caption { font-size: 12.5px; color: var(--secondary); line-height: 1.6; margin: 0 0 18px; }
+.resource-legend { display: flex; flex-wrap: wrap; gap: 8px; }
+.resource-key { display: flex; gap: 9px; align-items: center; border: 1px solid transparent; border-radius: 9px; padding: 8px 10px; background: transparent; color: var(--label); font: inherit; font-size: 13px; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.resource-key i { width: 9px; height: 9px; flex: 0 0 9px; border-radius: 50%; }
+.resource-key:hover { background: var(--fill-hover); }
+.resource-key[aria-pressed="true"] { background: var(--fill); border-color: var(--hairline-strong); }
+.resource-hierarchy { display: grid; grid-template-columns: minmax(0, 360px) minmax(180px, 1fr); align-items: center; gap: 32px; }
+.resource-hierarchy > svg { width: 100%; height: auto; }
+.resource-tree { max-height: 380px; overflow: auto; }
+.resource-branch + .resource-branch { margin-top: 16px; }
+.resource-branch .resource-key { width: 100%; }
+.resource-branch ul { list-style: none; margin: 4px 0 0 23px; padding-left: 16px; border-left: 1px solid var(--hairline-strong); }
+.resource-branch li { display: flex; justify-content: space-between; gap: 16px; padding: 6px 0; font-size: 12px; color: var(--secondary); }
+@media (max-width: 600px) {
+  .resource-hierarchy { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .resource-hierarchy > svg { max-width: 320px; margin: auto; }
+  .resource-heading .segmented { flex-wrap: wrap; }
+  .resource-heading .segmented button { padding-inline: 9px; }
+}
+.page-title, .panel-title, .ext-name, .cell .title, .cell .sub, .section-foot, .kpi-note { overflow-wrap: anywhere; }
+.nav-icon, .kpi-glyph, .ext-glyph, .status i { flex-shrink: 0; }
+.kpi-value { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px; overflow-wrap: anywhere; }
+.kpi-value small { white-space: nowrap; }
+.legend-item { padding-block: 6px; flex-wrap: wrap; row-gap: 2px; }
+.legend-item .name { flex-basis: 80px; white-space: normal; overflow-wrap: anywhere; }
+.legend-item .share, .legend-item .val { flex-shrink: 0; }
+.cell .fieldname { min-width: 80px; }
+.cell input, .cell select, .cell textarea { max-width: 100%; }
+.cell > .tnum { text-align: right; overflow-wrap: anywhere; }
+.hbar-top { flex-wrap: wrap; }
+.segmented { max-width: 100%; flex-wrap: wrap; }
+.keycard { min-width: 0; overflow-wrap: anywhere; }
+.donut-caption { text-align: center; color: var(--secondary); font-size: 12px; overflow-wrap: anywhere; }
+@media (min-width: 721px) and (max-width: 1050px) {
+  .sidebar { flex-basis: 196px; padding-inline: 8px; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+  .panel { padding: 18px 16px; }
+  .kpis { gap: 10px; }
+  .kpi { padding: 14px 12px; }
+  .kpi-value { font-size: 26px; }
+  .kpi-value small { font-size: 12px; }
+  .cell { flex-wrap: wrap; }
+  .cell input:not([type="checkbox"]), .cell select, .cell textarea { flex: 1 1 140px; }
+  .page-title { font-size: 28px; line-height: 1.25; }
+  .legend-item { padding-inline: 6px; gap: 6px; }
+}
+
+/* List refresh never unmounts the form or the table while waiting for data. */
+.list-toolbar, .list-pagination { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.list-toolbar { justify-content: space-between; margin-bottom: 14px; }
+.list-pagination { justify-content: flex-end; margin-top: 14px; }
+.list-pagination[hidden] { display: none; }
+.list-pagination > span { margin-right: auto; }
+.registry-list, .registry-content { min-width: 0; }

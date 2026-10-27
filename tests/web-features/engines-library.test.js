@@ -52,6 +52,8 @@ test('引擎库：字段照抄服务端的观测，不补默认值', () => {
     redacted: false,
     env: null,
     owner: 'alice',
+    ownerId: 'account:aaa',
+    locations: ['/usr/local/bin/llama-server'],
     self: true,
     state: 'present',
     lastSeenAt: '2026-10-26T09:00:00+00:00',

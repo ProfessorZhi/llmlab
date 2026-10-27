@@ -1,6 +1,8 @@
 /*! web/console/js/main.js — 控制台入口：会话、边栏导航与路由。 */
 import { h, clear, put } from './dom.js';
-import { PATHS, loadMe, loadIntegrations, login, safeJumpUrl, send, rememberCsrf } from './data.js';
+import { PATHS, loadMe, loadIntegrations, login, safeJumpUrl, send, rememberCsrf, invalidateReads, readRevision } from './data.js';
+import { createReadCache } from './read-cache.js';
+import { createOpsCache } from './page-data.js';
 import { DEMO_ME } from './demo.js';
 import { navIcon, brandMark, emptyState } from './ui.js';
 import * as pages from './pages.js';
@@ -22,12 +24,12 @@ const NAV = [
     { route: '#/evaluation', label: '模型评测', icon: 'evaluation', color: '#FF2D55', page: pages.evaluation },
     { route: '#/plugins', label: '插件', icon: 'extensions', color: '#636366', page: pages.extensions },
   ] },
-  { group: '网关', items: [
-    { route: '#/gateway', label: '网关概览', icon: 'gateway', color: '#007AFF', page: gateway.overview },
-    { route: '#/gateway/models', label: '模型路由', icon: 'route', color: '#AF52DE', page: gateway.models },
+  { group: '我的 API', items: [
+    { route: '#/gateway', label: '调用统计', icon: 'gateway', color: '#007AFF', page: gateway.overview },
+    { route: '#/gateway/models', label: 'API 接入', icon: 'route', color: '#AF52DE', page: gateway.models },
     { route: '#/gateway/keys', label: 'API 密钥', icon: 'keys', color: '#FF9500', page: gateway.keys },
     { route: '#/gateway/logs', label: '调用日志', icon: 'requests', color: '#34C759', page: gateway.logs },
-    { route: '#/gateway/playground', label: '在线体验', icon: 'chat', color: '#FF2D55', page: gateway.playground },
+    { route: '#/gateway/playground', label: 'API 测试', icon: 'chat', color: '#FF2D55', page: gateway.playground },
   ] },
   { group: '管理', admin: true, items: [
     { route: '#/admin/users', label: '用户与权限', icon: 'users', color: '#8E8E93', page: pages.users },
@@ -42,7 +44,7 @@ const EXTRA_ROUTES = {
   '#/requests': { redirect: '#/gateway/logs' },
 };
 
-const ctx = { demo: DEMO, me: null, navigate: (r) => { location.hash = r; }, isAdmin: () => isAdmin(), invalidateLaunch: () => { launchLinks = null; }, rerender: () => render() };
+const ctx = { demo: DEMO, me: null, navigate: (r) => { location.hash = r; }, isAdmin: () => isAdmin(), opsCache: createOpsCache(), integrationsCache: createReadCache(loadIntegrations, { revision: readRevision }), invalidateLaunch: () => { resetLaunch(); }, rerender: () => render() };
 const root = document.getElementById('app');
 
 function isAdmin() {
@@ -53,13 +55,13 @@ function isAdmin() {
 function sidebar(active) {
   const name = ctx.me?.display_name || ctx.me?.username || ctx.me?.subject || '—';
   return h('nav', { class: 'sidebar', 'aria-label': '主导航' },
-    h('div', { class: 'brand' }, brandMark(), h('div', {}, h('div', { class: 'brand-name' }, 'LLM Lab'), h('div', { class: 'brand-sub' }, 'RTX A6000 工作站'))),
+    h('div', { class: 'brand' }, brandMark(), h('div', {}, h('div', { class: 'brand-name' }, 'LLM Lab'), h('div', { class: 'brand-sub' }, '模型与推理服务管理'))),
     NAV.filter((g) => !g.admin || isAdmin()).map((g) => [
       g.group ? h('div', { class: 'nav-group' }, g.group) : null,
       g.items.map((it) => h('a', { class: 'nav-item', href: it.route, 'aria-current': it.route === active ? 'page' : null },
         navIcon(it.icon, it.color), it.label)),
     ]),
-    quickLaunch(),
+    h('div', { class: 'launch-slot' }, quickLaunch()),
     h('div', { class: 'sidebar-foot' },
       h('span', { class: 'avatar', 'aria-hidden': 'true' }, name.slice(0, 1)),
       h('div', { class: 'who' }, h('a', { href: '#/account', class: 'who-name', 'aria-current': active === '#/account' ? 'page' : null }, name),
@@ -72,13 +74,31 @@ let launchLinks = null;
 let launchOpen = true;
 try { launchOpen = localStorage.getItem('llmlab.launch.open') !== '0'; } catch { /* 无存储时默认展开 */ }
 
-async function loadLaunchLinks() {
-  if (DEMO) {
-    launchLinks = [{ key: 'strata', name: 'Strata 控制台', ui_url: '/strata/' }, { key: 'grafana', name: 'Grafana', ui_url: '/grafana/' }, { key: 'evalscope', name: 'EvalScope 报告', ui_url: '/evalscope/' }];
-    return;
-  }
-  const r = await loadIntegrations();
-  launchLinks = r.state === 'ready' ? r.value.filter((row) => safeJumpUrl(row.ui_url)) : [];
+let launchPending = null;
+let launchController = null;
+let launchGeneration = 0;
+function resetLaunch() {
+  launchGeneration++;
+  ctx.integrationsCache.clear();
+  launchController?.abort();
+  launchPending = null; launchLinks = null;
+}
+function loadLaunchLinks() {
+  if (launchPending) return launchPending;
+  const generation = launchGeneration;
+  launchController = new AbortController();
+  launchPending = (async () => {
+    const r = DEMO ? { state: 'ready', value: [
+      { key: 'strata', name: 'Strata 控制台', ui_url: '/strata/' },
+      { key: 'grafana', name: 'Grafana', ui_url: '/grafana/' },
+      { key: 'evalscope', name: 'EvalScope 报告', ui_url: '/evalscope/' },
+    ] } : await ctx.integrationsCache.read({ signal: launchController.signal });
+    if (generation !== launchGeneration) return;
+    launchLinks = r.state === 'ready' ? r.value.filter(row => safeJumpUrl(row.ui_url)) : [];
+    const slot = root.querySelector('.launch-slot');
+    if (slot) put(clear(slot), quickLaunch());
+  })().finally(() => { if (generation === launchGeneration) launchPending = null; });
+  return launchPending;
 }
 
 function quickLaunch() {
@@ -110,29 +130,40 @@ function findRoute(full) {
   return null;
 }
 
+let activePage = null;
+let routeController = null;
+let renderVersion = 0;
 async function render() {
+  const version = ++renderVersion;
+  routeController?.abort();
+  activePage?.dispose?.();
+  activePage = null;
   const hash = location.hash || '#/overview';
   if (!DEMO && (!ctx.me || hash === '#/login')) { renderLogin(); return; }
   if (ctx.me?.must_change_password) { renderChangePassword(); return; }
-  if (launchLinks === null) await loadLaunchLinks();
+  routeController = new AbortController();
+  const pageContext = { ...ctx, signal: routeController.signal };
   const route = findRoute(hash) ?? findRoute('#/overview');
   if (route.redirect) { location.replace(route.redirect); return; }
   const active = route.parent ?? route.route;
   const main = h('main', { class: 'main', id: 'main', tabindex: -1 }, h('div', { class: 'page' }, h('p', { class: 'muted' }, '正在加载…')));
   put(clear(root), h('div', { class: 'app' }, sidebar(active), main));
   document.title = `${route.label} · LLM Lab`;
+  if (launchLinks === null) void loadLaunchLinks();
   let content;
   try {
     if (route.adminOnly && !isAdmin()) content = h('div', { class: 'page' }, emptyState('denied'));
-    else content = await route.page(ctx);
+    else content = await route.page(pageContext);
   } catch (err) {
     console.error(err);
     content = h('div', { class: 'page' }, emptyState('error'));
   }
+  if (version !== renderVersion) { content?.dispose?.(); return; }
   if (DEMO) {
     content.prepend(h('div', { class: 'banner', role: 'note' }, h('strong', {}, '演示数据'), '当前页面显示的是示例数据，不代表实验室的真实状态。去掉地址中的 demo=1 即可查看真实数据。'));
   }
   put(clear(main), content);
+  activePage = content;
 }
 
 function renderLogin(message = null) {
@@ -151,6 +182,7 @@ function renderLogin(message = null) {
       return;
     }
     if (r.data?.csrf_token) rememberCsrf(r.data.csrf_token);
+    invalidateReads(); ctx.opsCache.clear(); resetLaunch();
     ctx.me = r.data?.user ?? null;
     location.hash = '#/overview';
     render();
@@ -159,7 +191,7 @@ function renderLogin(message = null) {
   put(clear(root), h('main', { class: 'login' }, h('div', { class: 'login-card' },
     brandMark(64),
     h('div', { style: { 'text-align': 'center' } }, h('h1', { style: { margin: 0, 'font-size': '28px', 'font-weight': 600 } }, '登录 LLM Lab'),
-      h('p', { class: 'muted', style: { margin: '4px 0 0', 'font-size': '15px' } }, 'RTX A6000 工作站')),
+      h('p', { class: 'muted', style: { margin: '4px 0 0', 'font-size': '15px' } }, '模型与推理服务管理')),
     h('form', { onsubmit: submit, novalidate: true },
       h('div', { class: 'fields' },
         h('label', {}, h('span', {}, '用户名'), h('input', { autocomplete: 'username', autofocus: true, oninput: (e) => { st.username = e.target.value.trim(); } })),
@@ -179,6 +211,7 @@ function renderChangePassword() {
     const r = await send(PATHS.changePassword, { current_password: st.current, new_password: st.next });
     if (!r.ok) { err.textContent = r.status === 401 || r.status === 400 ? '当前密码不正确，或新密码不符合要求。' : '修改失败，请稍后再试。'; return; }
     // 改密后服务端注销了全部旧会话并签发新会话；以返回的身份为准。
+    invalidateReads(); ctx.opsCache.clear(); resetLaunch();
     ctx.me = r.data?.user ?? { ...ctx.me, must_change_password: false };
     location.hash = '#/overview';
     render();
@@ -196,7 +229,7 @@ function renderChangePassword() {
 async function logout() {
   if (!DEMO) await send(PATHS.logout, {});
   rememberCsrf(null);
-  launchLinks = null;
+  invalidateReads(); ctx.opsCache.clear(); resetLaunch();
   ctx.me = null;
   location.hash = '#/login';
   render();
