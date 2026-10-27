@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 from . import store as gw_store
+from ..registry.presence import service_state
 
 ALLOWED = {
     ("GET", "/v1/models"),
@@ -155,6 +156,10 @@ class GatewayCore:
     clock: Callable[[], float] = time.time
     limiter: Limiter = field(default_factory=Limiter)
 
+    @property
+    def personal_mode(self) -> bool:
+        return bool(getattr(self.registry.config, "personal_mode", False))
+
     # -- 身份 --
 
     def principal_active(self, principal: str) -> bool:
@@ -183,7 +188,7 @@ class GatewayCore:
             return False
         if models is not None and route.alias not in models:
             return False
-        if route.visibility == gw_store.VISIBILITY_PRIVATE and route.owner != principal:
+        if (self.personal_mode or route.visibility == gw_store.VISIBILITY_PRIVATE) and route.owner != principal:
             return False
         return self.engine(route.engine_id) is not None
 
@@ -217,6 +222,8 @@ class GatewayCore:
     def forward(self, caller: Caller, path: str, payload: dict) -> tuple[int, list[tuple[str, str]], Iterable[bytes]]:
         route = self.resolve(caller, payload.get("model"))
         engine = self.engine(route.engine_id)
+        if engine is None or service_state(engine) in ("offline", "stale") or engine.status == "unavailable":
+            raise GatewayError(503, "service_offline", "the inference service is offline", kind="api_error")
         target = engine.target or {}
         stream = bool(payload.get("stream"))
         body = dict(payload)

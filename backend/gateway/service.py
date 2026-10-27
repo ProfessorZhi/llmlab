@@ -9,7 +9,7 @@
 
 日志以**密钥**为单位：每个人看自己每把密钥的调用。默认只记元数据；密钥所有者可以为
 某一把密钥打开「记录请求内容」，之后这把密钥的请求 / 响应正文（各截断到 64 KiB）保留
-7 天，只有密钥所有者和管理员能在单条请求详情里看到。
+7 天，只有调用者本人能在单条请求详情里看到；管理员只看元数据。
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from typing import Callable
 
 from . import store as gw_store
 from .proxy import CHANNEL_PLAYGROUND, Caller, GatewayCore, GatewayError
+from ..registry.presence import service_state
 
 ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 WINDOWS = {"24h": 24 * 3600, "7d": 7 * 86400, "30d": 30 * 86400}
@@ -163,7 +164,7 @@ class GatewayService:
 
     def revoke_key(self, principal, key_id: str) -> dict:
         record = self.store.key_by_id(key_id)
-        if record is None or (record.principal != principal.principal and not self.is_admin(principal)):
+        if record is None or (record.principal != principal.principal and (self.core.personal_mode or not self.is_admin(principal))):
             raise ManagementError(404, "gateway.not_found", "no such key")
         self.store.revoke_key(key_id)
         return {"key": self.key_dict(self.store.key_by_id(key_id))}
@@ -178,6 +179,7 @@ class GatewayService:
             "engine_id": route.engine_id,
             "engine_name": engine.name if engine else None,
             "engine_status": engine.status if engine else "missing",
+            "engine_state": service_state(engine) if engine else "offline",
             "framework": _framework(engine) if engine else None,
             "upstream_model": route.upstream_model,
             "owner": route.owner,
@@ -196,7 +198,9 @@ class GatewayService:
             for r in self.store.routes()
             if admin or r.owner == principal.principal or (r.visibility == gw_store.VISIBILITY_ALL and r.enabled)
         ]
-        return {"routes": rows, "base_url": self._base_url()}
+        if self.core.personal_mode:
+            rows = [row for row in rows if row["owner_is_self"]]
+        return {"routes": rows, "base_url": self._base_url(), "sharing_enabled": not self.core.personal_mode}
 
     def _owned_engine(self, principal, engine_id: object):
         if not isinstance(engine_id, str) or not engine_id:
@@ -204,7 +208,7 @@ class GatewayService:
         engine = self.core.engine(engine_id)
         if engine is None:
             raise ManagementError(404, "gateway.not_found", "no such inference service")
-        if engine.owner_principal != principal.principal and not self.is_admin(principal):
+        if engine.owner_principal != principal.principal and (self.core.personal_mode or not self.is_admin(principal)):
             raise ManagementError(403, "gateway.forbidden", "only the service owner or an administrator can publish it")
         return engine
 
@@ -213,10 +217,18 @@ class GatewayService:
         alias = body.get("model") or engine.name
         if not isinstance(alias, str) or not ALIAS_RE.match(alias):
             raise ManagementError(400, "gateway.invalid_request", "model name may use letters, digits and . _ : / -")
-        visibility = body.get("visibility", gw_store.VISIBILITY_ALL)
+        visibility = body.get("visibility", gw_store.VISIBILITY_PRIVATE if self.core.personal_mode else gw_store.VISIBILITY_ALL)
+        if self.core.personal_mode and visibility != gw_store.VISIBILITY_PRIVATE:
+            raise ManagementError(400, "gateway.sharing_disabled", "service sharing is not enabled")
         if visibility not in gw_store.VISIBILITIES:
             raise ManagementError(400, "gateway.invalid_request", "visibility must be 'all' or 'private'")
         upstream = body.get("upstream_model")
+        if not upstream:
+            candidates = (engine.launch or {}).get("model_ids") or []
+            if len(candidates) == 1:
+                upstream = candidates[0]
+            elif self.core.personal_mode:
+                raise ManagementError(400, "gateway.upstream_model_required", "请填写引擎 /v1/models 返回的上游模型名。")
         if upstream is not None and (not isinstance(upstream, str) or len(upstream) > 200):
             raise ManagementError(400, "gateway.invalid_request", "upstream_model must be a short string")
         try:
@@ -230,12 +242,14 @@ class GatewayService:
 
     def update_route(self, principal, route_id: str, body: dict) -> dict:
         route = self.store.route_by_id(route_id)
-        if route is None or (route.owner != principal.principal and not self.is_admin(principal)):
+        if route is None or (route.owner != principal.principal and (self.core.personal_mode or not self.is_admin(principal))):
             raise ManagementError(404, "gateway.not_found", "no such model route")
         if body.get("delete") is True:
             self.store.delete_route(route_id)
             return {"deleted": route_id}
         visibility = body.get("visibility")
+        if self.core.personal_mode and visibility not in (None, gw_store.VISIBILITY_PRIVATE):
+            raise ManagementError(400, "gateway.sharing_disabled", "service sharing is not enabled")
         if visibility is not None and visibility not in gw_store.VISIBILITIES:
             raise ManagementError(400, "gateway.invalid_request", "visibility must be 'all' or 'private'")
         enabled = body.get("enabled")
@@ -257,7 +271,7 @@ class GatewayService:
         rows = self.store.usage_rows(since=since, principal=None if everyone else principal.principal)
         mine = _aggregate(rows, now, span, self._name)
         served = None
-        if not everyone:
+        if not everyone and not self.core.personal_mode:
             owned = self.store.usage_rows(since=since, route_owner=principal.principal)
             if owned or any(r.owner == principal.principal for r in self.store.routes()):
                 served = _aggregate(owned, now, span, self._name)
@@ -316,7 +330,8 @@ class GatewayService:
             "upstream_model": route.upstream_model if route else None,
             "body": None,
         })
-        body = self.store.body_for(request_id) if row["has_body"] else None
+        body = self.store.body_for(request_id) if row["has_body"] and row["principal"] == principal.principal else None
+        out["body_access"] = "owner" if row["principal"] == principal.principal else "metadata_only"
         if body is not None:
             out["body"] = {
                 "request": _maybe_json(body["request"]),
@@ -420,8 +435,10 @@ def _bounded_int(value: object, default: int, low: int, high: int, name: str) ->
 def _aggregate(rows, now: float, span: float, name: Callable[[str], str]) -> dict:
     total = len(rows)
     ok = sum(1 for r in rows if r["outcome"] == "success")
-    prompt = sum(r["prompt_tokens"] or 0 for r in rows)
-    completion = sum(r["completion_tokens"] or 0 for r in rows)
+    prompt_values = [r["prompt_tokens"] for r in rows if r["prompt_tokens"] is not None]
+    completion_values = [r["completion_tokens"] for r in rows if r["completion_tokens"] is not None]
+    prompt = sum(prompt_values) if prompt_values or not rows else None
+    completion = sum(completion_values) if completion_values or not rows else None
     lat = [r["total_ms"] for r in rows if r["outcome"] == "success"]
     ttft = [r["ttft_ms"] for r in rows if r["outcome"] == "success" and r["stream"]]
     buckets = 24 if span <= 86400 else (7 if span <= 7 * 86400 else 30)
@@ -462,6 +479,7 @@ def _aggregate(rows, now: float, span: float, name: Callable[[str], str]) -> dic
         "success_rate": (ok / total) if total else None,
         "prompt_tokens": prompt,
         "completion_tokens": completion,
+        "usage_reported": sum(r["prompt_tokens"] is not None and r["completion_tokens"] is not None for r in rows),
         "latency_p50_ms": _percentile(lat, 0.5),
         "latency_p95_ms": _percentile(lat, 0.95),
         "ttft_p50_ms": _percentile(ttft, 0.5),
